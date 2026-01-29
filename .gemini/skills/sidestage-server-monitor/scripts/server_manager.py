@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import time
 import signal
+import json
 
 def get_campaign_dir(campaign_name):
     return Path.home() / ".sidestage" / campaign_name
@@ -41,7 +42,8 @@ def start(campaign_name, reload=False):
             cmd,
             stdout=log,
             stderr=subprocess.STDOUT,
-            preexec_fn=os.setpgrp
+            preexec_fn=os.setpgrp,
+            env={**os.environ, "SIDESTAGE_CAMPAIGN": campaign_name}
         )
         pid_file.write_text(str(process.pid))
     
@@ -100,9 +102,29 @@ def monitor(campaign_name, lines=20):
     except subprocess.CalledProcessError:
         print("Error reading log file.")
 
+def call(campaign_name, endpoint, method="GET", data=None, files=None):
+    import requests
+    url = f"http://localhost:8000{endpoint}"
+    try:
+        if method == "GET":
+            resp = requests.get(url)
+        elif method == "POST":
+            if files is not None:
+                # Use data for form fields when files are present
+                resp = requests.post(url, data=data, files=files)
+            else:
+                resp = requests.post(url, json=data)
+        else:
+            print(f"Method {method} not supported")
+            return
+
+        print(json.dumps(resp.json(), indent=2))
+    except Exception as e:
+        print(f"Error calling endpoint {endpoint}: {e}")
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python server_manager.py [start|stop|status|monitor] [campaign_name]")
+        print("Usage: python server_manager.py [start|stop|status|monitor|call] [campaign_name] [endpoint] [method] [data_json]")
         sys.exit(1)
     
     cmd = sys.argv[1]
@@ -117,5 +139,16 @@ if __name__ == "__main__":
         status(campaign)
     elif cmd == "monitor":
         monitor(campaign)
+    elif cmd == "call":
+        endpoint = sys.argv[3]
+        method = sys.argv[4] if len(sys.argv) > 4 else "GET"
+        data_str = sys.argv[5] if len(sys.argv) > 5 else None
+        data = json.loads(data_str) if data_str else None
+        
+        # Special handling for agent runs which Agno expects as multipart/form-data
+        if "runs" in endpoint and method == "POST":
+            call(campaign, endpoint, method, data=data, files={})
+        else:
+            call(campaign, endpoint, method, data)
     else:
         print(f"Unknown command: {cmd}")
