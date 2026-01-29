@@ -8,7 +8,9 @@ This track focuses on establishing the foundational "Sidestage" platform. It inc
 ### 2.1 Core Platform & Framework
 - Initialize Python project with Poetry.
 - Integrate `agno_os` as the agent orchestration layer.
+- **Agent OS:** The main server runs `agno.os.AgentOS` to manage and serve agents.
 - Support hybrid inference: `llama.cpp` (local) and `Gemini` (cloud).
+- **Campaign Storage:** The server accepts a campaign name as a CLI argument and stores all persistent data (configs, databases, files) in `~/.sidestage/<campaign_name>/`.
 
 ### 2.2 Co-Author Agent (Functional MVP)
 - **Knowledge Management:** Agent must be able to perform CRUD operations on a persistent knowledge store (e.g., SQLite or a vector-supported database).

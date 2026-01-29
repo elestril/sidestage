@@ -9,15 +9,15 @@ This plan outlines the steps to build the core Sidestage platform.
 - [x] Task: Set up Agno_os and hybrid inference stubs (9a32a19)
     - [x] Create basic Agno agent configuration.
     - [x] Implement a flexible LLM provider factory for `llama.cpp` and `Gemini`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
 
 ## Phase 2: Knowledge Store & Co-Author Agent
-- [ ] Task: Implement persistent storage for World Entities
-    - [ ] Write Tests: Define CRUD operations for NPC, Location, and Item entities.
-    - [ ] Implement Feature: Create a storage layer (e.g., SQLite) to manage world facts.
-- [ ] Task: Create the Co-Author Agent
-    - [ ] Write Tests: Verify the agent can retrieve and suggest updates to world facts.
-    - [ ] Implement Feature: Configure the Agno agent with tools to interact with the storage layer.
+- [x] Task: Implement persistent storage for World Entities
+    - [x] Write Tests: Define CRUD operations for NPC, Location, and Item entities.
+    - [x] Implement Feature: Create a storage layer (e.g., SQLite) to manage world facts.
+- [x] Task: Create the Co-Author Agent
+    - [x] Write Tests: Verify the agent can retrieve and suggest updates to world facts.
+    - [x] Implement Feature: Configure the Agno agent with tools to interact with the storage layer.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Store & Co-Author Agent' (Protocol in workflow.md)
 
 ## Phase 3: Introspection & Observability

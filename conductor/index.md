@@ -8,6 +8,9 @@
 ## Workflow
 - [Workflow](./workflow.md)
 - [Code Style Guides](./code_styleguides/)
+  - [General](./code_styleguides/general.md)
+  - [Python](./code_styleguides/python.md)
+  - [Agno Best Practices](./code_styleguides/agno.md)
 
 ## Management
 - [Tracks Registry](./tracks.md)

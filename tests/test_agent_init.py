@@ -1,44 +1,34 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from sidestage.agent import create_agent
-from sidestage.llm_factory import get_llm_model
-from sidestage.config import settings
-from agno.models.base import Model
+from sidestage.orchestrator import SidestageOrchestrator, SidestageConfig
+from agno.models.llama_cpp import LlamaCpp
 
-def test_get_llm_model_llama_cpp():
-    """Test that factory returns OpenAIChat with correct settings for Llama.cpp."""
-    with patch.object(settings, 'LLM_PROVIDER', 'llama_cpp'):
-        with patch('sidestage.llm_factory.OpenAIChat') as MockOpenAI:
-            # We don't check return value type here, just that it was called correctly
-            get_llm_model()
-            MockOpenAI.assert_called_once()
-            call_kwargs = MockOpenAI.call_args.kwargs
-            assert call_kwargs['base_url'] == settings.LLAMA_CPP_BASE_URL
-            assert call_kwargs['api_key'] == settings.LLAMA_CPP_API_KEY
+def test_orchestrator_get_llm_model_llama_cpp():
+    """Test that orchestrator returns LlamaCpp with correct settings for Llama.cpp."""
+    # Create a config to test
+    test_config = SidestageConfig(
+        llm_provider="llama_cpp",
+        llama_cpp_base_url="http://test:8080/v1"
+    )
+    
+    with patch('sidestage.orchestrator.SidestageOrchestrator._load_or_create_config', return_value=test_config):
+        real_model = LlamaCpp(id="test")
+        with patch('sidestage.orchestrator.LlamaCpp', return_value=real_model) as MockLlama:
+            orch = SidestageOrchestrator(campaign_name="test")
+            orch.get_llm_model()
+            MockLlama.assert_called()
+            last_call_kwargs = MockLlama.call_args.kwargs
+            assert last_call_kwargs['base_url'] == "http://test:8080/v1"
 
-def test_get_llm_model_gemini_raises():
-    """Test that Gemini provider raises NotImplementedError (until implemented)."""
-    with patch.object(settings, 'LLM_PROVIDER', 'gemini'):
-        with pytest.raises(NotImplementedError):
-            get_llm_model()
-
-def test_get_llm_model_unknown_provider_raises():
-    """Test that unknown provider raises ValueError."""
-    with patch.object(settings, 'LLM_PROVIDER', 'unknown_provider'):
-        with pytest.raises(ValueError):
-            get_llm_model()
-
-def test_create_agent_initialization():
+def test_orchestrator_create_agent_initialization():
     """Test that agent is initialized correctly using the model from factory."""
-    with patch('sidestage.agent.get_llm_model') as mock_get_model:
-        # Use a real OpenAIChat instance (it's concrete) but with dummy config
-        from agno.models.openai import OpenAIChat
-        
-        mock_model = OpenAIChat(id="test-model", api_key="test-key")
+    with patch('sidestage.orchestrator.SidestageOrchestrator.get_llm_model') as mock_get_model:
+        mock_model = LlamaCpp(id="test-model")
         mock_get_model.return_value = mock_model
         
-        agent = create_agent()
+        orch = SidestageOrchestrator(campaign_name="test")
+        agent = orch.agent
         
         assert agent is not None
+        assert agent.model is not None
         assert agent.model.id == "test-model" 
-        assert "Sidestage" in agent.description

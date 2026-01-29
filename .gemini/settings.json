@@ -1,4 +1,7 @@
 {
+  "model": {
+    "name": "gemini-3-flash-preview"
+  },
   "mcpServers": {
     "filesystem": {
       "command": "npx",
@@ -8,13 +11,17 @@
         "/home/harald/src/sidestage"
       ]
     },
-    "git": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-git",
-        "."
-      ]
+        "git": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-git",
+            "."
+          ]
+        },
+        "agno": {
+          "url": "https://docs.agno.com/mcp"
+        }
+      }
     }
-  }
-}
+    
