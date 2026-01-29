@@ -3,10 +3,10 @@
 This plan outlines the steps to build the core Sidestage platform.
 
 ## Phase 1: Environment & Project Scaffolding
-- [~] Task: Initialize Poetry project and directory structure
+- [x] Task: Initialize Poetry project and directory structure (9a32a19)
     - [x] Run `poetry init` and set up `src/` directory.
     - [x] Configure `pyproject.toml` with `agno` and other dependencies.
-- [~] Task: Set up Agno_os and hybrid inference stubs
+- [x] Task: Set up Agno_os and hybrid inference stubs (9a32a19)
     - [x] Create basic Agno agent configuration.
     - [x] Implement a flexible LLM provider factory for `llama.cpp` and `Gemini`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
