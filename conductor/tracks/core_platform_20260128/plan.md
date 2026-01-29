@@ -20,11 +20,11 @@ This plan outlines the steps to build the core Sidestage platform.
     - [x] Implement Feature: Configure the Agno agent with tools to interact with the storage layer.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Store & Co-Author Agent' (5e054a3)
 
-## Phase 3: Introspection & Observability
-- [x] Task: Enable Agno Built-in Tracing (5e054a3)
+## Phase 3: Introspection & Observability [checkpoint: 2329da2]
+- [x] Task: Enable Agno Built-in Tracing (2329da2)
     - [x] Configure AgentOS with `tracing=True` and SQLite storage.
     - [x] Verify that prompts and tool calls are captured in `agno_spans`.
-- [x] Task: Verify and Document Agno Observability Access (5e054a3)
+- [x] Task: Verify and Document Agno Observability Access (2329da2)
     - [x] Write Tests: Ensure Agno's trace endpoints (`/traces`, `/sessions/{id}/runs`) return captured logs.
     - [x] Implement Feature: Document how to use Agno's built-in observability (API endpoints or Agno UI).
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Introspection & Observability' (Protocol in workflow.md)
