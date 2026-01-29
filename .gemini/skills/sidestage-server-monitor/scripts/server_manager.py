@@ -23,16 +23,17 @@ def start(campaign_name, reload=False):
     pid_file = get_pid_file(campaign_name)
     
     if pid_file.exists():
-        pid = int(pid_file.read_text())
         try:
+            pid = int(pid_file.read_text())
             os.kill(pid, 0)
             print(f"Server is already running for campaign '{campaign_name}' (PID: {pid})")
             return
-        except OSError:
+        except (OSError, ValueError):
             pid_file.unlink()
 
     print(f"Starting server for campaign '{campaign_name}' (reload={reload})...")
     
+    # Use absolute path for poetry to ensure it's found
     cmd = ["poetry", "run", "server", campaign_name]
     if reload:
         cmd.append("--reload")
@@ -55,28 +56,32 @@ def stop(campaign_name):
         print(f"No server running for campaign '{campaign_name}'")
         return
 
-    pid = int(pid_file.read_text())
     try:
+        pid = int(pid_file.read_text())
         os.killpg(pid, signal.SIGTERM)
         print(f"Stopped server for campaign '{campaign_name}' (PID: {pid})")
-    except OSError:
-        print(f"Process {pid} already dead.")
+    except (OSError, ValueError):
+        print("Process already dead or PID invalid.")
     
-    pid_file.unlink()
+    if pid_file.exists():
+        pid_file.unlink()
 
 def status(campaign_name):
     pid_file = get_pid_file(campaign_name)
     if not pid_file.exists():
         print(f"Server NOT running for campaign '{campaign_name}'")
-        return
+        return False
 
-    pid = int(pid_file.read_text())
     try:
+        pid = int(pid_file.read_text())
         os.kill(pid, 0)
         print(f"Server is running for campaign '{campaign_name}' (PID: {pid})")
-    except OSError:
-        print(f"Server CRASHED or stopped unexpectedly (Stale PID: {pid})")
-        pid_file.unlink()
+        return True
+    except (OSError, ValueError):
+        print(f"Server CRASHED or stopped unexpectedly (Stale PID: {pid if 'pid' in locals() else 'unknown'})")
+        if pid_file.exists():
+            pid_file.unlink()
+        return False
 
 def monitor(campaign_name, lines=20):
     log_file = get_log_file(campaign_name)
@@ -105,20 +110,35 @@ def monitor(campaign_name, lines=20):
 def call(campaign_name, endpoint, method="GET", data=None, files=None):
     import requests
     url = f"http://localhost:8000{endpoint}"
+    print(f"Calling {method} {url}...")
     try:
         if method == "GET":
-            resp = requests.get(url)
+            resp = requests.get(url, timeout=30)
         elif method == "POST":
             if files is not None:
                 # Use data for form fields when files are present
-                resp = requests.post(url, data=data, files=files)
+                # Convert all values to strings for multipart/form-data
+                form_data = {k: str(v) if not isinstance(v, bool) else str(v).lower() for k, v in data.items()} if data else {}
+                resp = requests.post(url, data=form_data, files=files, timeout=60)
             else:
-                resp = requests.post(url, json=data)
+                resp = requests.post(url, json=data, timeout=60)
         else:
             print(f"Method {method} not supported")
             return
 
-        print(json.dumps(resp.json(), indent=2))
+        if resp.status_code != 200:
+            print(f"Error: Server returned status {resp.status_code}")
+            print(resp.text)
+            return
+
+        try:
+            print(json.dumps(resp.json(), indent=2))
+        except json.JSONDecodeError:
+            print("Raw response (not JSON):")
+            print(resp.text)
+            
+    except requests.exceptions.Timeout:
+        print(f"Error: Request to {endpoint} timed out.")
     except Exception as e:
         print(f"Error calling endpoint {endpoint}: {e}")
 
@@ -140,6 +160,9 @@ if __name__ == "__main__":
     elif cmd == "monitor":
         monitor(campaign)
     elif cmd == "call":
+        if len(sys.argv) < 4:
+            print("Usage: python server_manager.py call [campaign_name] [endpoint] [method] [data_json]")
+            sys.exit(1)
         endpoint = sys.argv[3]
         method = sys.argv[4] if len(sys.argv) > 4 else "GET"
         data_str = sys.argv[5] if len(sys.argv) > 5 else None

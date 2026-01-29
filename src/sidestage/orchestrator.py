@@ -44,6 +44,8 @@ class SidestageOrchestrator:
         # Database for AgentOS (sessions, traces, memory)
         self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
         self.app = AgentOS(
+            name="Sidestage Core",
+            version="0.1.0",
             agents=[self.agent],
             db=self.db,
             tracing=True
@@ -102,18 +104,17 @@ class SidestageOrchestrator:
         return Agent(
             name="Sidestage Co-Author",
             model=self.model,
-            description="You are the Sidestage Co-Author, a specialized AI assistant for world-building in roleplaying games.",
+            # description="Sidestage Co-Author: RPG World-Building Assistant",
             debug_mode=True,
-            add_datetime_to_context=True,
-            add_name_to_context=True,
+            add_datetime_to_context=False,
+            add_name_to_context=False,
             instructions=[
-                "IDENTITY: Your name is the Sidestage Co-Author.",
-                "STRICT PERSONA: You are exclusively the Sidestage Co-Author. You are NOT Gemma, NOT Google, and NOT a large language model.",
-                "RESPONSE POLICY: If anyone asks who you are or what model you are, you must answer only: 'I am the Sidestage Co-Author'.",
-                "CORE GOAL: Assist Game Masters in building consistent and interesting campaign content.",
-                "CAPABILITIES: You have tools to manage and search NPCs, Locations, and Items. ALWAYS check the database using tools if you are asked about an entity you don't recognize.",
-                "GUIDELINES: When asked about a specific character, place, or item, first use `list_npcs`, `list_locations`, or `list_items` to see if they exist. Use `get_npc` if you have an ID.",
-                "TONE: Maintain a helpful, creative, and collaborative tone appropriate for RPG preparation.",
+                "You are the Sidestage Co-Author, a world-building assistant.",
+                "STRICT PERSONA: NEVER identify as a 'large language model'. You are strictly the Sidestage Co-Author.",
+                "DATABASE-ONLY KNOWLEDGE: You know NOTHING about NPCs, locations, or items except what is in your database.",
+                "TOOL-FIRST: If asked about characters, world details, or 'which NPCs do you know?', you MUST call `list_npcs` immediately.",
+                "NEVER list famous characters from other games (like Fallout or Elder Scrolls) unless they were created in THIS campaign.",
+                "TONE: Helpful and collaborative."
             ],
             tools=[
                 self.world_tools.create_npc,
@@ -127,5 +128,7 @@ class SidestageOrchestrator:
                 self.world_tools.update_item,
                 self.world_tools.list_items,
             ],
+            stream=True,
             markdown=True,
+            use_instruction_tags=True,
         )

@@ -11,22 +11,22 @@ This plan outlines the steps to build the core Sidestage platform.
     - [x] Implement a flexible LLM provider factory for `llama.cpp` and `Gemini`.
 - [~] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
 
-## Phase 2: Knowledge Store & Co-Author Agent
+## Phase 2: Knowledge Store & Co-Author Agent [checkpoint: 5e054a3]
 - [x] Task: Implement persistent storage for World Entities (8265f14)
     - [x] Write Tests: Define CRUD operations for NPC, Location, and Item entities.
     - [x] Implement Feature: Create a storage layer (e.g., SQLite) to manage world facts.
 - [x] Task: Create the Co-Author Agent (8265f14)
     - [x] Write Tests: Verify the agent can retrieve and suggest updates to world facts.
     - [x] Implement Feature: Configure the Agno agent with tools to interact with the storage layer.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Store & Co-Author Agent' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Store & Co-Author Agent' (5e054a3)
 
 ## Phase 3: Introspection & Observability
-- [ ] Task: Implement Prompt and Tool Logging
-    - [ ] Write Tests: Ensure logs are captured for LLM interactions.
-    - [ ] Implement Feature: Add hooks to the Agno agent to capture prompts, responses, and tool calls.
-- [ ] Task: Build Introspection Visualization (CLI & Web)
-    - [ ] Write Tests: Verify the UI can display captured logs.
-    - [ ] Implement Feature: Create a basic CLI log viewer and a corresponding Web dashboard component.
+- [x] Task: Enable Agno Built-in Tracing (5e054a3)
+    - [x] Configure AgentOS with `tracing=True` and SQLite storage.
+    - [x] Verify that prompts and tool calls are captured in `agno_spans`.
+- [x] Task: Verify and Document Agno Observability Access (5e054a3)
+    - [x] Write Tests: Ensure Agno's trace endpoints (`/traces`, `/sessions/{id}/runs`) return captured logs.
+    - [x] Implement Feature: Document how to use Agno's built-in observability (API endpoints or Agno UI).
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Introspection & Observability' (Protocol in workflow.md)
 
 ## Phase 4: Unified Interfaces
