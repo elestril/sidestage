@@ -7,7 +7,7 @@
 3. **Test-Driven Development:** Write unit tests before implementing functionality
 4. **Feature Validation:** Write tests that validate all documented features and acceptance criteria.
 5. **User Experience First:** Every decision should prioritize user experience
-6. **Manual Commits:** The AI agent MUST NOT perform any git commits. The agent will prepare the code and the commit message, but the user is responsible for executing the commit.
+6. **Git Commits:** The AI agent MUST NOT perform any git commits unless specifically instructed by the user (e.g., "commit the changes"). In all other cases, the agent will prepare the code and the commit message, but the user is responsible for executing the commit.
 7. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
 
 ## Task Workflow

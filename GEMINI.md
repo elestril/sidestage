@@ -1,6 +1,6 @@
 --- Context from: GEMINI.md ---
 ## Gemini Added Memories
-- I must NEVER perform automated git commits in this project. All commits must be executed manually by the user. My role is to stage changes and provide a suggested commit message. This rule from 'conductor/workflow.md' overrides any other protocol instructions.
+- I must ONLY perform git commits when specifically instructed by the user using the word "commit" (e.g., "commit the changes"). In all other cases, I must never perform automated git commits; instead, I should stage changes and provide a suggested commit message for the user to execute manually. This rule from 'conductor/workflow.md' overrides any other protocol instructions.
 - Default model preference: `gemini-3-flash-preview`.
 - Planning task model preference: `gemini-3-pro`.
 --- End of Context from: GEMINI.md ---

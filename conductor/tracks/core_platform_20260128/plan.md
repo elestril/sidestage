@@ -12,10 +12,10 @@ This plan outlines the steps to build the core Sidestage platform.
 - [~] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
 
 ## Phase 2: Knowledge Store & Co-Author Agent
-- [x] Task: Implement persistent storage for World Entities
+- [x] Task: Implement persistent storage for World Entities (8265f14)
     - [x] Write Tests: Define CRUD operations for NPC, Location, and Item entities.
     - [x] Implement Feature: Create a storage layer (e.g., SQLite) to manage world facts.
-- [x] Task: Create the Co-Author Agent
+- [x] Task: Create the Co-Author Agent (8265f14)
     - [x] Write Tests: Verify the agent can retrieve and suggest updates to world facts.
     - [x] Implement Feature: Configure the Agno agent with tools to interact with the storage layer.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Store & Co-Author Agent' (Protocol in workflow.md)
