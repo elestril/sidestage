@@ -13,14 +13,13 @@ This track focuses on establishing the foundational "Sidestage" platform. It inc
 - **Campaign Storage:** The server accepts a campaign name as a CLI argument and stores all persistent data (configs, databases, files) in `~/.sidestage/<campaign_name>/`.
 
 ### 2.2 Co-Author Agent (Functional MVP)
-- **Knowledge Management:** Agent must be able to perform CRUD operations on a persistent knowledge store (e.g., SQLite or a vector-supported database).
-- **Entities:** Support for NPCs, Locations, and Items.
-- **Fact Updates:** Enable the DM to ask questions about the world and request updates/creations.
+- **Knowledge & Memory:** Utilize Agno's built-in memory and storage systems (e.g., `SqliteDb`) to maintain context across sessions.
+- **Fact Management:** Leverage Agno's native capability to store and retrieve "Learned Knowledge" or agent memory for world details.
+- **Tooling:** ONLY enable Agno's built-in internal tools (e.g., search, memory retrieval) that come standard with the framework. Custom domain-specific tools (e.g., NPC CRUD) are deferred to a subsequent track.
 
 ### 2.3 Introspection & Observability
-- **Prompt Logging:** Log every prompt sent to and received from LLMs.
-- **Tool Tracing:** Record and display function calls made by agents.
-- **Context Visualization:** Show what data was retrieved from the knowledge store to answer a specific query.
+- **Built-in Tracing:** Exclusively use Agno's internal tracing and observability features (via `AgentOS` and `agno_spans`).
+- **Standard UI:** Use Agno's default observability interfaces or API endpoints for viewing logs, tool traces, and prompts.
 
 ### 2.4 User Interfaces
 - **CLI:** A terminal-based interface for rapid agent interaction and debugging.

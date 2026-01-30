@@ -8,10 +8,8 @@ def client(tmp_path):
     # Setup a test campaign
     campaign_name = "test_integration"
     
-    # We use the real orchestrator which defaults to local llama_cpp config
-    orchestrator = SidestageOrchestrator(campaign_name=campaign_name)
-    orchestrator.storage.db_path = tmp_path / "world.db"
-    orchestrator.storage._init_db()
+    # We use the real orchestrator which uses the single database
+    orchestrator = SidestageOrchestrator(campaign_name=campaign_name, base_dir=tmp_path)
     
     return TestClient(orchestrator.app.get_app())
 

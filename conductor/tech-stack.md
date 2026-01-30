@@ -17,5 +17,6 @@
 - **API:** Native `agno_os` endpoints for integration and external customer interactions.
 
 ## Development & Observability
-- **Observability:** Custom logging and tracing for prompt introspection and memory state inspection.
+- **Observability:** Agno native tracing and observability (via `AgentOS` and `agno_spans`) for prompt introspection and memory state inspection.
+- **Storage:** Agno `SqliteDb` for persistent session memory and `Learned Knowledge`.
 - **Project Structure:** Standard Python project layout managed by Poetry.

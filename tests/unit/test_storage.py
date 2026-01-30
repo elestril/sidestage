@@ -1,12 +1,14 @@
 import pytest
 from pathlib import Path
+from agno.db.sqlite import SqliteDb
 from sidestage.models import NPC, Location, Item
 from sidestage.storage import Storage
 
 @pytest.fixture
 def storage(tmp_path):
-    db_path = tmp_path / "world.db"
-    return Storage(db_path=db_path)
+    db_file = tmp_path / "world.db"
+    db = SqliteDb(db_file=str(db_file))
+    return Storage(db=db)
 
 def test_npc_crud(storage):
     npc = NPC(id="npc_1", name="Grog", description="A big barbarian")

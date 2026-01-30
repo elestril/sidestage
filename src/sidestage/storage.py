@@ -2,12 +2,15 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import Type, List, Optional, cast
-from pydantic import BaseModel
+from agno.db.sqlite import SqliteDb
 from sidestage.models import NPC, Location, Item, Entity
 
 class Storage:
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
+    def __init__(self, db: SqliteDb):
+        self.db = db
+        if db.db_file is None:
+            raise ValueError("SqliteDb must have a db_file defined")
+        self.db_path = Path(db.db_file)
         self._init_db()
 
     def _init_db(self):

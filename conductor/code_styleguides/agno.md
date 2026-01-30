@@ -7,6 +7,9 @@ This guide outlines best practices for working with the Agno framework in the Si
 ### Use Agno MCP for Research
 When investigating Agno capabilities, API references, or best practices, **always use the Agno MCP tool** (`SearchAgno`) first. Do not manually trawl through the `.venv` directory or internal library source code unless the MCP tool fails to provide sufficient information or specific implementation details are required that are not covered in the documentation.
 
+### Search for Cookbooks
+When implementing features or solving specific architectural problems, use the `SearchAgno` tool specifically to find **"cookbooks"** or official examples. Agno's internal patterns are best captured in these cookbooks; solutions should follow these official patterns and examples as closely as possible to ensure compatibility and maintainability.
+
 ## 1. Instruction & Prompt Engineering
 
 ### Use Modular Instructions

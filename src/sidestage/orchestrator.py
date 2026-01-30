@@ -36,13 +36,13 @@ class SidestageOrchestrator:
         self.config_path = self.campaign_dir / "config.yml"
         self.config = self._load_or_create_config()
         
-        self.storage = Storage(db_path=self.campaign_dir / "world.db")
+        # Single database for everything
+        self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
+        self.storage = Storage(db=self.db)
         self.world_tools = WorldTools(storage=self.storage)
         self.model = self.get_llm_model()
         self.agent = self.create_agent()
 
-        # Database for AgentOS (sessions, traces, memory)
-        self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
         self.app = AgentOS(
             name="Sidestage Core",
             version="0.1.0",

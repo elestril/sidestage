@@ -4,7 +4,8 @@
 
 1. **The Plan is the Source of Truth:** All work must be tracked in `plan.md`
 2. **The Tech Stack is Deliberate:** Changes to the tech stack must be documented in `tech-stack.md` *before* implementation
-3. **Test-Driven Development:** Write unit tests before implementing functionality
+3. **Follow Official Cookbooks:** When implementing features with the Agno framework, always search for and follow official "cookbooks" or examples. These solutions should be followed closely to ensure idiomatic and stable usage.
+4. **Test-Driven Development:** Write unit tests before implementing functionality
 4. **Feature Validation:** Write tests that validate all documented features and acceptance criteria.
 5. **User Experience First:** Every decision should prioritize user experience
 6. **Git Commits:** The AI agent MUST NOT perform any git commits unless specifically instructed by the user (e.g., "commit the changes"). In all other cases, the agent will prepare the code and the commit message, but the user is responsible for executing the commit.
