@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Type, List, Optional, cast
 from agno.db.sqlite import SqliteDb
-from sidestage.models import NPC, Location, Item, Entity
+from sidestage.models import NPC, Location, Item, Entity, Scene, Event
 
 class Storage:
     def __init__(self, db: SqliteDb):
@@ -18,6 +18,8 @@ class Storage:
             conn.execute("CREATE TABLE IF NOT EXISTS npcs (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS locations (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, data TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, data TEXT)")
 
     def _save_entity(self, table: str, entity: Entity):
         with sqlite3.connect(self.db_path) as conn:
@@ -91,9 +93,34 @@ class Storage:
     def list_items(self) -> List[Item]:
         return cast(List[Item], self._list_entities("items", Item))
 
+    # Scene
+    def add_scene(self, scene: Scene):
+        self._save_entity("scenes", scene)
+
+    def update_scene(self, scene: Scene):
+        self._save_entity("scenes", scene)
+
+    def get_scene(self, scene_id: str) -> Optional[Scene]:
+        return cast(Optional[Scene], self._get_entity("scenes", scene_id, Scene))
+
+    def delete_scene(self, scene_id: str):
+        self._delete_entity("scenes", scene_id)
+
+    def list_scenes(self) -> List[Scene]:
+        return cast(List[Scene], self._list_entities("scenes", Scene))
+
+    # Event
+    def add_event(self, event: Event):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO events (id, data) VALUES (?, ?)",
+                (event.id, event.model_dump_json())
+            )
+
     def list_all_entities(self) -> List[Entity]:
         all_entities: List[Entity] = []
         all_entities.extend(self.list_npcs())
         all_entities.extend(self.list_locations())
         all_entities.extend(self.list_items())
+        all_entities.extend(self.list_scenes())
         return all_entities

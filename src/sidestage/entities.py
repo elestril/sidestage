@@ -1,7 +1,7 @@
 import yaml
 import re
 from typing import Dict, Any, Type, Optional
-from sidestage.models import Entity, NPC, Location, Item
+from sidestage.models import Entity, NPC, Location, Item, Scene, Event
 
 def entity_to_markdown(entity: Entity) -> str:
     """
@@ -47,6 +47,8 @@ def markdown_to_entity(content: str) -> Entity:
         "NPC": NPC,
         "Location": Location,
         "Item": Item,
+        "Scene": Scene,
+        "Event": Event,
         "Entity": Entity
     }
     

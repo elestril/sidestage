@@ -8,6 +8,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const entitiesContainer = document.getElementById('entities-container');
     const entityList = document.getElementById('entity-list');
 
+    // Scenes
+    const sceneList = document.getElementById('scene-list');
+    const createSceneBtn = document.getElementById('create-scene-btn');
+    let currentSceneId = 'campaign_planning';
+    let scenes = [];
+
     // WebSocket Sync
     let socket;
     let currentEntityId = null;
@@ -31,7 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else if (data.type === 'chat_message') {
                 console.log('Chat message received via sync:', data);
-                addMessageToAll(data.text, data.sender, data.widget);
+                if (data.scene_id === currentSceneId) {
+                    addMessageToAll(data.text, data.sender, data.widget);
+                }
+            } else if (data.type === 'scene_updated') {
+                loadScenes();
             }
         };
 
@@ -42,6 +52,114 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     connectWebSocket();
+
+    // Scene Logic
+    async function loadScenes() {
+        try {
+            const response = await fetch('/scenes');
+            scenes = await response.json();
+            renderSceneList();
+            updateSceneUI();
+        } catch (error) {
+            console.error('Failed to load scenes:', error);
+        }
+    }
+
+    function renderSceneList() {
+        sceneList.innerHTML = '';
+        scenes.forEach(scene => {
+            const item = document.createElement('div');
+            item.className = `scene-item ${scene.id === currentSceneId ? 'active' : ''}`;
+            item.textContent = scene.name;
+            item.onclick = () => switchScene(scene.id);
+            sceneList.appendChild(item);
+        });
+    }
+
+    async function switchScene(sceneId) {
+        if (sceneId === currentSceneId) return;
+        currentSceneId = sceneId;
+        renderSceneList();
+        updateSceneUI();
+        await loadChatHistory();
+    }
+
+    function formatGametime(totalSeconds) {
+        if (totalSeconds === null) return '';
+        const days = Math.floor(totalSeconds / (24 * 3600));
+        const remainder = totalSeconds % (24 * 3600);
+        const h = Math.floor(remainder / 3600);
+        const m = Math.floor((remainder % 3600) / 60);
+        const s = remainder % 60;
+        
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `Day ${days}, ${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+
+    function updateSceneUI() {
+        const activeScene = scenes.find(s => s.id === currentSceneId);
+        if (!activeScene) return;
+
+        document.querySelectorAll('.scene-name').forEach(el => {
+            el.textContent = activeScene.name;
+        });
+
+        document.querySelectorAll('.scene-gametime').forEach(el => {
+            if (activeScene.current_gametime !== null) {
+                el.textContent = formatGametime(activeScene.current_gametime);
+            } else {
+                el.textContent = '';
+            }
+        });
+    }
+
+    async function loadChatHistory() {
+        document.querySelectorAll('.messages-display').forEach(el => el.innerHTML = '');
+        try {
+            // Agno AgentOS history endpoint
+            const response = await fetch(`/sessions/${currentSceneId}/runs`);
+            if (!response.ok) return;
+            const runs = await response.json();
+            
+            // Runs are newest first usually, or sorted by timestamp
+            // Agno returns a list of Run objects.
+            runs.reverse().forEach(run => {
+                // User message
+                if (run.message && run.message.content) {
+                    addMessageToAll(run.message.content, 'user');
+                }
+                // Agent response
+                if (run.response && run.response.content) {
+                    addMessageToAll(run.response.content, 'agent');
+                }
+            });
+        } catch (error) {
+            console.error('Failed to load chat history:', error);
+        }
+    }
+
+    // Initialize scenes
+    loadScenes().then(() => loadChatHistory());
+
+    createSceneBtn.addEventListener('click', async () => {
+        const name = prompt('Enter scene name:');
+        if (!name) return;
+        
+        try {
+            const response = await fetch('/scenes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            if (response.ok) {
+                const scene = await response.json();
+                loadScenes();
+                switchScene(scene.id);
+            }
+        } catch (error) {
+            console.error('Failed to create scene:', error);
+        }
+    });
 
     // Markdown Parser (Discord-style)
     function parseMarkdown(text) {
@@ -284,7 +402,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
+                body: JSON.stringify({ 
+                    message: text,
+                    scene_id: currentSceneId
+                })
             });
 
             if (!response.ok) throw new Error('Failed to send message');

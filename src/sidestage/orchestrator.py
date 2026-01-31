@@ -17,7 +17,8 @@ import asyncio
 
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
-from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item
+from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item, Scene, Event
+from sidestage.time import Gametime
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,9 @@ class SidestageOrchestrator:
         self.model = self.get_llm_model()
         self.agent = self.create_agent()
 
+        # Ensure default scene exists
+        self._ensure_default_scenes()
+
         self.app = AgentOS(
             name="Sidestage Core",
             version="0.1.0",
@@ -125,6 +129,30 @@ class SidestageOrchestrator:
                 d["type"] = e.__class__.__name__
                 result.append(d)
             return result
+
+        @self.fastapi_app.get("/scenes")
+        async def list_scenes():
+            scenes = self.storage.list_scenes()
+            return [s.model_dump() for s in scenes]
+
+        class SceneCreateRequest(BaseModel):
+            name: str
+            description: str = ""
+            current_gametime: Optional[int] = None
+
+        @self.fastapi_app.post("/scenes")
+        async def create_scene(request: SceneCreateRequest):
+            import uuid
+            scene_id = f"scene_{str(uuid.uuid4())[:8]}"
+            scene = Scene(
+                id=scene_id,
+                name=request.name,
+                description=request.description,
+                current_gametime=request.current_gametime
+            )
+            self.storage.add_scene(scene)
+            await self.manager.broadcast({"type": "scene_updated"})
+            return scene.model_dump()
 
         @self.fastapi_app.get("/entities/{entity_id}/markdown")
         async def get_entity_markdown(entity_id: str):
@@ -179,24 +207,29 @@ class SidestageOrchestrator:
             logger.info(f"Successfully imported {count} entities.")
             # Broadcast update
             await self.manager.broadcast({"type": "entities_updated"})
-            return {"message": f"Imported {count} entities from {entities_dir}", "count": count}
+            return {"message": f"Successfully imported {count} entities."}
 
         class ChatRequest(BaseModel):
             message: str
+            scene_id: str = "campaign_planning"
 
         @self.fastapi_app.post("/chat")
         async def chat_endpoint(request: ChatRequest):
             message = request.message
-            logger.info(f"Chat request received: {message[:20]}...")
+            scene_id = request.scene_id
+            
+            logger.info(f"Chat request received for scene {scene_id}: {message[:20]}...")
+            
             # Broadcast user message
             await self.manager.broadcast({
                 "type": "chat_message",
                 "text": message,
-                "sender": "user"
+                "sender": "user",
+                "scene_id": scene_id
             })
             
-            # Run agent asynchronously
-            response = await self.agent.arun(message, stream=False)
+            # Run agent asynchronously with session_id linked to scene_id
+            response = await self.agent.arun(message, session_id=scene_id, stream=False)
             response_content = str(response.content) if hasattr(response, 'content') and response.content is not None else str(response)
 
             # Detect entities in response to send widgets
@@ -214,6 +247,7 @@ class SidestageOrchestrator:
                 "type": "chat_message",
                 "text": response_content,
                 "sender": "agent",
+                "scene_id": scene_id,
                 "widget": widget
             })
             
@@ -221,6 +255,21 @@ class SidestageOrchestrator:
 
         # Mount frontend static files
         self._mount_frontend()
+
+    def _ensure_default_scenes(self):
+        """
+        Creates the default 'Campaign Planning' scene if it doesn't exist.
+        """
+        planning_scene = self.storage.get_scene("campaign_planning")
+        if not planning_scene:
+            logger.info("Creating default 'Campaign Planning' scene.")
+            self.storage.add_scene(Scene(
+                id="campaign_planning",
+                name="Campaign Planning",
+                description="The default space for discussing the campaign world, characters, and plot.",
+                current_gametime=None # Planning is meta-level, no gametime
+            ))
+
 
     def _setup_logging(self):
         log_file = self.campaign_dir / "server.log"

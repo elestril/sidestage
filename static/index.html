@@ -17,8 +17,21 @@
             </nav>
         </header>
         <div id="main-content">
+            <aside id="sidebar">
+                <div class="sidebar-section">
+                    <h3>Scenes</h3>
+                    <div id="scene-list">
+                        <!-- Scenes will be listed here -->
+                    </div>
+                    <button id="create-scene-btn" class="small-btn">New Scene</button>
+                </div>
+            </aside>
             <main id="chat-container">
                 <div class="chat-widget">
+                    <div class="scene-header">
+                        <span class="scene-name">Campaign Planning</span>
+                        <span class="scene-gametime"></span>
+                    </div>
                     <div class="messages-display"></div>
                     <form class="chat-form">
                         <input type="text" class="user-input" placeholder="Type your message..." autocomplete="off">
@@ -46,6 +59,10 @@
                 </div>
                 <div id="splitter"></div>
                 <div class="chat-widget">
+                    <div class="scene-header">
+                        <span class="scene-name">Campaign Planning</span>
+                        <span class="scene-gametime"></span>
+                    </div>
                     <div class="messages-display"></div>
                     <form class="chat-form">
                         <input type="text" class="user-input" placeholder="Ask about entities..." autocomplete="off">
