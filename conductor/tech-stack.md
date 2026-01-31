@@ -13,7 +13,7 @@
 
 ## Interfaces
 - **CLI:** Custom Python-based CLI for direct agent interaction and low-latency debugging.
-- **Web Frontend:** A flexible, modern UI (to be defined) for campaign management and system introspection.
+- **Web Frontend:** A lightweight, self-hosted single-page application (SPA) built with Vanilla JavaScript and plain CSS. All assets are served locally from the server; no external CDNs or heavy build steps (npm/webpack/Next.js) are used.
 - **API:** Native `agno_os` endpoints for integration and external customer interactions.
 
 ## Development & Observability

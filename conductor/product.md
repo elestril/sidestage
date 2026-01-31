@@ -25,7 +25,7 @@ Sidestage is a modular, multi-agent RPG assistant designed to bridge the gap bet
 ## 4. Key Features & Capabilities
 - **Multi-Interface Access:**
     - **CLI:** For direct, low-level agent interaction and debugging.
-    - **Web Frontend:** A flexible UI for campaign management and system introspection.
+    - **Web Frontend:** A lightweight, self-hosted interface for campaign management and system introspection.
     - **API (agno_os):** Standard endpoints for custom integrations.
     - **Discord Bot:** (Planned) For player downtime interactions.
 - **Hybrid Model Support:** Native support for both local (`llama.cpp`) and cloud (`Gemini`) inference engines.

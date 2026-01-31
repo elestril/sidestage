@@ -25,7 +25,7 @@ class TestServerUnmocked:
             campaign_name=self.campaign_name,
             base_dir=tmp_path
         )
-        self.client = TestClient(self.orchestrator.app.get_app())
+        self.client = TestClient(self.orchestrator.fastapi_app)
 
     def test_real_chat_interaction(self):
         """

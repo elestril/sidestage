@@ -1,4 +1,5 @@
 import yaml
+import logging
 from typing import Optional, List
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -9,9 +10,12 @@ from agno.models.base import Model
 from agno.models.llama_cpp import LlamaCpp
 from agno.models.message import Message
 from agno.os import AgentOS
+from fastapi.staticfiles import StaticFiles
 
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
+
+logger = logging.getLogger(__name__)
 
 class SidestageConfig(BaseModel):
     # LLM Configuration
@@ -33,6 +37,9 @@ class SidestageOrchestrator:
         self.campaign_dir = self.base_dir / campaign_name
         self._ensure_campaign_dir()
         
+        # Setup logging to campaign directory
+        self._setup_logging()
+
         self.config_path = self.campaign_dir / "config.yml"
         self.config = self._load_or_create_config()
         
@@ -50,13 +57,53 @@ class SidestageOrchestrator:
             db=self.db,
             tracing=True
         )
+        
+        # Cache the FastAPI app instance to ensure modifications (like mounting) persist
+        self.fastapi_app = self.app.get_app()
+
+        # Mount frontend static files
+        self._mount_frontend()
+
+    def _setup_logging(self):
+        log_file = self.campaign_dir / "server.log"
+        
+        # Configure the root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        
+        # Avoid adding multiple handlers if the orchestrator is re-initialized in the same process
+        if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file.absolute()) for h in root_logger.handlers):
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+            root_logger.addHandler(file_handler)
+            
+            logger.info(f"Logging initialized. Output redirected to: {log_file}")
+
+    def _mount_frontend(self):
+        project_root = Path(__file__).parent.parent.parent
+        static_dir = project_root / "static"
+        
+        if static_dir.exists():
+            fastapi_app = self.fastapi_app
+            
+            # Remove default AgentOS root route to allow frontend to serve index.html
+            for route in list(fastapi_app.routes):
+                if getattr(route, "path", None) == "/":
+                    fastapi_app.routes.remove(route)
+                    break
+
+            # Mount the static directory
+            fastapi_app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+            logger.info(f"Frontend mounted from: {static_dir}")
+        else:
+            logger.warning(f"Static directory not found at {static_dir}. No frontend will be served.")
 
     def _ensure_campaign_dir(self):
         if not self.campaign_dir.exists():
-            print(f"Creating new campaign directory: {self.campaign_dir}")
+            logger.info(f"Creating new campaign directory: {self.campaign_dir}")
             self.campaign_dir.mkdir(parents=True, exist_ok=True)
         else:
-            print(f"Loading campaign from: {self.campaign_dir}")
+            logger.info(f"Loading campaign from: {self.campaign_dir}")
 
     def _load_or_create_config(self) -> SidestageConfig:
         if self.config_path.exists():
@@ -65,10 +112,10 @@ class SidestageOrchestrator:
                     data = yaml.safe_load(f) or {}
                     config = SidestageConfig(**data)
                 except Exception as e:
-                    print(f"Warning: Error loading config.yml ({e}). Using defaults.")
+                    logger.warning(f"Error loading config.yml ({e}). Using defaults.")
                     config = SidestageConfig()
         else:
-            print(f"Creating default configuration at: {self.config_path}")
+            logger.info(f"Creating default configuration at: {self.config_path}")
             config = SidestageConfig()
         
         # Always save back to ensure any new defaults are populated and formatting is consistent

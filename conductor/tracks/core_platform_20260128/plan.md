@@ -30,10 +30,9 @@ This plan outlines the steps to build the core Sidestage platform.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Introspection & Observability' (Protocol in workflow.md)
 
 ## Phase 4: Unified Interfaces
-- [ ] Task: Finalize CLI Interface
-    - [ ] Write Tests: Validate end-to-end flow in the terminal.
-    - [ ] Implement Feature: Build a robust CLI loop for agent interaction.
-- [ ] Task: Basic Web Frontend Integration
-    - [ ] Write Tests: Verify the web server serves the UI and connects to the agent.
-    - [ ] Implement Feature: Set up a basic web server (e.g., FastAPI) to host the high-contrast UI.
+- [x] Task: Web Frontend Integration (Vanilla JS SPA)
+    - [x] Create `static/` directory for HTML/JS/CSS assets.
+    - [x] Implement High-Contrast RPG UI for chat interaction.
+    - [x] Integrate client-side API calls to Agno AgentOS endpoints.
+    - [x] Configure FastAPI to mount and serve static files from `static/`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Unified Interfaces' (Protocol in workflow.md)

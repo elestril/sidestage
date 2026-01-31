@@ -34,7 +34,10 @@ All tasks follow a strict lifecycle:
    - With the safety of passing tests, refactor the implementation code and the test code to improve clarity, remove duplication, and enhance performance without changing the external behavior.
    - Rerun tests to ensure they still pass after refactoring.
 
-6. **Verify Feature Validation:** Ensure that all acceptance criteria and documented features for the task are fully covered by tests.
+6. **Verify Feature Validation:** 
+   - Ensure that all acceptance criteria and documented features for the task are fully covered by tests.
+   - Use the `runLongCommand` to keep a server running at all times with the .workdir/dev 
+   campaign. Use that to validate the behavior.
 
 7. **Document Deviations:** If implementation differs from tech stack:
    - **STOP** implementation
@@ -118,27 +121,6 @@ Before marking any task complete, verify:
 ## Development Commands
 
 **AI AGENT INSTRUCTION: This section should be adapted to the project's specific language, framework, and build tools.**
-
-### Setup
-```bash
-# Example: Commands to set up the development environment (e.g., install dependencies, configure database)
-# e.g., for a Node.js project: npm install
-# e.g., for a Go project: go mod tidy
-```
-
-### Daily Development
-```bash
-# Example: Commands for common daily tasks (e.g., start dev server, run tests, lint, format)
-# e.g., for a Node.js project: npm run dev, npm test, npm run lint
-# e.g., for a Go project: go run main.go, go test ./..., go fmt ./...
-```
-
-### Before Committing
-```bash
-# Example: Commands to run all pre-commit checks (e.g., format, lint, type check, run tests)
-# e.g., for a Node.js project: npm run check
-# e.g., for a Go project: make check (if a Makefile exists)
-```
 
 ## Testing Requirements
 
