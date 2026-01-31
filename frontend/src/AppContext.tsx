@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Scene, Entity, Message, WebSocketMessage } from './types';
 
 interface AppContextType {
@@ -11,6 +11,8 @@ interface AppContextType {
   sendMessage: (text: string) => Promise<void>;
   saveEntityMarkdown: (id: string, markdown: string) => Promise<void>;
   saveEntity: (id: string, data: any) => Promise<void>;
+  syncSocketMessage: (data: any) => void;
+  onSync: (callback: (data: any) => void) => () => void;
   messages: Message[];
   activeScene: Scene | undefined;
 }
@@ -100,6 +102,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const syncListeners = useRef<Set<(data: any) => void>>(new Set());
+
+  const onSync = useCallback((callback: (data: any) => void) => {
+    syncListeners.current.add(callback);
+    return () => syncListeners.current.delete(callback);
+  }, []);
+
+  const syncSocketMessage = useCallback((data: any) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(data));
+    }
+  }, [socket]);
+
   useEffect(() => {
     loadScenes();
     loadEntities();
@@ -111,9 +127,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/sidestage/ws`);
+    const s = new WebSocket(`${protocol}//${window.location.host}/sidestage/ws`);
 
-    socket.onmessage = (event) => {
+    s.onopen = () => {
+      console.log('WebSocket connection established');
+      setSocket(s);
+    };
+
+    s.onmessage = (event) => {
       try {
         const data: WebSocketMessage = JSON.parse(event.data);
         if (data.type === 'entities_updated') {
@@ -128,13 +149,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         } else if (data.type === 'scene_updated') {
           loadScenes();
+        } else if (data.type === 'entity_content_sync') {
+          syncListeners.current.forEach((listener: (data: any) => void) => listener(data));
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
       }
     };
 
-    return () => socket.close();
+    s.onclose = () => {
+      console.log('WebSocket disconnected. Retrying in 2s...');
+      setSocket(null);
+      setTimeout(() => {}, 2000); // Trigger a re-render or effect to reconnect? 
+      // Actually simple effect below
+    };
+
+    return () => s.close();
   }, [currentSceneId, loadEntities, loadScenes]);
 
   const activeScene = scenes.find(s => s.id === currentSceneId);
@@ -150,6 +180,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sendMessage,
       saveEntityMarkdown,
       saveEntity,
+      syncSocketMessage,
+      onSync,
       messages,
       activeScene
     }}>

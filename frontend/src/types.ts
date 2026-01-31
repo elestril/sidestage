@@ -39,4 +39,10 @@ export interface SceneUpdatedBroadcast {
   type: 'scene_updated';
 }
 
-export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast;
+export interface EntityContentSyncBroadcast {
+  type: 'entity_content_sync';
+  entity_id: string;
+  body: string;
+}
+
+export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast;

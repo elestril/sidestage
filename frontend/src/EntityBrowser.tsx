@@ -46,9 +46,10 @@ interface EntityEditorProps {
 }
 
 export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
-  const { entities, saveEntity } = useAppContext();
+  const { entities, saveEntity, syncSocketMessage, onSync } = useAppContext();
   const [isSaving, setIsSaving] = useState(false);
   const [meta, setMeta] = useState<any>(null);
+  const isRemoteUpdate = React.useRef(false);
   
   const entity = entities.find(e => e.id === entityId);
 
@@ -66,13 +67,44 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
         class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px] p-6 font-sans',
       },
     },
+    onUpdate: ({ editor }) => {
+      if (isRemoteUpdate.current) {
+        isRemoteUpdate.current = false;
+        return;
+      }
+      if (entityId) {
+        const body = (editor.storage as any).markdown.getMarkdown();
+        syncSocketMessage({
+          type: 'entity_content_sync',
+          entity_id: entityId,
+          body: body
+        });
+      }
+    },
   });
+
+  useEffect(() => {
+    const cleanup = onSync((data) => {
+      if (data.type === 'entity_content_sync' && data.entity_id === entityId && editor) {
+        const currentBody = (editor.storage as any).markdown.getMarkdown();
+        if (data.body !== currentBody) {
+          isRemoteUpdate.current = true;
+          editor.commands.setContent(data.body);
+        }
+      }
+    });
+    return cleanup;
+  }, [entityId, editor, onSync]);
 
   useEffect(() => {
     if (entity) {
       setMeta({ ...entity });
       if (editor) {
-        editor.commands.setContent(entity.body || '');
+        // Only set content if it's actually different to avoid jumping
+        const currentBody = (editor.storage as any).markdown.getMarkdown();
+        if (entity.body !== currentBody) {
+          editor.commands.setContent(entity.body || '');
+        }
       }
     } else {
       setMeta(null);
@@ -206,9 +238,6 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
   const [filter, setFilter] = useState('all');
 
   const filteredEntities = entities.filter(e => {
-    // Exclude scenes from the entity browser
-    if (e.type === 'Scene') return false;
-    
     const matchesFilter = filter === 'all' || e.type === filter;
     const nameMatch = (e.name || '').toLowerCase().includes(search.toLowerCase());
     const bodyMatch = (e.body || '').toLowerCase().includes(search.toLowerCase());
@@ -268,7 +297,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
             </div>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
-            {['all', 'NPC', 'Location', 'Item'].map(f => (
+            {['all', 'NPC', 'Location', 'Item', 'Scene'].map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}

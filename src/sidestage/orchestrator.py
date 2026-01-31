@@ -20,32 +20,9 @@ from sidestage.storage import Storage
 from sidestage.tools import WorldTools
 from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item, Scene, Event
 from sidestage.time import Gametime
+from sidestage.sync import SyncManager
 
 logger = logging.getLogger(__name__)
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket client connected. Total: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-            logger.info(f"WebSocket client disconnected. Total: {len(self.active_connections)}")
-
-    async def broadcast(self, message: dict):
-        logger.info(f"Broadcasting message: {message.get('type')}")
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to a client: {e}")
-                # We don't remove here to avoid modifying list during iteration
-                # Disconnect will handle it or next broadcast will fail too
 
 class SidestageConfig(BaseModel):
     # LLM Configuration
@@ -76,7 +53,7 @@ class SidestageOrchestrator:
         # Single database for everything
         self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
         self.storage = Storage(db=self.db)
-        self.manager = ConnectionManager()
+        self.manager = SyncManager()
 
         # Define a callback for WorldTools to notify of changes
         def on_world_change():
@@ -115,7 +92,8 @@ class SidestageOrchestrator:
             await self.manager.connect(websocket)
             try:
                 while True:
-                    await websocket.receive_text()
+                    data = await websocket.receive_text()
+                    await self.manager.handle_message(websocket, data)
             except WebSocketDisconnect:
                 self.manager.disconnect(websocket)
 
