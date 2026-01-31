@@ -25,4 +25,4 @@ class Scene(Entity):
     current_gametime: Optional[int] = Field(default=None, description="Current gametime in seconds. None if inactive.")
     location_id: Optional[str] = Field(default=None, description="Primary location of the scene")
     events: List[str] = Field(default_factory=list, description="IDs of events in this scene")
-    messages: List[str] = Field(default_factory=list, description="IDs of messages in this scene")
+    messages: List[dict] = Field(default_factory=list, description="List of messages in this scene")

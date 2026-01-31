@@ -92,7 +92,7 @@ class SidestageOrchestrator:
 
         self.world_tools = WorldTools(storage=self.storage, on_change=on_world_change)
         self.model = self.get_llm_model()
-        self.agent = self.create_agent()
+        self.agent = self.create_agent() # No storage passed here
 
         # Ensure default scene exists
         self._ensure_default_scenes()
@@ -134,6 +134,13 @@ class SidestageOrchestrator:
         async def list_scenes():
             scenes = self.storage.list_scenes()
             return [s.model_dump() for s in scenes]
+
+        @self.fastapi_app.get("/scenes/{scene_id}/messages")
+        async def get_scene_messages(scene_id: str):
+            scene = self.storage.get_scene(scene_id)
+            if not scene:
+                raise HTTPException(status_code=404, detail="Scene not found")
+            return scene.messages
 
         class SceneCreateRequest(BaseModel):
             name: str
@@ -200,6 +207,10 @@ class SidestageOrchestrator:
                         self.storage.add_location(entity)
                     elif isinstance(entity, Item):
                         self.storage.add_item(entity)
+                    elif isinstance(entity, Scene):
+                        self.storage.add_scene(entity)
+                    elif isinstance(entity, Event):
+                        self.storage.add_event(entity)
                     count += 1
                 except Exception as e:
                     logger.error(f"Error importing {md_file.name}: {e}")
@@ -220,6 +231,16 @@ class SidestageOrchestrator:
             
             logger.info(f"Chat request received for scene {scene_id}: {message[:20]}...")
             
+            # Load scene
+            scene = self.storage.get_scene(scene_id)
+            if not scene:
+                raise HTTPException(status_code=404, detail="Scene not found")
+
+            # Update scene messages with user input and persist immediately
+            user_msg = {"role": "user", "content": message}
+            scene.messages.append(user_msg)
+            self.storage.update_scene(scene)
+            
             # Broadcast user message
             await self.manager.broadcast({
                 "type": "chat_message",
@@ -228,9 +249,16 @@ class SidestageOrchestrator:
                 "scene_id": scene_id
             })
             
-            # Run agent asynchronously with session_id linked to scene_id
-            response = await self.agent.arun(message, session_id=scene_id, stream=False)
+            # Run agent asynchronously
+            # Note: Context/History management is deferred to a dedicated track.
+            # For now, we just run the single message.
+            response = await self.agent.arun(message, stream=False)
             response_content = str(response.content) if hasattr(response, 'content') and response.content is not None else str(response)
+
+            # Update scene with agent response and persist
+            agent_msg = {"role": "assistant", "content": response_content}
+            scene.messages.append(agent_msg)
+            self.storage.update_scene(scene)
 
             # Detect entities in response to send widgets
             widget = None
@@ -269,17 +297,6 @@ class SidestageOrchestrator:
                 description="The default space for discussing the campaign world, characters, and plot.",
                 current_gametime=None # Planning is meta-level, no gametime
             ))
-        
-        # Also ensure Agno knows about this session to avoid 404s in logs
-        try:
-            from agno.session import AgentSession
-            session = AgentSession(
-                session_id="campaign_planning",
-                agent_id=self.agent.id,
-            )
-            self.db.upsert_session(session)
-        except Exception as e:
-            logger.warning(f"Could not pre-initialize Agno session: {e}")
 
 
     def _setup_logging(self):
@@ -370,7 +387,7 @@ class SidestageOrchestrator:
             name="Sidestage Co-Author",
             model=self.model,
             # description="Sidestage Co-Author: RPG World-Building Assistant",
-            debug_mode=True,
+            debug_mode=False,
             add_datetime_to_context=False,
             add_name_to_context=False,
             instructions=[

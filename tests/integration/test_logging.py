@@ -32,6 +32,7 @@ orchestrator = SidestageOrchestrator(
 
 logger = logging.getLogger("test_logger")
 logger.info("Integration test message in campaign dir")
+logging.shutdown()
 """
     script_path = tmp_path / "test_log_script.py"
     with open(script_path, "w") as f:

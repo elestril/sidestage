@@ -78,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function switchScene(sceneId) {
         if (sceneId === currentSceneId) return;
+        console.log(`Switching to scene: ${sceneId}`);
         currentSceneId = sceneId;
         renderSceneList();
         updateSceneUI();
@@ -114,24 +115,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadChatHistory() {
+        console.log(`Loading chat history for scene: ${currentSceneId}`);
         document.querySelectorAll('.messages-display').forEach(el => el.innerHTML = '');
         try {
-            // Agno AgentOS history endpoint
-            const response = await fetch(`/sessions/${currentSceneId}/runs`);
-            if (!response.ok) return;
-            const runs = await response.json();
+            const response = await fetch(`/scenes/${currentSceneId}/messages`);
+            if (!response.ok) {
+                console.error(`Failed to fetch messages: ${response.status}`);
+                return;
+            }
+            const messages = await response.json();
+            console.log(`Fetched ${messages.length} messages for ${currentSceneId}`);
             
-            // Runs are newest first usually, or sorted by timestamp
-            // Agno returns a list of Run objects.
-            runs.reverse().forEach(run => {
-                // User message
-                if (run.message && run.message.content) {
-                    addMessageToAll(run.message.content, 'user');
-                }
-                // Agent response
-                if (run.response && run.response.content) {
-                    addMessageToAll(run.response.content, 'agent');
-                }
+            messages.forEach(msg => {
+                const sender = msg.role === 'user' ? 'user' : 'agent';
+                addMessageToAll(msg.content, sender);
             });
         } catch (error) {
             console.error('Failed to load chat history:', error);
@@ -364,10 +361,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${sender}`;
             
+            // Always show text if present
+            if (text) {
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+                textDiv.innerHTML = parseMarkdown(text);
+                msgDiv.appendChild(textDiv);
+            }
+
+            // Append widget if present
             if (widget) {
                 msgDiv.appendChild(renderWidget(widget));
-            } else {
-                msgDiv.innerHTML = parseMarkdown(text);
             }
             
             container.appendChild(msgDiv);
