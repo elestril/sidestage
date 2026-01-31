@@ -40,6 +40,7 @@ def test_event_storage(tmp_path):
     
     event = Event(
         id="event_1",
+        name="Test Event",
         scene_id="scene_1",
         gametime=3600,
         walltime="2026-01-30T22:30:00",

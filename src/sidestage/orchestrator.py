@@ -269,6 +269,17 @@ class SidestageOrchestrator:
                 description="The default space for discussing the campaign world, characters, and plot.",
                 current_gametime=None # Planning is meta-level, no gametime
             ))
+        
+        # Also ensure Agno knows about this session to avoid 404s in logs
+        try:
+            from agno.session import AgentSession
+            session = AgentSession(
+                session_id="campaign_planning",
+                agent_id=self.agent.id,
+            )
+            self.db.upsert_session(session)
+        except Exception as e:
+            logger.warning(f"Could not pre-initialize Agno session: {e}")
 
 
     def _setup_logging(self):

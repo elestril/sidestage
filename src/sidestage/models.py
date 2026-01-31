@@ -16,12 +16,10 @@ class NPC(Entity):
     location_id: Optional[str] = Field(default=None, description="ID of the location where the NPC is currently present")
     inventory: List[str] = Field(default_factory=list, description="IDs of items in possession")
 
-class Event(BaseModel):
-    id: str = Field(..., description="Unique identifier for the event")
+class Event(Entity):
     scene_id: str
     gametime: int = Field(..., description="Gametime in seconds when the event occurred")
     walltime: str = Field(..., description="ISO formatted walltime when the event occurred")
-    description: str
 
 class Scene(Entity):
     current_gametime: Optional[int] = Field(default=None, description="Current gametime in seconds. None if inactive.")
