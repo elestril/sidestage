@@ -9,13 +9,13 @@ This plan outlines the steps to build the core Sidestage platform.
 - [x] Task: Set up Agno_os and hybrid inference stubs (9a32a19)
     - [x] Create basic Agno agent configuration.
     - [x] Implement a flexible LLM provider factory for `llama.cpp` and `Gemini`.
-- [~] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Environment & Project Scaffolding' (Protocol in workflow.md)
 
 ## Phase 2: Agno-Native Memory & Knowledge [checkpoint: 5e054a3]
 - [x] Task: Implement Agno Persistent Storage (8265f14)
     - [x] Write Tests: Verify `SqliteDb` integration for agent sessions and memory.
     - [x] Implement Feature: Configure `AgentOS` and `Agent` to use persistent SQLite storage for session memory.
-- [ ] Task: Enable Agno Knowledge Management
+- [~] Task: Enable Agno Knowledge Management (Deferred to later thread)
     - [ ] Write Tests: Verify the agent can store and retrieve "Learned Knowledge".
     - [ ] Implement Feature: Configure the Co-Author agent with Agno's native memory/knowledge tools.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Agno-Native Memory & Knowledge' (5e054a3)
@@ -27,7 +27,7 @@ This plan outlines the steps to build the core Sidestage platform.
 - [x] Task: Verify and Document Agno Observability Access (2329da2)
     - [x] Write Tests: Ensure Agno's trace endpoints (`/traces`, `/sessions/{id}/runs`) return captured logs.
     - [x] Implement Feature: Document how to use Agno's built-in observability (API endpoints or Agno UI).
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Introspection & Observability' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Introspection & Observability' (Protocol in workflow.md)
 
 ## Phase 4: Unified Interfaces
 - [x] Task: Web Frontend Integration (Vanilla JS SPA)
@@ -35,4 +35,4 @@ This plan outlines the steps to build the core Sidestage platform.
     - [x] Implement High-Contrast RPG UI for chat interaction.
     - [x] Integrate client-side API calls to Agno AgentOS endpoints.
     - [x] Configure FastAPI to mount and serve static files from `static/`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Unified Interfaces' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Unified Interfaces' (Protocol in workflow.md)

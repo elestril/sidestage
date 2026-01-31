@@ -1,8 +1,8 @@
 {
   "track_id": "core_platform_20260128",
   "type": "feature",
-  "status": "new",
+  "status": "completed",
   "created_at": "2026-01-28T12:00:00Z",
-  "updated_at": "2026-01-28T12:00:00Z",
+  "updated_at": "2026-01-30T21:10:00Z",
   "description": "Build the core Sidestage platform, featuring the 'Co-Author' agent with CRUD capabilities for world entities, and a CLI/Web interface that includes the full suite of introspection tools (prompt logging, memory visualization, tool tracing)."
 }
