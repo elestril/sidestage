@@ -102,13 +102,7 @@ nav a:hover, nav a.active {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1rem;
-}
-
-.mini-chat {
-    flex: 1;
     min-height: 150px;
-    background-color: #1a1a1a;
-    padding: 0.5rem;
 }
 
 .messages-display {
@@ -119,11 +113,6 @@ nav a:hover, nav a.active {
     gap: 1rem;
     padding-right: 0.5rem;
     margin-bottom: 1rem;
-}
-
-.mini-chat .messages-display {
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
 }
 
 #entities-container .toolbar {
