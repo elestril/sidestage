@@ -47,33 +47,35 @@ export const Layout: React.FC<{ children: React.ReactNode, activeTab: string, se
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-64 bg-black border-r border-[#333] p-4 flex flex-col gap-6">
-          <section>
-            <h3 className="text-[10px] uppercase tracking-wider text-[#666] mb-2 font-bold">Scenes</h3>
-            <div className="flex flex-col gap-1">
-              {scenes.map(scene => (
-                <button
-                  key={scene.id}
-                  onClick={() => setCurrentSceneId(scene.id)}
-                  className={cn(
-                    "text-left p-2 text-sm rounded transition-all border-l-2 border-transparent",
-                    scene.id === currentSceneId 
-                      ? "bg-[#1e1e1e] text-[#bb86fc] border-[#bb86fc]" 
-                      : "hover:bg-[#222]"
-                  )}
-                >
-                  {scene.name}
-                </button>
-              ))}
-            </div>
-            <button 
-              onClick={handleCreateScene}
-              className="mt-4 flex items-center gap-2 text-[10px] uppercase font-bold text-[#bb86fc] hover:opacity-80 transition-opacity"
-            >
-              <Plus size={12} /> New Scene
-            </button>
-          </section>
-        </aside>
+        {activeTab === 'scenes' && (
+          <aside className="w-64 bg-black border-r border-[#333] p-4 flex flex-col gap-6">
+            <section>
+              <h3 className="text-[10px] uppercase tracking-wider text-[#666] mb-2 font-bold">Scenes</h3>
+              <div className="flex flex-col gap-1">
+                {scenes.map(scene => (
+                  <button
+                    key={scene.id}
+                    onClick={() => setCurrentSceneId(scene.id)}
+                    className={cn(
+                      "text-left p-2 text-sm rounded transition-all border-l-2 border-transparent",
+                      scene.id === currentSceneId 
+                        ? "bg-[#1e1e1e] text-[#bb86fc] border-[#bb86fc]" 
+                        : "hover:bg-[#222]"
+                    )}
+                  >
+                    {scene.name}
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={handleCreateScene}
+                className="mt-4 flex items-center gap-2 text-[10px] uppercase font-bold text-[#bb86fc] hover:opacity-80 transition-opacity"
+              >
+                <Plus size={12} /> New Scene
+              </button>
+            </section>
+          </aside>
+        )}
 
         <main className="flex-1 flex flex-col overflow-hidden relative">
           {children}

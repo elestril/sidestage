@@ -113,6 +113,9 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
   const [filter, setFilter] = useState('all');
 
   const filteredEntities = entities.filter(e => {
+    // Exclude scenes from the entity browser
+    if (e.type === 'Scene') return false;
+    
     const matchesFilter = filter === 'all' || e.type === filter;
     const nameMatch = (e.name || '').toLowerCase().includes(search.toLowerCase());
     const descMatch = (e.description || '').toLowerCase().includes(search.toLowerCase());
@@ -145,7 +148,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
             />
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
-            {['all', 'NPC', 'Location', 'Item', 'Scene'].map(f => (
+            {['all', 'NPC', 'Location', 'Item'].map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
