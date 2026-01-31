@@ -8,13 +8,14 @@ def test_pyright():
     """
     # Check if pyright is available
     pyright_path = shutil.which("pyright")
+    
+    cmd = ["pyright", "--warnings"]
     if not pyright_path:
-        # Fallback to running via poetry if not in path (though running via poetry pytest usually has it)
-        # We assume 'pyright' executable is available in the environment
-        pass
+        # Fallback to poetry run
+        cmd = ["poetry", "run", "pyright", "--warnings"]
         
     result = subprocess.run(
-        ["pyright", "--warnings"], 
+        cmd, 
         capture_output=True,
         text=True
     )
