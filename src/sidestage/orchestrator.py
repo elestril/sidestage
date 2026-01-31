@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
+from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,72 @@ class SidestageOrchestrator:
         
         # Cache the FastAPI app instance to ensure modifications (like mounting) persist
         self.fastapi_app = self.app.get_app()
+
+        # Add custom endpoints
+        @self.fastapi_app.get("/entities")
+        async def list_entities():
+            entities = self.storage.list_all_entities()
+            # Add type to the response for the UI
+            result = []
+            for e in entities:
+                d = e.model_dump()
+                d["type"] = e.__class__.__name__
+                result.append(d)
+            return result
+
+        @self.fastapi_app.get("/entities/{entity_id}/markdown")
+        async def get_entity_markdown(entity_id: str):
+            entities = self.storage.list_all_entities()
+            entity = next((e for e in entities if e.id == entity_id), None)
+            if not entity:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail="Entity not found")
+            return {"markdown": entity_to_markdown(entity)}
+
+        @self.fastapi_app.post("/entities/export")
+        async def export_entities():
+            logger.info("Exporting entities...")
+            entities_dir = self.campaign_dir / "entities"
+            entities_dir.mkdir(parents=True, exist_ok=True)
+            
+            entities = self.storage.list_all_entities()
+            count = 0
+            for entity in entities:
+                md_content = entity_to_markdown(entity)
+                # Use a safe filename
+                filename = f"{entity.id}.md"
+                (entities_dir / filename).write_text(md_content)
+                count += 1
+            
+            logger.info(f"Successfully exported {count} entities.")
+            return {"message": f"Exported {count} entities to {entities_dir}"}
+
+        @self.fastapi_app.post("/entities/import")
+        async def import_entities():
+            logger.info("Importing entities...")
+            entities_dir = self.campaign_dir / "entities"
+            if not entities_dir.exists():
+                logger.warning("Import failed: entities directory does not exist.")
+                return {"message": "No entities directory found for import.", "count": 0}
+            
+            count = 0
+            for md_file in entities_dir.glob("*.md"):
+                try:
+                    md_content = md_file.read_text()
+                    entity = markdown_to_entity(md_content)
+                    
+                    if isinstance(entity, NPC):
+                        self.storage.add_npc(entity)
+                    elif isinstance(entity, Location):
+                        self.storage.add_location(entity)
+                    elif isinstance(entity, Item):
+                        self.storage.add_item(entity)
+                    count += 1
+                except Exception as e:
+                    logger.error(f"Error importing {md_file.name}: {e}")
+            
+            logger.info(f"Successfully imported {count} entities.")
+            return {"message": f"Imported {count} entities from {entities_dir}", "count": count}
 
         # Mount frontend static files
         self._mount_frontend()

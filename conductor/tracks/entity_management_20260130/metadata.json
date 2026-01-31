@@ -1,0 +1,8 @@
+{
+  "track_id": "entity_management_20260130",
+  "type": "feature",
+  "status": "completed",
+  "created_at": "2026-01-30T21:15:00Z",
+  "updated_at": "2026-01-30T21:30:00Z",
+  "description": "Implement entity management including a consistent UI navbar, a markdown-based entity renderer, a web-based entity browser with filters, and markdown import/export capabilities."
+}

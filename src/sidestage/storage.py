@@ -90,3 +90,10 @@ class Storage:
 
     def list_items(self) -> List[Item]:
         return cast(List[Item], self._list_entities("items", Item))
+
+    def list_all_entities(self) -> List[Entity]:
+        all_entities: List[Entity] = []
+        all_entities.extend(self.list_npcs())
+        all_entities.extend(self.list_locations())
+        all_entities.extend(self.list_items())
+        return all_entities

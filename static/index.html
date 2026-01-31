@@ -11,17 +11,48 @@
         <header>
             <h1>Sidestage</h1>
             <nav>
-                <a href="/">Chat</a>
+                <a href="#" id="nav-chat">Chat</a>
+                <a href="#" id="nav-entities">Entities</a>
                 <a href="/traces">Traces</a>
             </nav>
         </header>
-        <main id="chat-container">
-            <div id="messages"></div>
-            <form id="chat-form">
-                <input type="text" id="user-input" placeholder="Type your message..." autocomplete="off">
-                <button type="submit">Send</button>
-            </form>
-        </main>
+        <div id="main-content">
+            <main id="chat-container">
+                <div id="messages"></div>
+                <form id="chat-form">
+                    <input type="text" id="user-input" placeholder="Type your message..." autocomplete="off">
+                    <button type="submit">Send</button>
+                </form>
+            </main>
+            <main id="entities-container" style="display: none;">
+                <div class="toolbar">
+                    <div class="filters">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="NPC">NPCs</button>
+                        <button class="filter-btn" data-filter="Location">Locations</button>
+                        <button class="filter-btn" data-filter="Item">Items</button>
+                    </div>
+                    <div class="actions">
+                        <button id="import-btn">Import</button>
+                        <button id="export-btn">Export</button>
+                    </div>
+                </div>
+                <div id="entity-list">
+                    <!-- Entities will be rendered here -->
+                </div>
+            </main>
+        </div>
+
+        <div id="entity-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">Entity Name</h2>
+                    <span class="close-btn">&times;</span>
+                </div>
+                <div class="modal-type" id="modal-type">NPC</div>
+                <pre id="modal-markdown" class="markdown-body"></pre>
+            </div>
+        </div>
     </div>
     <script src="app.js"></script>
 </body>
