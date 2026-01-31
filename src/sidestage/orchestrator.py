@@ -12,6 +12,7 @@ from agno.models.message import Message
 from agno.os import AgentOS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import json
 import asyncio
 
@@ -305,6 +306,19 @@ class SidestageOrchestrator:
             })
             
             return {"status": "ok"}
+
+        # Catch-all route for SPA
+        @self.fastapi_app.get("/{full_path:path}")
+        async def catch_all(full_path: str):
+            dist_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
+            index_path = dist_dir / "index.html"
+            
+            # If the path exists as a file in dist (like assets), let StaticFiles handle it.
+            # But StaticFiles is mounted at /, so it usually wins if it matches.
+            # This catch_all is for things like /entities which aren't files.
+            if index_path.exists():
+                return FileResponse(index_path)
+            return {"detail": "Not Found"}
 
         # Mount frontend static files
         self._mount_frontend()
