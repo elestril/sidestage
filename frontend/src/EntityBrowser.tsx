@@ -194,7 +194,7 @@ interface EntityBrowserProps {
 }
 
 export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSelect }) => {
-  const { entities } = useAppContext();
+  const { entities, loadEntities } = useAppContext();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
@@ -207,6 +207,17 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
     const bodyMatch = (e.body || '').toLowerCase().includes(search.toLowerCase());
     return matchesFilter && (nameMatch || bodyMatch);
   });
+
+  const handleSync = async (type: 'import' | 'export') => {
+    try {
+      const response = await fetch(`/entities/${type}`, { method: 'POST' });
+      if (response.ok) {
+        if (type === 'import') await loadEntities();
+      }
+    } catch (error) {
+      console.error(`${type} failed:`, error);
+    }
+  };
 
   const getEntityIcon = (type: string) => {
     switch (type) {
@@ -223,15 +234,31 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
       {/* Left List */}
       <div className="w-1/2 flex flex-col border-r border-[#333] bg-black/20">
         <div className="p-4 border-b border-[#333] flex flex-col gap-3">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#666]" />
-            <input 
-              type="text" 
-              placeholder="Search Entities..." 
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded px-9 py-2 text-xs outline-none focus:border-[#bb86fc]"
-            />
+          <div className="flex justify-between items-center gap-4">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#666]" />
+              <input 
+                type="text" 
+                placeholder="Search Entities..." 
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded px-9 py-2 text-xs outline-none focus:border-[#bb86fc]"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => handleSync('import')}
+                className="text-[10px] uppercase font-bold text-[#03dac6] hover:opacity-80 transition-opacity"
+              >
+                Import
+              </button>
+              <button 
+                onClick={() => handleSync('export')}
+                className="text-[10px] uppercase font-bold text-[#666] hover:text-white transition-colors"
+              >
+                Export
+              </button>
+            </div>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
             {['all', 'NPC', 'Location', 'Item'].map(f => (

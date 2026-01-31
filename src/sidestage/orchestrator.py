@@ -155,7 +155,7 @@ class SidestageOrchestrator:
             scene = Scene(
                 id=scene_id,
                 name=request.name,
-                description=request.description,
+                body=request.description,
                 current_gametime=request.current_gametime
             )
             self.storage.add_scene(scene)
