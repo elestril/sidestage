@@ -311,11 +311,16 @@ class SidestageOrchestrator:
         @self.fastapi_app.get("/{full_path:path}")
         async def catch_all(full_path: str):
             dist_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
-            index_path = dist_dir / "index.html"
             
-            # If the path exists as a file in dist (like assets), let StaticFiles handle it.
-            # But StaticFiles is mounted at /, so it usually wins if it matches.
-            # This catch_all is for things like /entities which aren't files.
+            # If the path is empty (root) or a known SPA route, serve index.html
+            # If it's a file that exists (like assets/...), we should NOT return index.html
+            # because that breaks JS/CSS loading.
+            file_path = dist_dir / full_path
+            if full_path != "" and file_path.exists() and file_path.is_file():
+                # Let StaticFiles handle it or serve it here
+                return FileResponse(file_path)
+            
+            index_path = dist_dir / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
             return {"detail": "Not Found"}

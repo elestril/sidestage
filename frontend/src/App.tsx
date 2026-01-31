@@ -7,6 +7,16 @@ import { EntityBrowser } from './EntityBrowser';
 import { cn } from './lib/utils';
 import { marked } from 'marked';
 
+const renderMarkdown = (text: string) => {
+  try {
+    const result = marked.parse(text);
+    if (typeof result === 'string') return result;
+    return text;
+  } catch (e) {
+    return text;
+  }
+};
+
 const ScenesPage: React.FC = () => {
   const [scenesSplitterPos, setScenesSplitterPos] = useState(40); // Percentage for prose vs chat
   const [isResizingScenes, setIsResizingScenes] = useState(false);
@@ -33,7 +43,7 @@ const ScenesPage: React.FC = () => {
         {/* Scene Prose */}
         <div style={{ flex: `${scenesSplitterPos} 1 0%` }} className="p-6 overflow-y-auto bg-black/50 prose prose-invert max-w-none">
           <h2 className="text-[#bb86fc] mt-0">{activeScene?.name}</h2>
-          <div dangerouslySetInnerHTML={{ __html: activeScene?.description ? marked.parse(activeScene.description) : 'No description available.' }} />
+          <div dangerouslySetInnerHTML={{ __html: activeScene?.description ? renderMarkdown(activeScene.description) : 'No description available.' }} />
         </div>
 
         {/* Splitter */}
@@ -75,6 +85,7 @@ const EntitiesPage: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
+  console.log('AppContent mounting...');
   return (
     <Layout>
       <Routes>

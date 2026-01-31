@@ -99,19 +99,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     socket.onmessage = (event) => {
-      const data: WebSocketMessage = JSON.parse(event.data);
-      if (data.type === 'entities_updated') {
-        loadEntities();
-      } else if (data.type === 'chat_message') {
-        if (data.scene_id === currentSceneId) {
-          setMessages(prev => [...prev, { 
-            role: data.sender === 'user' ? 'user' : 'assistant', 
-            content: data.text,
-            widget: data.widget 
-          } as any]);
+      try {
+        const data: WebSocketMessage = JSON.parse(event.data);
+        if (data.type === 'entities_updated') {
+          loadEntities();
+        } else if (data.type === 'chat_message') {
+          if (data.scene_id === currentSceneId) {
+            setMessages(prev => [...prev, { 
+              role: data.sender === 'user' ? 'user' : 'assistant', 
+              content: data.text,
+              widget: data.widget 
+            } as any]);
+          }
+        } else if (data.type === 'scene_updated') {
+          loadScenes();
         }
-      } else if (data.type === 'scene_updated') {
-        loadScenes();
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error, event.data);
       }
     };
 
