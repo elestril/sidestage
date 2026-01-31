@@ -109,21 +109,19 @@ class SidestageOrchestrator:
         # Cache the FastAPI app instance to ensure modifications (like mounting) persist
         self.fastapi_app = self.app.get_app()
 
-        # Add custom endpoints
-        @self.fastapi_app.websocket("/ws")
+        # Add custom endpoints under /sidestage prefix
+        @self.fastapi_app.websocket("/sidestage/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await self.manager.connect(websocket)
             try:
                 while True:
-                    # Keep connection alive, we mostly use it for server-to-client broadcast
                     await websocket.receive_text()
             except WebSocketDisconnect:
                 self.manager.disconnect(websocket)
 
-        @self.fastapi_app.get("/entities")
+        @self.fastapi_app.get("/sidestage/entities")
         async def list_entities():
             entities = self.storage.list_all_entities()
-            # Add type to the response for the UI
             result = []
             for e in entities:
                 d = e.model_dump()
@@ -131,12 +129,12 @@ class SidestageOrchestrator:
                 result.append(d)
             return result
 
-        @self.fastapi_app.get("/scenes")
+        @self.fastapi_app.get("/sidestage/scenes")
         async def list_scenes():
             scenes = self.storage.list_scenes()
             return [s.model_dump() for s in scenes]
 
-        @self.fastapi_app.get("/scenes/{scene_id}/messages")
+        @self.fastapi_app.get("/sidestage/scenes/{scene_id}/messages")
         async def get_scene_messages(scene_id: str):
             scene = self.storage.get_scene(scene_id)
             if not scene:
@@ -148,7 +146,7 @@ class SidestageOrchestrator:
             description: str = ""
             current_gametime: Optional[int] = None
 
-        @self.fastapi_app.post("/scenes")
+        @self.fastapi_app.post("/sidestage/scenes")
         async def create_scene(request: SceneCreateRequest):
             import uuid
             scene_id = f"scene_{str(uuid.uuid4())[:8]}"
@@ -162,7 +160,7 @@ class SidestageOrchestrator:
             await self.manager.broadcast({"type": "scene_updated"})
             return scene.model_dump()
 
-        @self.fastapi_app.get("/entities/{entity_id}/markdown")
+        @self.fastapi_app.get("/sidestage/entities/{entity_id}/markdown")
         async def get_entity_markdown(entity_id: str):
             entities = self.storage.list_all_entities()
             entity = next((e for e in entities if e.id == entity_id), None)
@@ -173,11 +171,10 @@ class SidestageOrchestrator:
         class EntityMarkdownUpdateRequest(BaseModel):
             markdown: str
 
-        @self.fastapi_app.post("/entities/{entity_id}/markdown")
+        @self.fastapi_app.post("/sidestage/entities/{entity_id}/markdown")
         async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
             try:
                 entity = markdown_to_entity(request.markdown)
-                # Ensure the ID matches the URL
                 entity.id = entity_id
                 
                 if isinstance(entity, NPC):
@@ -195,7 +192,7 @@ class SidestageOrchestrator:
                 logger.error(f"Error updating entity {entity_id}: {e}")
                 raise HTTPException(status_code=400, detail=str(e))
 
-        @self.fastapi_app.post("/entities/export")
+        @self.fastapi_app.post("/sidestage/entities/export")
         async def export_entities():
             logger.info("Exporting entities...")
             entities_dir = self.campaign_dir / "entities"
@@ -205,7 +202,6 @@ class SidestageOrchestrator:
             count = 0
             for entity in entities:
                 md_content = entity_to_markdown(entity)
-                # Use a safe filename
                 filename = f"{entity.id}.md"
                 (entities_dir / filename).write_text(md_content)
                 count += 1
@@ -213,7 +209,7 @@ class SidestageOrchestrator:
             logger.info(f"Successfully exported {count} entities.")
             return {"message": f"Exported {count} entities to {entities_dir}"}
 
-        @self.fastapi_app.post("/entities/import")
+        @self.fastapi_app.post("/sidestage/entities/import")
         async def import_entities():
             logger.info("Importing entities...")
             entities_dir = self.campaign_dir / "entities"
@@ -242,7 +238,6 @@ class SidestageOrchestrator:
                     logger.error(f"Error importing {md_file.name}: {e}")
             
             logger.info(f"Successfully imported {count} entities.")
-            # Broadcast update
             await self.manager.broadcast({"type": "entities_updated"})
             return {"message": f"Successfully imported {count} entities."}
 
@@ -250,24 +245,21 @@ class SidestageOrchestrator:
             message: str
             scene_id: str = "campaign_planning"
 
-        @self.fastapi_app.post("/chat")
+        @self.fastapi_app.post("/sidestage/chat")
         async def chat_endpoint(request: ChatRequest):
             message = request.message
             scene_id = request.scene_id
             
             logger.info(f"Chat request received for scene {scene_id}: {message[:20]}...")
             
-            # Load scene
             scene = self.storage.get_scene(scene_id)
             if not scene:
                 raise HTTPException(status_code=404, detail="Scene not found")
 
-            # Update scene messages with user input and persist immediately
             user_msg = {"role": "user", "content": message}
             scene.messages.append(user_msg)
             self.storage.update_scene(scene)
             
-            # Broadcast user message
             await self.manager.broadcast({
                 "type": "chat_message",
                 "text": message,
@@ -275,18 +267,13 @@ class SidestageOrchestrator:
                 "scene_id": scene_id
             })
             
-            # Run agent asynchronously
-            # Note: Context/History management is deferred to a dedicated track.
-            # For now, we just run the single message.
             response = await self.agent.arun(message, stream=False)
             response_content = str(response.content) if hasattr(response, 'content') and response.content is not None else str(response)
 
-            # Update scene with agent response and persist
             agent_msg = {"role": "assistant", "content": response_content}
             scene.messages.append(agent_msg)
             self.storage.update_scene(scene)
 
-            # Detect entities in response to send widgets
             widget = None
             entities = self.storage.list_all_entities()
             for e in entities:
@@ -294,9 +281,8 @@ class SidestageOrchestrator:
                     widget = e.model_dump()
                     widget["type"] = "entity"
                     widget["entity_type"] = e.__class__.__name__
-                    break # Just one widget for now
+                    break
 
-            # Broadcast agent message
             await self.manager.broadcast({
                 "type": "chat_message",
                 "text": response_content,
@@ -310,20 +296,19 @@ class SidestageOrchestrator:
         # Catch-all route for SPA
         @self.fastapi_app.get("/{full_path:path}")
         async def catch_all(full_path: str):
+            # Ignore requests to /sidestage, /agents, /sessions, /traces which are API/internal
+            if full_path.startswith(("sidestage", "agents", "sessions", "traces")):
+                raise HTTPException(status_code=404)
+
             dist_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
-            
-            # If the path is empty (root) or a known SPA route, serve index.html
-            # If it's a file that exists (like assets/...), we should NOT return index.html
-            # because that breaks JS/CSS loading.
             file_path = dist_dir / full_path
             if full_path != "" and file_path.exists() and file_path.is_file():
-                # Let StaticFiles handle it or serve it here
                 return FileResponse(file_path)
             
             index_path = dist_dir / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
-            return {"detail": "Not Found"}
+            raise HTTPException(status_code=404)
 
         # Mount frontend static files
         self._mount_frontend()

@@ -10,14 +10,12 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/chat': 'http://localhost:8000',
-      '/entities': 'http://localhost:8000',
-      '/scenes': 'http://localhost:8000',
-      '/sessions': 'http://localhost:8000',
-      '/ws': {
-        target: 'ws://localhost:8000',
+      '/sidestage': {
+        target: 'http://localhost:8000',
         ws: true
-      }
+      },
+      '/agents': 'http://localhost:8000',
+      '/sessions': 'http://localhost:8000',
     }
   }
 })

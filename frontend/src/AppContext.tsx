@@ -24,7 +24,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadScenes = useCallback(async () => {
     try {
-      const response = await fetch('/scenes');
+      const response = await fetch('/sidestage/scenes');
       if (response.ok) {
         const data = await response.json();
         setScenes(data);
@@ -36,7 +36,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadEntities = useCallback(async () => {
     try {
-      const response = await fetch('/entities');
+      const response = await fetch('/sidestage/entities');
       if (response.ok) {
         const data = await response.json();
         setEntities(data);
@@ -48,7 +48,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadMessages = useCallback(async (sceneId: string) => {
     try {
-      const response = await fetch(`/scenes/${sceneId}/messages`);
+      const response = await fetch(`/sidestage/scenes/${sceneId}/messages`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
@@ -60,7 +60,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendMessage = async (text: string) => {
     try {
-      const response = await fetch('/chat', {
+      const response = await fetch('/sidestage/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, scene_id: currentSceneId })
@@ -73,7 +73,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveEntityMarkdown = async (id: string, markdown: string) => {
     try {
-      const response = await fetch(`/entities/${id}/markdown`, {
+      const response = await fetch(`/sidestage/entities/${id}/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markdown })
@@ -96,7 +96,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    const socket = new WebSocket(`${protocol}//${window.location.host}/sidestage/ws`);
 
     socket.onmessage = (event) => {
       try {

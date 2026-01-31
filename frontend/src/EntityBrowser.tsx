@@ -14,7 +14,7 @@ export const EntityModal: React.FC<{ entityId: string | null, onClose: () => voi
 
   useEffect(() => {
     if (entityId) {
-      fetch(`/entities/${entityId}/markdown`)
+      fetch(`/sidestage/entities/${entityId}/markdown`)
         .then(res => res.json())
         .then(data => setMarkdown(data.markdown))
         .catch(err => setMarkdown('Error loading markdown: ' + err.message));
@@ -68,7 +68,7 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
 
   useEffect(() => {
     if (entityId) {
-      fetch(`/entities/${entityId}/markdown`)
+      fetch(`/sidestage/entities/${entityId}/markdown`)
         .then(res => res.json())
         .then(data => {
           // TipTap Markdown extension handles the conversion if we set it as markdown
@@ -210,7 +210,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
 
   const handleSync = async (type: 'import' | 'export') => {
     try {
-      const response = await fetch(`/entities/${type}`, { method: 'POST' });
+      const response = await fetch(`/sidestage/entities/${type}`, { method: 'POST' });
       if (response.ok) {
         if (type === 'import') await loadEntities();
       }
