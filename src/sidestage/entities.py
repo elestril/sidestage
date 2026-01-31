@@ -8,7 +8,7 @@ def entity_to_markdown(entity: Entity) -> str:
     Serializes an Entity to a standardized Markdown format with YAML frontmatter.
     """
     data = entity.model_dump()
-    description = data.pop("description", "")
+    body = data.pop("body", "")
     
     # Ensure type is explicitly in the frontmatter for easier identification
     data["type"] = entity.__class__.__name__
@@ -21,7 +21,7 @@ def entity_to_markdown(entity: Entity) -> str:
     ordered_data.update(data)
     
     frontmatter = yaml.dump(ordered_data, sort_keys=False).strip()
-    return f"---\n{frontmatter}\n---\n\n{description}"
+    return f"---\n{frontmatter}\n---\n\n{body}"
 
 def markdown_to_entity(content: str) -> Entity:
     """
@@ -40,7 +40,7 @@ def markdown_to_entity(content: str) -> Entity:
     if not isinstance(data, dict):
         raise ValueError("Invalid YAML frontmatter")
     
-    data["description"] = body
+    data["body"] = body
     entity_type = data.get("type", "Entity")
     
     type_map: Dict[str, Type[Entity]] = {

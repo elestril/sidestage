@@ -1,7 +1,7 @@
 export interface Entity {
   id: string;
   name: string;
-  description: string;
+  body: string;
   type: string;
   entity_type?: string;
   location_id?: string | null;
@@ -12,7 +12,7 @@ export interface Entity {
 export interface Scene {
   id: string;
   name: string;
-  description: string;
+  body: string;
   current_gametime: number | null;
   events: string[];
   messages: Message[];

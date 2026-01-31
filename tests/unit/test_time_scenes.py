@@ -20,7 +20,7 @@ def test_scene_crud(tmp_path):
     scene = Scene(
         id="scene_1",
         name="Test Scene",
-        description="A test scene",
+        body="A test scene",
         current_gametime=3600
     )
     
@@ -44,7 +44,7 @@ def test_event_storage(tmp_path):
         scene_id="scene_1",
         gametime=3600,
         walltime="2026-01-30T22:30:00",
-        description="Something happened"
+        body="Something happened"
     )
     
     storage.add_event(event)

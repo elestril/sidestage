@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class Entity(BaseModel):
     name: str
-    description: str
+    body: str
     id: str = Field(..., description="Unique identifier for the entity")
 
 class Item(Entity):

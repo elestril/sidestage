@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
-import { Search, Save, FileText, User, MapPin, Package, Film } from 'lucide-react';
+import { Search, Save, FileText, User, MapPin, Package, Film, Hash, List as ListIcon } from 'lucide-react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { Markdown } from 'tiptap-markdown';
+import Placeholder from '@tiptap/extension-placeholder';
 
 export const EntityModal: React.FC<{ entityId: string | null, onClose: () => void }> = ({ entityId, onClose }) => {
   const [markdown, setMarkdown] = useState('Loading...');
@@ -43,32 +47,51 @@ interface EntityEditorProps {
 
 export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
   const { entities, saveEntityMarkdown } = useAppContext();
-  const [markdown, setMarkdown] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const entity = entities.find(e => e.id === entityId);
 
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Markdown,
+      Placeholder.configure({
+        placeholder: 'Write something amazing...',
+      }),
+    ],
+    content: '',
+    editorProps: {
+      attributes: {
+        class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px] p-6 font-sans',
+      },
+    },
+  });
+
   useEffect(() => {
     if (entityId) {
-      setMarkdown('Loading...');
       fetch(`/entities/${entityId}/markdown`)
         .then(res => res.json())
-        .then(data => setMarkdown(data.markdown))
-        .catch(err => setMarkdown('Error loading markdown: ' + err.message));
-    } else {
-      setMarkdown('');
+        .then(data => {
+          // TipTap Markdown extension handles the conversion if we set it as markdown
+          if (editor) {
+            editor.commands.setContent(data.markdown);
+          }
+        })
+        .catch(err => console.error('Error loading markdown:', err));
     }
-  }, [entityId]);
+  }, [entityId, editor]);
 
   const handleSave = async () => {
-    if (!entityId) return;
+    if (!entityId || !editor) return;
     setIsSaving(true);
+    // Get markdown from editor
+    const markdown = (editor.storage as any).markdown.getMarkdown();
     await saveEntityMarkdown(entityId, markdown);
     setIsSaving(false);
   };
 
   if (!entityId) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[#444] italic bg-black/20">
+      <div className="flex-1 flex items-center justify-center text-[#444] italic bg-black/20 uppercase tracking-widest text-xs font-bold">
         Select an entity to edit...
       </div>
     );
@@ -76,6 +99,7 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-[#1a1a1a]">
+      {/* Titlebar */}
       <div className="flex justify-between items-center p-4 border-b border-[#333] bg-black/40">
         <div className="flex items-center gap-3">
           <FileText size={18} className="text-[#bb86fc]" />
@@ -84,20 +108,82 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
             <p className="text-[10px] text-[#666] uppercase tracking-widest font-bold">Editing {entity?.type}</p>
           </div>
         </div>
-        <button 
-          onClick={handleSave}
-          disabled={isSaving}
-          className="flex items-center gap-2 bg-[#bb86fc] text-black px-4 py-1.5 rounded text-xs font-bold hover:opacity-90 transition-all disabled:opacity-50"
-        >
-          <Save size={14} /> {isSaving ? 'Saving...' : 'Save'}
-        </button>
+        <div className="flex items-center gap-4">
+          <span className="text-[10px] font-mono text-[#444] uppercase">{entity?.id}</span>
+          <button 
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex items-center gap-2 bg-[#bb86fc] text-black px-4 py-1.5 rounded text-xs font-bold hover:opacity-90 transition-all disabled:opacity-50 active:translate-y-px"
+          >
+            <Save size={14} /> {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
-      <textarea
-        value={markdown}
-        onChange={(e) => setMarkdown(e.target.value)}
-        className="flex-1 p-6 bg-transparent text-gray-300 font-mono text-sm outline-none resize-none leading-relaxed scrollbar-thin"
-        placeholder="Standardized Markdown Representation..."
-      />
+
+      <div className="flex-1 flex flex-col overflow-y-auto scrollbar-thin">
+        {/* TipTap Editor for Body */}
+        <div className="bg-black/20 border-b border-[#222]">
+          <div className="px-6 pt-4 text-[10px] uppercase font-bold text-[#444] tracking-widest">Content Body</div>
+          <EditorContent editor={editor} />
+        </div>
+
+        {/* Structured Metadata Fields */}
+        <div className="p-6 flex flex-col gap-6 bg-black/10">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Common fields or specific ones */}
+            {entity?.type === 'NPC' && (
+              <>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><MapPin size={10} /> Location ID</label>
+                  <div className="text-xs font-mono text-[#bb86fc] p-2 bg-black/40 border border-[#333] rounded">
+                    {entity.location_id || 'Not set'}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><Package size={10} /> Inventory</label>
+                  <div className="flex flex-wrap gap-1">
+                    {entity.inventory && entity.inventory.length > 0 ? entity.inventory.map(item => (
+                      <span key={item} className="text-[9px] font-mono bg-[#bb86fc]/10 text-[#bb86fc] border border-[#bb86fc]/20 px-2 py-0.5 rounded uppercase">{item}</span>
+                    )) : <span className="text-xs text-[#444] italic">Empty</span>}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {entity?.type === 'Location' && (
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><MapPin size={10} /> Connected Locations</label>
+                <div className="flex flex-wrap gap-1">
+                  {entity.connected_locations && entity.connected_locations.length > 0 ? entity.connected_locations.map(loc => (
+                    <span key={loc} className="text-[9px] font-mono bg-green-400/10 text-green-400 border border-green-400/20 px-2 py-0.5 rounded uppercase">{loc}</span>
+                  )) : <span className="text-xs text-[#444] italic">None</span>}
+                </div>
+              </div>
+            )}
+
+            {entity?.type === 'Scene' && (
+              <>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><Hash size={10} /> Current Gametime</label>
+                  <div className="text-xs font-mono text-[#03dac6] p-2 bg-black/40 border border-[#333] rounded">
+                    {(entity as any).current_gametime !== null ? (entity as any).current_gametime : 'Inactive'}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><ListIcon size={10} /> Events</label>
+                  <div className="text-xs text-[#444] italic">
+                    {(entity as any).events?.length || 0} events recorded.
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          
+          <div className="text-[9px] text-[#333] mt-4 border-t border-[#222] pt-4 italic">
+            Note: Metadata fields are read-only in this view. Edit the frontmatter in the content body to update them.
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -118,8 +204,8 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
     
     const matchesFilter = filter === 'all' || e.type === filter;
     const nameMatch = (e.name || '').toLowerCase().includes(search.toLowerCase());
-    const descMatch = (e.description || '').toLowerCase().includes(search.toLowerCase());
-    return matchesFilter && (nameMatch || descMatch);
+    const bodyMatch = (e.body || '').toLowerCase().includes(search.toLowerCase());
+    return matchesFilter && (nameMatch || bodyMatch);
   });
 
   const getEntityIcon = (type: string) => {
@@ -179,7 +265,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
                 {getEntityIcon(entity.type)}
                 <span className="font-bold text-sm">{entity.name}</span>
               </div>
-              <p className="text-[11px] text-gray-500 line-clamp-1 italic">{entity.description}</p>
+              <p className="text-[11px] text-gray-500 line-clamp-1 italic">{entity.body}</p>
             </button>
           ))}
           {filteredEntities.length === 0 && (
@@ -195,3 +281,4 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
     </div>
   );
 };
+

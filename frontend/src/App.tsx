@@ -50,7 +50,7 @@ const ScenesPage: React.FC = () => {
         {/* Scene Prose */}
         <div style={{ flex: `${scenesSplitterPos} 1 0%` }} className="p-6 overflow-y-auto bg-black/50 prose prose-invert max-w-none">
           <h2 className="text-[#bb86fc] mt-0">{activeScene?.name}</h2>
-          <div dangerouslySetInnerHTML={{ __html: activeScene?.description ? renderMarkdown(activeScene.description) : 'No description available.' }} />
+          <div dangerouslySetInnerHTML={{ __html: activeScene?.body ? renderMarkdown(activeScene.body) : 'No description available.' }} />
         </div>
 
         {/* Splitter */}

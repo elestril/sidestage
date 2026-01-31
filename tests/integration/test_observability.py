@@ -7,15 +7,8 @@ from agno.run.agent import RunOutput
 @pytest.fixture
 def client(tmp_path):
     campaign_name = "test_observability"
-    orchestrator = SidestageOrchestrator(campaign_name=campaign_name)
-    # Ensure we use the tmp_path for the DBs
-    orchestrator.campaign_dir = tmp_path
-    orchestrator.storage.db_path = tmp_path / "world.db"
-    orchestrator.storage._init_db()
-    # Re-init AgentOS with the new campaign dir if needed, 
-    # but here we can just mock the app's db if it's already set.
-    # Actually, orchestrator already sets it in __init__.
-    return TestClient(orchestrator.app.get_app())
+    orchestrator = SidestageOrchestrator(campaign_name=campaign_name, base_dir=tmp_path)
+    return TestClient(orchestrator.fastapi_app)
 
 def test_trace_endpoint_captured_data(client):
     # 1. Get Agent ID

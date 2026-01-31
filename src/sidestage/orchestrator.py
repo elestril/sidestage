@@ -338,7 +338,7 @@ class SidestageOrchestrator:
             self.storage.add_scene(Scene(
                 id="campaign_planning",
                 name="Campaign Planning",
-                description="The default space for discussing the campaign world, characters, and plot.",
+                body="The default space for discussing the campaign world, characters, and plot.",
                 current_gametime=None # Planning is meta-level, no gametime
             ))
 

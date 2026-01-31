@@ -6,7 +6,7 @@ def test_npc_markdown_roundtrip():
     npc = NPC(
         id="npc_barnaby",
         name="Barnaby the Bold",
-        description="A retired knight.",
+        body="A retired knight.",
         location_id="loc_tavern",
         inventory=["item_sword"]
     )
@@ -20,7 +20,7 @@ def test_npc_markdown_roundtrip():
     assert isinstance(parsed, NPC)
     assert parsed.id == npc.id
     assert parsed.name == npc.name
-    assert parsed.description == npc.description
+    assert parsed.body == npc.body
     assert parsed.location_id == npc.location_id
     assert parsed.inventory == npc.inventory
 
@@ -28,7 +28,7 @@ def test_location_markdown_roundtrip():
     loc = Location(
         id="loc_woods",
         name="Whispering Woods",
-        description="A spooky forest.",
+        body="A spooky forest.",
         connected_locations=["loc_tavern"]
     )
     
@@ -44,7 +44,7 @@ def test_item_markdown_roundtrip():
     item = Item(
         id="item_sword",
         name="Sword",
-        description="Sharp blade."
+        body="Sharp blade."
     )
     
     md = entity_to_markdown(item)

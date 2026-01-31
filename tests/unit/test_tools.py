@@ -15,13 +15,12 @@ def test_world_tools_wrapper(tmp_path):
     npc_data = storage.list_npcs()[0]
     npc_id = npc_data.id
     
-    # Test update
-    update_resp = tools.update_npc(npc_id, description="Updated description")
-    assert "Updated description" in update_resp
+    # Update
+    update_resp = tools.update_npc(npc_id, body="Updated body")
+    assert "Updated body" in update_resp
     
     updated_npc = storage.get_npc(npc_id)
-    assert updated_npc is not None
-    assert updated_npc.description == "Updated description"
+    assert updated_npc.body == "Updated body"
     
     # Test list
     list_resp = tools.list_npcs()
