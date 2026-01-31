@@ -2,12 +2,13 @@ import React from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
 import { Plus, MessageSquare, Database, Activity } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { scenes, currentSceneId, setCurrentSceneId, loadScenes } = useAppContext();
+  const { scenes, loadScenes } = useAppContext();
   const location = useLocation();
-  const isScenesPage = location.pathname === '/' || location.pathname === '/scenes';
+  const navigate = useNavigate();
+  const isScenesPage = location.pathname === '/' || location.pathname.startsWith('/scenes');
 
   const handleCreateScene = async () => {
     const name = prompt('Enter scene name:');
@@ -21,7 +22,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       if (response.ok) {
         const scene = await response.json();
         await loadScenes();
-        setCurrentSceneId(scene.id);
+        navigate(`/scenes/${scene.id}`);
       }
     } catch (error) {
       console.error('Failed to create scene:', error);
@@ -56,18 +57,18 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <h3 className="text-[10px] uppercase tracking-wider text-[#666] mb-2 font-bold">Scenes</h3>
               <div className="flex flex-col gap-1">
                 {scenes.map(scene => (
-                  <button
+                  <NavLink
                     key={scene.id}
-                    onClick={() => setCurrentSceneId(scene.id)}
-                    className={cn(
+                    to={`/scenes/${scene.id}`}
+                    className={({ isActive }) => cn(
                       "text-left p-2 text-sm rounded transition-all border-l-2 border-transparent",
-                      scene.id === currentSceneId 
+                      isActive 
                         ? "bg-[#1e1e1e] text-[#bb86fc] border-[#bb86fc]" 
                         : "hover:bg-[#222]"
                     )}
                   >
                     {scene.name}
-                  </button>
+                  </NavLink>
                 ))}
               </div>
               <button 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AppProvider, useAppContext } from './AppContext';
 import { Layout } from './Layout';
 import { ChatWidget } from './ChatWidget';
@@ -18,9 +18,16 @@ const renderMarkdown = (text: string) => {
 };
 
 const ScenesPage: React.FC = () => {
+  const { sceneId } = useParams<{ sceneId: string }>();
+  const { setCurrentSceneId, activeScene } = useAppContext();
   const [scenesSplitterPos, setScenesSplitterPos] = useState(40); // Percentage for prose vs chat
   const [isResizingScenes, setIsResizingScenes] = useState(false);
-  const { activeScene } = useAppContext();
+
+  React.useEffect(() => {
+    if (sceneId) {
+      setCurrentSceneId(sceneId);
+    }
+  }, [sceneId, setCurrentSceneId]);
 
   const resizeScenes = (e: React.MouseEvent) => {
     if (!isResizingScenes) return;
@@ -89,8 +96,9 @@ const AppContent: React.FC = () => {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<ScenesPage />} />
-        <Route path="/scenes" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<Navigate to="/scenes/campaign_planning" replace />} />
+        <Route path="/scenes" element={<Navigate to="/scenes/campaign_planning" replace />} />
+        <Route path="/scenes/:sceneId" element={<ScenesPage />} />
         <Route path="/entities" element={<EntitiesPage />} />
       </Routes>
     </Layout>
