@@ -197,7 +197,7 @@ class SidestageOrchestrator:
             
             # Run agent asynchronously
             response = await self.agent.arun(message, stream=False)
-            response_content = response.content if hasattr(response, 'content') else str(response)
+            response_content = str(response.content) if hasattr(response, 'content') and response.content is not None else str(response)
 
             # Detect entities in response to send widgets
             widget = None
