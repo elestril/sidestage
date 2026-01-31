@@ -45,9 +45,9 @@ export const EntityBrowser: React.FC = () => {
 
   const filteredEntities = entities.filter(e => {
     const matchesFilter = filter === 'all' || e.type === filter;
-    const matchesSearch = e.name.toLowerCase().includes(search.toLowerCase()) || 
-                         e.description.toLowerCase().includes(search.toLowerCase());
-    return matchesFilter && matchesSearch;
+    const nameMatch = (e.name || '').toLowerCase().includes(search.toLowerCase());
+    const descMatch = (e.description || '').toLowerCase().includes(search.toLowerCase());
+    return matchesFilter && (nameMatch || descMatch);
   });
 
   const handleSync = async (type: 'import' | 'export') => {

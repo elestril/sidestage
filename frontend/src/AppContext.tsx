@@ -89,7 +89,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadEntities();
       } else if (data.type === 'chat_message') {
         if (data.scene_id === currentSceneId) {
-          setMessages(prev => [...prev, { role: data.sender === 'user' ? 'user' : 'assistant', content: data.text }]);
+          setMessages(prev => [...prev, { 
+            role: data.sender === 'user' ? 'user' : 'assistant', 
+            content: data.text,
+            widget: data.widget 
+          } as any]);
         }
       } else if (data.type === 'scene_updated') {
         loadScenes();
