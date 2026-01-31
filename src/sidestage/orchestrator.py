@@ -316,9 +316,9 @@ class SidestageOrchestrator:
 
     def _mount_frontend(self):
         project_root = Path(__file__).parent.parent.parent
-        static_dir = project_root / "static"
+        dist_dir = project_root / "frontend" / "dist"
         
-        if static_dir.exists():
+        if dist_dir.exists():
             fastapi_app = self.fastapi_app
             
             # Remove default AgentOS root route to allow frontend to serve index.html
@@ -327,11 +327,11 @@ class SidestageOrchestrator:
                     fastapi_app.routes.remove(route)
                     break
 
-            # Mount the static directory
-            fastapi_app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
-            logger.info(f"Frontend mounted from: {static_dir}")
+            # Mount the built assets directory
+            fastapi_app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
+            logger.info(f"Frontend mounted from: {dist_dir}")
         else:
-            logger.warning(f"Static directory not found at {static_dir}. No frontend will be served.")
+            logger.warning(f"Built frontend directory not found at {dist_dir}. No frontend will be served.")
 
     def _ensure_campaign_dir(self):
         if not self.campaign_dir.exists():
