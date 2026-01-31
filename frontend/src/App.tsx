@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
 import { AppProvider, useAppContext } from './AppContext';
 import { Layout } from './Layout';
 import { ChatWidget } from './ChatWidget';
@@ -80,12 +80,14 @@ const ScenesPage: React.FC = () => {
 };
 
 const EntitiesPage: React.FC = () => {
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const { entityId } = useParams<{ entityId: string }>();
+  const navigate = useNavigate();
+
   return (
     <div className="flex-1 flex overflow-hidden">
       <EntityBrowser 
-        selectedId={selectedEntityId} 
-        onSelect={setSelectedEntityId} 
+        selectedId={entityId || null} 
+        onSelect={(id) => navigate(id ? `/entities/${id}` : '/entities')} 
       />
     </div>
   );
@@ -100,6 +102,7 @@ const AppContent: React.FC = () => {
         <Route path="/scenes" element={<Navigate to="/scenes/campaign_planning" replace />} />
         <Route path="/scenes/:sceneId" element={<ScenesPage />} />
         <Route path="/entities" element={<EntitiesPage />} />
+        <Route path="/entities/:entityId" element={<EntitiesPage />} />
       </Routes>
     </Layout>
   );
