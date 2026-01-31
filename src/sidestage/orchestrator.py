@@ -192,6 +192,45 @@ class SidestageOrchestrator:
                 logger.error(f"Error updating entity {entity_id}: {e}")
                 raise HTTPException(status_code=400, detail=str(e))
 
+        @self.fastapi_app.post("/sidestage/entities/{entity_id}")
+        async def update_entity(entity_id: str, data: dict):
+            try:
+                # Detect type and validate with Pydantic
+                entity_type = data.get("type")
+                if not entity_type:
+                    # Try to infer from ID or existing data
+                    existing = next((e for e in self.storage.list_all_entities() if e.id == entity_id), None)
+                    if existing:
+                        entity_type = existing.__class__.__name__
+                
+                if entity_type == "NPC":
+                    obj = NPC(**data)
+                elif entity_type == "Location":
+                    obj = Location(**data)
+                elif entity_type == "Item":
+                    obj = Item(**data)
+                elif entity_type == "Scene":
+                    obj = Scene(**data)
+                else:
+                    raise ValueError(f"Unknown entity type: {entity_type}")
+                
+                obj.id = entity_id
+                
+                if isinstance(obj, NPC):
+                    self.storage.update_npc(obj)
+                elif isinstance(obj, Location):
+                    self.storage.update_location(obj)
+                elif isinstance(obj, Item):
+                    self.storage.update_item(obj)
+                elif isinstance(obj, Scene):
+                    self.storage.update_scene(obj)
+                
+                await self.manager.broadcast({"type": "entities_updated"})
+                return {"status": "ok"}
+            except Exception as e:
+                logger.error(f"Error updating entity {entity_id}: {e}")
+                raise HTTPException(status_code=400, detail=str(e))
+
         @self.fastapi_app.post("/sidestage/entities/export")
         async def export_entities():
             logger.info("Exporting entities...")

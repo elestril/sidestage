@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
-import { Search, Save, FileText, User, MapPin, Package, Film, Hash, List as ListIcon } from 'lucide-react';
+import { Search, Save, FileText, User, MapPin, Package, Film, Hash } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from 'tiptap-markdown';
@@ -46,8 +46,10 @@ interface EntityEditorProps {
 }
 
 export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
-  const { entities, saveEntityMarkdown } = useAppContext();
+  const { entities, saveEntity } = useAppContext();
   const [isSaving, setIsSaving] = useState(false);
+  const [meta, setMeta] = useState<any>(null);
+  
   const entity = entities.find(e => e.id === entityId);
 
   const editor = useEditor({
@@ -67,25 +69,23 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
   });
 
   useEffect(() => {
-    if (entityId) {
-      fetch(`/sidestage/entities/${entityId}/markdown`)
-        .then(res => res.json())
-        .then(data => {
-          // TipTap Markdown extension handles the conversion if we set it as markdown
-          if (editor) {
-            editor.commands.setContent(data.markdown);
-          }
-        })
-        .catch(err => console.error('Error loading markdown:', err));
+    if (entity) {
+      setMeta({ ...entity });
+      if (editor) {
+        editor.commands.setContent(entity.body || '');
+      }
+    } else {
+      setMeta(null);
+      if (editor) editor.commands.setContent('');
     }
-  }, [entityId, editor]);
+  }, [entityId, entities, editor]);
 
   const handleSave = async () => {
-    if (!entityId || !editor) return;
+    if (!entityId || !editor || !meta) return;
     setIsSaving(true);
-    // Get markdown from editor
-    const markdown = (editor.storage as any).markdown.getMarkdown();
-    await saveEntityMarkdown(entityId, markdown);
+    const body = (editor.storage as any).markdown.getMarkdown();
+    const updatedData = { ...meta, body };
+    await saveEntity(entityId, updatedData);
     setIsSaving(false);
   };
 
@@ -103,13 +103,19 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
       <div className="flex justify-between items-center p-4 border-b border-[#333] bg-black/40">
         <div className="flex items-center gap-3">
           <FileText size={18} className="text-[#bb86fc]" />
-          <div>
-            <h3 className="font-bold text-sm text-[#e0e0e0]">{entity?.name}</h3>
-            <p className="text-[10px] text-[#666] uppercase tracking-widest font-bold">Editing {entity?.type}</p>
+          <div className="flex flex-col">
+            <input 
+              type="text"
+              value={meta?.name || ''}
+              onChange={(e) => setMeta({ ...meta, name: e.target.value })}
+              className="bg-transparent border-none font-bold text-sm text-[#e0e0e0] outline-none focus:text-white"
+              placeholder="Entity Name"
+            />
+            <p className="text-[10px] text-[#666] uppercase tracking-widest font-bold">{entity?.type}</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-[10px] font-mono text-[#444] uppercase">{entity?.id}</span>
+          <span className="text-[10px] font-mono text-[#444] uppercase">{entityId}</span>
           <button 
             onClick={handleSave}
             disabled={isSaving}
@@ -123,64 +129,65 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
       <div className="flex-1 flex flex-col overflow-y-auto scrollbar-thin">
         {/* TipTap Editor for Body */}
         <div className="bg-black/20 border-b border-[#222]">
-          <div className="px-6 pt-4 text-[10px] uppercase font-bold text-[#444] tracking-widest">Content Body</div>
+          <div className="px-6 pt-4 text-[10px] uppercase font-bold text-[#444] tracking-widest border-b border-[#222] pb-2 mb-2">Content Body</div>
           <EditorContent editor={editor} />
         </div>
 
         {/* Structured Metadata Fields */}
         <div className="p-6 flex flex-col gap-6 bg-black/10">
+          <h4 className="text-[10px] uppercase font-bold text-[#666] tracking-widest">Metadata</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Common fields or specific ones */}
             {entity?.type === 'NPC' && (
               <>
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><MapPin size={10} /> Location ID</label>
-                  <div className="text-xs font-mono text-[#bb86fc] p-2 bg-black/40 border border-[#333] rounded">
-                    {entity.location_id || 'Not set'}
-                  </div>
+                  <label className="text-[10px] uppercase font-bold text-[#444] flex items-center gap-2"><MapPin size={10} /> Location ID</label>
+                  <input 
+                    type="text"
+                    value={meta?.location_id || ''}
+                    onChange={(e) => setMeta({ ...meta, location_id: e.target.value })}
+                    className="text-xs font-mono text-[#bb86fc] p-2 bg-black/40 border border-[#333] rounded outline-none focus:border-[#bb86fc]/50"
+                    placeholder="loc_..."
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><Package size={10} /> Inventory</label>
-                  <div className="flex flex-wrap gap-1">
-                    {entity.inventory && entity.inventory.length > 0 ? entity.inventory.map(item => (
-                      <span key={item} className="text-[9px] font-mono bg-[#bb86fc]/10 text-[#bb86fc] border border-[#bb86fc]/20 px-2 py-0.5 rounded uppercase">{item}</span>
-                    )) : <span className="text-xs text-[#444] italic">Empty</span>}
-                  </div>
+                  <label className="text-[10px] uppercase font-bold text-[#444] flex items-center gap-2"><Package size={10} /> Inventory (IDs, comma-separated)</label>
+                  <input 
+                    type="text"
+                    value={meta?.inventory?.join(', ') || ''}
+                    onChange={(e) => setMeta({ ...meta, inventory: e.target.value.split(',').map((s: string) => s.trim()).filter((s: string) => s !== '') })}
+                    className="text-xs font-mono text-[#bb86fc] p-2 bg-black/40 border border-[#333] rounded outline-none focus:border-[#bb86fc]/50"
+                    placeholder="item_1, item_2..."
+                  />
                 </div>
               </>
             )}
 
             {entity?.type === 'Location' && (
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><MapPin size={10} /> Connected Locations</label>
-                <div className="flex flex-wrap gap-1">
-                  {entity.connected_locations && entity.connected_locations.length > 0 ? entity.connected_locations.map(loc => (
-                    <span key={loc} className="text-[9px] font-mono bg-green-400/10 text-green-400 border border-green-400/20 px-2 py-0.5 rounded uppercase">{loc}</span>
-                  )) : <span className="text-xs text-[#444] italic">None</span>}
-                </div>
+                <label className="text-[10px] uppercase font-bold text-[#444] flex items-center gap-2"><MapPin size={10} /> Connected Locations (IDs, comma-separated)</label>
+                <input 
+                  type="text"
+                  value={meta?.connected_locations?.join(', ') || ''}
+                  onChange={(e) => setMeta({ ...meta, connected_locations: e.target.value.split(',').map((s: string) => s.trim()).filter((s: string) => s !== '') })}
+                  className="text-xs font-mono text-green-400 p-2 bg-black/40 border border-[#333] rounded outline-none focus:border-green-400/50"
+                  placeholder="loc_1, loc_2..."
+                />
               </div>
             )}
 
             {entity?.type === 'Scene' && (
               <>
                 <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><Hash size={10} /> Current Gametime</label>
-                  <div className="text-xs font-mono text-[#03dac6] p-2 bg-black/40 border border-[#333] rounded">
-                    {(entity as any).current_gametime !== null ? (entity as any).current_gametime : 'Inactive'}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-[10px] uppercase font-bold text-[#666] flex items-center gap-2"><ListIcon size={10} /> Events</label>
-                  <div className="text-xs text-[#444] italic">
-                    {(entity as any).events?.length || 0} events recorded.
-                  </div>
+                  <label className="text-[10px] uppercase font-bold text-[#444] flex items-center gap-2"><Hash size={10} /> Current Gametime (seconds)</label>
+                  <input 
+                    type="number"
+                    value={meta?.current_gametime || 0}
+                    onChange={(e) => setMeta({ ...meta, current_gametime: parseInt(e.target.value) || null })}
+                    className="text-xs font-mono text-[#03dac6] p-2 bg-black/40 border border-[#333] rounded outline-none focus:border-[#03dac6]/50"
+                  />
                 </div>
               </>
             )}
-          </div>
-          
-          <div className="text-[9px] text-[#333] mt-4 border-t border-[#222] pt-4 italic">
-            Note: Metadata fields are read-only in this view. Edit the frontmatter in the content body to update them.
           </div>
         </div>
       </div>
@@ -308,4 +315,3 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
     </div>
   );
 };
-

@@ -10,6 +10,7 @@ interface AppContextType {
   loadEntities: (filter?: string) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   saveEntityMarkdown: (id: string, markdown: string) => Promise<void>;
+  saveEntity: (id: string, data: any) => Promise<void>;
   messages: Message[];
   activeScene: Scene | undefined;
 }
@@ -85,6 +86,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const saveEntity = async (id: string, data: any) => {
+    try {
+      const response = await fetch(`/sidestage/entities/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!response.ok) throw new Error('Failed to save entity');
+      await loadEntities();
+    } catch (error) {
+      console.error('Error saving entity:', error);
+    }
+  };
+
   useEffect(() => {
     loadScenes();
     loadEntities();
@@ -134,6 +149,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       loadEntities,
       sendMessage,
       saveEntityMarkdown,
+      saveEntity,
       messages,
       activeScene
     }}>
