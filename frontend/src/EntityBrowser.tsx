@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
-import { X, Search } from 'lucide-react';
+import { Search, Save, FileText, User, MapPin, Package, Film } from 'lucide-react';
 
 export const EntityModal: React.FC<{ entityId: string | null, onClose: () => void }> = ({ entityId, onClose }) => {
   const [markdown, setMarkdown] = useState('Loading...');
   const { entities } = useAppContext();
   const entity = entities.find(e => e.id === entityId);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (entityId) {
       fetch(`/entities/${entityId}/markdown`)
         .then(res => res.json())
@@ -27,7 +27,7 @@ export const EntityModal: React.FC<{ entityId: string | null, onClose: () => voi
             <h2 className="text-2xl font-bold text-[#bb86fc]">{entity.name}</h2>
             <div className="text-[10px] uppercase tracking-widest text-[#03dac6] font-bold mt-1">{entity.type || (entity as any).entity_type}</div>
           </div>
-          <button onClick={onClose} className="text-[#666] hover:text-white transition-colors"><X size={24} /></button>
+          <button onClick={onClose} className="text-[#666] hover:text-white transition-colors">Close</button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 bg-black">
           <pre className="font-mono text-sm leading-relaxed text-gray-300 whitespace-pre-wrap">{markdown}</pre>
@@ -37,11 +37,80 @@ export const EntityModal: React.FC<{ entityId: string | null, onClose: () => voi
   );
 };
 
-export const EntityBrowser: React.FC = () => {
-  const { entities, loadEntities } = useAppContext();
-  const [filter, setFilter] = useState('all');
+interface EntityEditorProps {
+  entityId: string | null;
+}
+
+export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
+  const { entities, saveEntityMarkdown } = useAppContext();
+  const [markdown, setMarkdown] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const entity = entities.find(e => e.id === entityId);
+
+  useEffect(() => {
+    if (entityId) {
+      setMarkdown('Loading...');
+      fetch(`/entities/${entityId}/markdown`)
+        .then(res => res.json())
+        .then(data => setMarkdown(data.markdown))
+        .catch(err => setMarkdown('Error loading markdown: ' + err.message));
+    } else {
+      setMarkdown('');
+    }
+  }, [entityId]);
+
+  const handleSave = async () => {
+    if (!entityId) return;
+    setIsSaving(true);
+    await saveEntityMarkdown(entityId, markdown);
+    setIsSaving(false);
+  };
+
+  if (!entityId) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-[#444] italic bg-black/20">
+        Select an entity to edit...
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden bg-[#1a1a1a]">
+      <div className="flex justify-between items-center p-4 border-b border-[#333] bg-black/40">
+        <div className="flex items-center gap-3">
+          <FileText size={18} className="text-[#bb86fc]" />
+          <div>
+            <h3 className="font-bold text-sm text-[#e0e0e0]">{entity?.name}</h3>
+            <p className="text-[10px] text-[#666] uppercase tracking-widest font-bold">Editing {entity?.type}</p>
+          </div>
+        </div>
+        <button 
+          onClick={handleSave}
+          disabled={isSaving}
+          className="flex items-center gap-2 bg-[#bb86fc] text-black px-4 py-1.5 rounded text-xs font-bold hover:opacity-90 transition-all disabled:opacity-50"
+        >
+          <Save size={14} /> {isSaving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      <textarea
+        value={markdown}
+        onChange={(e) => setMarkdown(e.target.value)}
+        className="flex-1 p-6 bg-transparent text-gray-300 font-mono text-sm outline-none resize-none leading-relaxed scrollbar-thin"
+        placeholder="Standardized Markdown Representation..."
+      />
+    </div>
+  );
+};
+
+interface EntityBrowserProps {
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}
+
+export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSelect }) => {
+  const { entities } = useAppContext();
   const [search, setSearch] = useState('');
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [filter, setFilter] = useState('all');
 
   const filteredEntities = entities.filter(e => {
     const matchesFilter = filter === 'all' || e.type === filter;
@@ -50,75 +119,76 @@ export const EntityBrowser: React.FC = () => {
     return matchesFilter && (nameMatch || descMatch);
   });
 
-  const handleSync = async (type: 'import' | 'export') => {
-    try {
-      const response = await fetch(`/entities/${type}`, { method: 'POST' });
-      const data = await response.json();
-      console.log(`${type} success:`, data.message);
-      if (type === 'import') await loadEntities();
-    } catch (error) {
-      console.error(`${type} failed:`, error);
+  const getEntityIcon = (type: string) => {
+    switch (type) {
+      case 'NPC': return <User size={14} className="text-orange-400" />;
+      case 'Location': return <MapPin size={14} className="text-green-400" />;
+      case 'Item': return <Package size={14} className="text-blue-400" />;
+      case 'Scene': return <Film size={14} className="text-purple-400" />;
+      default: return <FileText size={14} />;
     }
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden p-4 gap-4">
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-black p-4 rounded-lg border border-[#333]">
-        <div className="flex gap-2">
-          {['all', 'NPC', 'Location', 'Item'].map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "px-4 py-1.5 text-xs rounded font-bold border transition-all",
-                filter === f 
-                  ? "bg-[#bb86fc] border-[#bb86fc] text-black" 
-                  : "bg-[#2c2c2c] border-[#333] text-[#666] hover:border-[#bb86fc]"
-              )}
-            >
-              {f === 'all' ? 'All' : f + 's'}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex gap-4 items-center flex-1 max-w-md">
-          <div className="relative flex-1">
+    <div className="flex-1 flex overflow-hidden">
+      {/* Left List */}
+      <div className="w-1/2 flex flex-col border-r border-[#333] bg-black/20">
+        <div className="p-4 border-b border-[#333] flex flex-col gap-3">
+          <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#666]" />
             <input 
               type="text" 
-              placeholder="Search entities..." 
+              placeholder="Search Entities..." 
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded px-9 py-1.5 text-xs outline-none focus:border-[#bb86fc]"
+              className="w-full bg-[#1a1a1a] border border-[#333] rounded px-9 py-2 text-xs outline-none focus:border-[#bb86fc]"
             />
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => handleSync('import')} className="text-[10px] uppercase font-bold text-[#03dac6] hover:opacity-80 transition-opacity">Import</button>
-            <button onClick={() => handleSync('export')} className="text-[10px] uppercase font-bold text-[#666] hover:text-white transition-colors">Export</button>
+          <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+            {['all', 'NPC', 'Location', 'Item', 'Scene'].map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "px-3 py-1 text-[10px] rounded font-bold uppercase tracking-tighter border transition-all whitespace-nowrap",
+                  filter === f 
+                    ? "bg-[#bb86fc]/20 border-[#bb86fc] text-[#bb86fc]" 
+                    : "bg-transparent border-[#333] text-[#666] hover:border-[#444]"
+                )}
+              >
+                {f === 'all' ? 'All' : f + 's'}
+              </button>
+            ))}
           </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin">
+          {filteredEntities.map(entity => (
+            <button
+              key={entity.id}
+              onClick={() => onSelect(entity.id)}
+              className={cn(
+                "w-full text-left p-4 border-b border-[#222] flex flex-col gap-1 transition-colors hover:bg-white/5",
+                selectedId === entity.id && "bg-[#bb86fc]/10 border-l-4 border-l-[#bb86fc]"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {getEntityIcon(entity.type)}
+                <span className="font-bold text-sm">{entity.name}</span>
+              </div>
+              <p className="text-[11px] text-gray-500 line-clamp-1 italic">{entity.description}</p>
+            </button>
+          ))}
+          {filteredEntities.length === 0 && (
+            <div className="py-20 text-center text-[#444] italic text-sm">
+              No results found...
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pr-2 scrollbar-thin">
-        {filteredEntities.map(entity => (
-          <div 
-            key={entity.id}
-            onClick={() => setSelectedEntityId(entity.id)}
-            className="bg-[#1e1e1e] border border-[#333] rounded-lg p-4 cursor-pointer hover:border-[#bb86fc] hover:-translate-y-1 transition-all flex flex-col gap-2 group"
-          >
-            <div className="text-[9px] uppercase font-bold tracking-widest text-[#03dac6]">{entity.type}</div>
-            <h4 className="font-bold group-hover:text-[#bb86fc] transition-colors">{entity.name}</h4>
-            <p className="text-xs text-[#888] line-clamp-3 leading-relaxed italic">"{entity.description}"</p>
-          </div>
-        ))}
-        {filteredEntities.length === 0 && (
-          <div className="col-span-full py-20 text-center text-[#666]">
-            No entities found matching your criteria.
-          </div>
-        )}
-      </div>
-
-      <EntityModal entityId={selectedEntityId} onClose={() => setSelectedEntityId(null)} />
+      {/* Right Editor */}
+      <EntityEditor entityId={selectedId} />
     </div>
   );
 };

@@ -31,10 +31,10 @@ export const Layout: React.FC<{ children: React.ReactNode, activeTab: string, se
         <h1 className="text-xl font-bold text-[#bb86fc]">Sidestage</h1>
         <nav className="flex gap-4">
           <button 
-            onClick={() => setActiveTab('chat')}
-            className={cn("text-sm transition-colors", activeTab === 'chat' ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
+            onClick={() => setActiveTab('scenes')}
+            className={cn("text-sm transition-colors", activeTab === 'scenes' ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
           >
-            <div className="flex items-center gap-1"><MessageSquare size={16} /> Chat</div>
+            <div className="flex items-center gap-1"><MessageSquare size={16} /> Scenes</div>
           </button>
           <button 
             onClick={() => setActiveTab('entities')}

@@ -169,6 +169,31 @@ class SidestageOrchestrator:
                 raise HTTPException(status_code=404, detail="Entity not found")
             return {"markdown": entity_to_markdown(entity)}
 
+        class EntityMarkdownUpdateRequest(BaseModel):
+            markdown: str
+
+        @self.fastapi_app.post("/entities/{entity_id}/markdown")
+        async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
+            try:
+                entity = markdown_to_entity(request.markdown)
+                # Ensure the ID matches the URL
+                entity.id = entity_id
+                
+                if isinstance(entity, NPC):
+                    self.storage.update_npc(entity)
+                elif isinstance(entity, Location):
+                    self.storage.update_location(entity)
+                elif isinstance(entity, Item):
+                    self.storage.update_item(entity)
+                elif isinstance(entity, Scene):
+                    self.storage.update_scene(entity)
+                
+                await self.manager.broadcast({"type": "entities_updated"})
+                return {"status": "ok"}
+            except Exception as e:
+                logger.error(f"Error updating entity {entity_id}: {e}")
+                raise HTTPException(status_code=400, detail=str(e))
+
         @self.fastapi_app.post("/entities/export")
         async def export_entities():
             logger.info("Exporting entities...")
