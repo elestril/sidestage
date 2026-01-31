@@ -1,11 +1,16 @@
-from typing import List, Optional
+from typing import List, Optional, Callable, Any
 import json
 from sidestage.storage import Storage
 from sidestage.models import NPC, Location, Item
 
 class WorldTools:
-    def __init__(self, storage: Storage):
+    def __init__(self, storage: Storage, on_change: Optional[Callable[[], Any]] = None):
         self.storage = storage
+        self.on_change = on_change
+
+    def _notify_change(self):
+        if self.on_change:
+            self.on_change()
 
     def create_npc(self, name: str, description: str, location_id: Optional[str] = None) -> str:
         """
@@ -24,6 +29,7 @@ class WorldTools:
         
         npc = NPC(id=entity_id, name=name, description=description, location_id=location_id)
         self.storage.add_npc(npc)
+        self._notify_change()
         return npc.model_dump_json()
 
     def update_npc(self, npc_id: str, name: Optional[str] = None, description: Optional[str] = None, location_id: Optional[str] = None) -> str:
@@ -51,6 +57,7 @@ class WorldTools:
             npc.location_id = location_id
             
         self.storage.update_npc(npc)
+        self._notify_change()
         return npc.model_dump_json()
 
     def get_npc(self, npc_id: str) -> str:
@@ -93,6 +100,7 @@ class WorldTools:
         entity_id = f"loc_{str(uuid.uuid4())[:8]}"
         loc = Location(id=entity_id, name=name, description=description)
         self.storage.add_location(loc)
+        self._notify_change()
         return loc.model_dump_json()
 
     def update_location(self, location_id: str, name: Optional[str] = None, description: Optional[str] = None) -> str:
@@ -117,6 +125,7 @@ class WorldTools:
             loc.description = description
             
         self.storage.update_location(loc)
+        self._notify_change()
         return loc.model_dump_json()
 
     def list_locations(self) -> str:
@@ -144,6 +153,7 @@ class WorldTools:
         entity_id = f"item_{str(uuid.uuid4())[:8]}"
         item = Item(id=entity_id, name=name, description=description)
         self.storage.add_item(item)
+        self._notify_change()
         return item.model_dump_json()
 
     def update_item(self, item_id: str, name: Optional[str] = None, description: Optional[str] = None) -> str:
@@ -168,6 +178,7 @@ class WorldTools:
             item.description = description
             
         self.storage.update_item(item)
+        self._notify_change()
         return item.model_dump_json()
 
     def list_items(self) -> str:

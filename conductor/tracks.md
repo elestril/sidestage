@@ -8,3 +8,5 @@ This file tracks all major tracks for the project. Each track has its own detail
   *Link: [./tracks/core_platform_20260128/](./tracks/core_platform_20260128/)*
 - [x] **Track: Entity Management - Navbar, Rendering, Browser, and Import/Export**
   *Link: [./tracks/entity_management_20260130/](./tracks/entity_management_20260130/)*
+- [x] **Track: Universal Console - Markdown, Widgets, Splitter, and Sync**
+  *Link: [./tracks/universal_console_20260130/](./tracks/universal_console_20260130/)*

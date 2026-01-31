@@ -18,27 +18,39 @@
         </header>
         <div id="main-content">
             <main id="chat-container">
-                <div id="messages"></div>
-                <form id="chat-form">
-                    <input type="text" id="user-input" placeholder="Type your message..." autocomplete="off">
-                    <button type="submit">Send</button>
-                </form>
+                <div class="chat-widget">
+                    <div id="main-messages" class="messages-display"></div>
+                    <form id="chat-form" class="chat-form">
+                        <input type="text" id="user-input" class="user-input" placeholder="Type your message..." autocomplete="off">
+                        <button type="submit">Send</button>
+                    </form>
+                </div>
             </main>
             <main id="entities-container" style="display: none;">
-                <div class="toolbar">
-                    <div class="filters">
-                        <button class="filter-btn active" data-filter="all">All</button>
-                        <button class="filter-btn" data-filter="NPC">NPCs</button>
-                        <button class="filter-btn" data-filter="Location">Locations</button>
-                        <button class="filter-btn" data-filter="Item">Items</button>
+                <div id="entities-browser">
+                    <div class="toolbar">
+                        <div class="filters">
+                            <button class="filter-btn active" data-filter="all">All</button>
+                            <button class="filter-btn" data-filter="NPC">NPCs</button>
+                            <button class="filter-btn" data-filter="Location">Locations</button>
+                            <button class="filter-btn" data-filter="Item">Items</button>
+                        </div>
+                        <div class="actions">
+                            <button id="import-btn">Import</button>
+                            <button id="export-btn">Export</button>
+                        </div>
                     </div>
-                    <div class="actions">
-                        <button id="import-btn">Import</button>
-                        <button id="export-btn">Export</button>
+                    <div id="entity-list">
+                        <!-- Entities will be rendered here -->
                     </div>
                 </div>
-                <div id="entity-list">
-                    <!-- Entities will be rendered here -->
+                <div id="splitter"></div>
+                <div id="entities-chat" class="chat-widget mini-chat">
+                    <div id="entities-messages" class="messages-display"></div>
+                    <form class="chat-form">
+                        <input type="text" class="user-input" placeholder="Ask about entities..." autocomplete="off">
+                        <button type="submit">Send</button>
+                    </form>
                 </div>
             </main>
         </div>
@@ -54,6 +66,6 @@
             </div>
         </div>
     </div>
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>

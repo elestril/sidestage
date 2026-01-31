@@ -10,13 +10,40 @@ from agno.models.base import Model
 from agno.models.llama_cpp import LlamaCpp
 from agno.models.message import Message
 from agno.os import AgentOS
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
+import json
+import asyncio
 
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
 from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item
 
 logger = logging.getLogger(__name__)
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket client connected. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"WebSocket client disconnected. Total: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        logger.info(f"Broadcasting message: {message.get('type')}")
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to a client: {e}")
+                # We don't remove here to avoid modifying list during iteration
+                # Disconnect will handle it or next broadcast will fail too
 
 class SidestageConfig(BaseModel):
     # LLM Configuration
@@ -47,7 +74,22 @@ class SidestageOrchestrator:
         # Single database for everything
         self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
         self.storage = Storage(db=self.db)
-        self.world_tools = WorldTools(storage=self.storage)
+        self.manager = ConnectionManager()
+
+        # Define a callback for WorldTools to notify of changes
+        def on_world_change():
+            if self.manager:
+                # We need to bridge sync tool call to async broadcast
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self.manager.broadcast({"type": "entities_updated"}))
+                    else:
+                        asyncio.run(self.manager.broadcast({"type": "entities_updated"}))
+                except Exception as e:
+                    logger.error(f"Error broadcasting world change: {e}")
+
+        self.world_tools = WorldTools(storage=self.storage, on_change=on_world_change)
         self.model = self.get_llm_model()
         self.agent = self.create_agent()
 
@@ -63,6 +105,16 @@ class SidestageOrchestrator:
         self.fastapi_app = self.app.get_app()
 
         # Add custom endpoints
+        @self.fastapi_app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            await self.manager.connect(websocket)
+            try:
+                while True:
+                    # Keep connection alive, we mostly use it for server-to-client broadcast
+                    await websocket.receive_text()
+            except WebSocketDisconnect:
+                self.manager.disconnect(websocket)
+
         @self.fastapi_app.get("/entities")
         async def list_entities():
             entities = self.storage.list_all_entities()
@@ -79,7 +131,6 @@ class SidestageOrchestrator:
             entities = self.storage.list_all_entities()
             entity = next((e for e in entities if e.id == entity_id), None)
             if not entity:
-                from fastapi import HTTPException
                 raise HTTPException(status_code=404, detail="Entity not found")
             return {"markdown": entity_to_markdown(entity)}
 
@@ -126,7 +177,47 @@ class SidestageOrchestrator:
                     logger.error(f"Error importing {md_file.name}: {e}")
             
             logger.info(f"Successfully imported {count} entities.")
+            # Broadcast update
+            await self.manager.broadcast({"type": "entities_updated"})
             return {"message": f"Imported {count} entities from {entities_dir}", "count": count}
+
+        class ChatRequest(BaseModel):
+            message: str
+
+        @self.fastapi_app.post("/chat")
+        async def chat_endpoint(request: ChatRequest):
+            message = request.message
+            logger.info(f"Chat request received: {message[:20]}...")
+            # Broadcast user message
+            await self.manager.broadcast({
+                "type": "chat_message",
+                "text": message,
+                "sender": "user"
+            })
+            
+            # Run agent asynchronously
+            response = await self.agent.arun(message, stream=False)
+            response_content = response.content if hasattr(response, 'content') else str(response)
+
+            # Detect entities in response to send widgets
+            widget = None
+            entities = self.storage.list_all_entities()
+            for e in entities:
+                if e.id in response_content:
+                    widget = e.model_dump()
+                    widget["type"] = "entity"
+                    widget["entity_type"] = e.__class__.__name__
+                    break # Just one widget for now
+
+            # Broadcast agent message
+            await self.manager.broadcast({
+                "type": "chat_message",
+                "text": response_content,
+                "sender": "agent",
+                "widget": widget
+            })
+            
+            return {"status": "ok"}
 
         # Mount frontend static files
         self._mount_frontend()
