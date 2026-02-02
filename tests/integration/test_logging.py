@@ -20,15 +20,17 @@ import logging
 import sys
 import os
 from pathlib import Path
+from unittest.mock import patch
 # Ensure src is in path
 sys.path.insert(0, "{src_dir}")
 from sidestage.orchestrator import SidestageOrchestrator
 
-# Initialize orchestrator with a custom base_dir
-orchestrator = SidestageOrchestrator(
-    campaign_name="{campaign_name}",
-    base_dir=Path("{tmp_path}") / ".sidestage"
-)
+with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
+    # Initialize orchestrator with a custom base_dir
+    orchestrator = SidestageOrchestrator(
+        campaign_name="{campaign_name}",
+        base_dir=Path("{tmp_path}") / ".sidestage"
+    )
 
 logger = logging.getLogger("test_logger")
 logger.info("Integration test message in campaign dir")

@@ -15,20 +15,23 @@ export interface Scene {
   body: string;
   current_gametime: number | null;
   events: string[];
-  messages: Message[];
+  messages: ChatMessage[];
 }
 
-export interface Message {
-  role: 'user' | 'assistant';
-  content: string;
+export interface ChatMessage {
+  id: string;
+  actor: string;
+  message: string;
+  scene_id: string;
+  gametime: number;
+  walltime: string;
+  widget?: any;
 }
 
 export interface ChatMessageBroadcast {
   type: 'chat_message';
-  text: string;
-  sender: 'user' | 'agent';
+  message: ChatMessage;
   scene_id: string;
-  widget?: any;
 }
 
 export interface EntitiesUpdatedBroadcast {

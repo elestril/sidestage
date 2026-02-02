@@ -1,0 +1,103 @@
+from typing import List, Optional, Dict, Any, Union, Literal
+from pydantic import BaseModel, Field, model_validator
+from pydantic_core import PydanticCustomError
+
+# --- Domain Models ---
+
+class Entity(BaseModel):
+    name: str
+    body: str
+    id: str = Field(..., description="Unique identifier for the entity")
+
+class Item(Entity):
+    pass
+
+class Location(Entity):
+    connected_locations: List[str] = Field(default_factory=list, description="IDs of connected locations")
+
+class NPC(Entity):
+    location_id: Optional[str] = Field(default=None, description="ID of the location where the NPC is currently present")
+    inventory: List[str] = Field(default_factory=list, description="IDs of items in possession")
+
+class Event(Entity):
+    scene_id: str
+    gametime: int = Field(..., description="Gametime in seconds when the event occurred")
+    walltime: str = Field(..., description="ISO formatted walltime when the event occurred")
+
+class ChatMessage(Event):
+    actor: str = Field(..., description="ID of the NPC or 'user'/'agent' who sent the message")
+    message: str = Field(..., description="The content of the chat message")
+    widget: Optional[Dict[str, Any]] = Field(default=None, description="Optional interactive widget data")
+
+    @model_validator(mode='before')
+    @classmethod
+    def handle_legacy_format(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "role" in data and "content" in data:
+            # Migration logic for legacy messages
+            import uuid
+            from datetime import datetime
+            return {
+                "id": f"msg_legacy_{str(uuid.uuid4())[:8]}",
+                "name": "Legacy Message",
+                "body": data["content"],
+                "scene_id": "unknown", # We don't know the scene from the message dict alone
+                "gametime": 0,
+                "walltime": datetime.now().isoformat(),
+                "actor": "user" if data["role"] == "user" else "agent",
+                "message": data["content"]
+            }
+        return data
+
+class SceneData(Entity):
+    current_gametime: Optional[int] = Field(default=None, description="Current gametime in seconds. None if inactive.")
+    location_id: Optional[str] = Field(default=None, description="Primary location of the scene")
+    events: List[str] = Field(default_factory=list, description="IDs of events in this scene")
+    messages: List[ChatMessage] = Field(default_factory=list, description="List of messages in this scene")
+
+
+# --- API Request/Response Models ---
+
+class WebSocketMessage(BaseModel):
+    type: str
+    # Other fields are flexible depending on type, but we can define common ones
+    text: Optional[str] = None
+    sender: Optional[str] = None
+    scene_id: Optional[str] = None
+    widget: Optional[Dict[str, Any]] = None
+    entity_id: Optional[str] = None
+    body: Optional[str] = None
+
+class EntityListResponse(BaseModel):
+    # Just a list of dicts with an added "type" field
+    # We can use a Union of models if we want strict typing, but for list view usually lightweight is fine.
+    # The current implementation returns model_dump() + type string.
+    pass
+
+class SceneCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    current_gametime: Optional[int] = None
+
+class EntityMarkdownResponse(BaseModel):
+    markdown: str
+
+class EntityMarkdownUpdateRequest(BaseModel):
+    markdown: str
+
+class StatusResponse(BaseModel):
+    status: Literal["ok", "error"]
+    message: Optional[str] = None
+
+class ExportResponse(BaseModel):
+    message: str
+
+class ImportResponse(BaseModel):
+    message: str
+
+class ChatRequest(BaseModel):
+    message: str
+    scene_id: str = "campaign_planning"
+
+class ChatResponse(BaseModel):
+    user_message: ChatMessage
+    agent_message: ChatMessage

@@ -54,19 +54,19 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
       </div>
 
       <div className="flex-1 overflow-y-auto mb-4 pr-2 flex flex-col gap-4 scrollbar-thin scrollbar-thumb-[#333]">
-        {messages.map((msg: any, i) => (
+        {messages.map((msg, i) => (
           <div 
             key={i} 
             className={cn(
               "max-w-[85%] p-3 rounded-xl leading-relaxed break-words flex flex-col gap-2",
-              msg.role === 'user' 
+              msg.actor === 'user' 
                 ? "self-end bg-[#bb86fc] text-black" 
                 : "self-start bg-[#2c2c2c] text-[#e0e0e0] border border-[#333]"
             )}
           >
             <div 
               className="prose prose-invert prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: renderContent(msg.content) }} 
+              dangerouslySetInnerHTML={{ __html: renderContent(msg.message) }} 
             />
             {msg.widget && msg.widget.type === 'entity' && (
               <div 

@@ -4,13 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/sidestage/',
   plugins: [
     react(),
     tailwindcss(),
   ],
   server: {
     proxy: {
-      '/sidestage': {
+      '/v1': {
         target: 'http://localhost:8000',
         ws: true
       },

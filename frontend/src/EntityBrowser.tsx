@@ -14,7 +14,7 @@ export const EntityModal: React.FC<{ entityId: string | null, onClose: () => voi
 
   useEffect(() => {
     if (entityId) {
-      fetch(`/sidestage/entities/${entityId}/markdown`)
+      fetch(`/v1/entities/${entityId}/markdown`)
         .then(res => res.json())
         .then(data => setMarkdown(data.markdown))
         .catch(err => setMarkdown('Error loading markdown: ' + err.message));
@@ -246,7 +246,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
 
   const handleSync = async (type: 'import' | 'export') => {
     try {
-      const response = await fetch(`/sidestage/entities/${type}`, { method: 'POST' });
+      const response = await fetch(`/v1/entities/${type}`, { method: 'POST' });
       if (response.ok) {
         if (type === 'import') await loadEntities();
       }

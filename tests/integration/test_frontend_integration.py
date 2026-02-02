@@ -3,6 +3,7 @@ import os
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
 from pathlib import Path
+from unittest.mock import patch
 
 # Skip if backend dependencies like llama_cpp are problematic, but here we use TestClient so it's fine 
 # as long as we mock or if the real one works.
@@ -22,33 +23,34 @@ class TestFrontendIntegration:
         # The orchestrator uses __file__ relative path. 
         # Since we are importing SidestageOrchestrator, its __file__ should be correct relative to the project.
         
-        self.orchestrator = SidestageOrchestrator(
-            campaign_name=self.campaign_name,
-            base_dir=tmp_path
-        )
+        with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
+            self.orchestrator = SidestageOrchestrator(
+                campaign_name=self.campaign_name,
+                base_dir=tmp_path
+            )
         self.client = TestClient(self.orchestrator.fastapi_app)
 
     def test_serve_frontend(self):
         """
-        Test that the root URL serves the frontend index.html
+        Test that the /sidestage/ URL serves the frontend index.html
         """
-        response = self.client.get("/")
+        response = self.client.get("/sidestage/", follow_redirects=True)
         assert response.status_code == 200
-        # Check for some content we expect in the built index.html
-        # Since it's a minified React app, we might just look for <html or <div or "Sidestage"
-        # The title or some text from page.tsx should be there.
         assert "<!DOCTYPE html>" in response.text or "<html" in response.text
-        # We can also check for a specific JS file reference or "Greeting, Archivist" if it's rendered (it's client side so maybe not in static HTML)
-        # But Next.js static export usually pre-renders initial state.
-        # "Greeting, Archivist" is in the initial state of useState, so it might be in the HTML if Next.js pre-rendered it.
-        # But "use client" component might not be fully pre-rendered if it depends on browser APIs.
-        # However, we definitely expect HTML.
+
+    def test_root_redirect(self):
+        """
+        Test that root URL redirects to /sidestage
+        """
+        response = self.client.get("/", follow_redirects=False)
+        assert response.status_code == 307 or response.status_code == 302
+        assert response.headers["location"] == "/sidestage"
 
     def test_api_access(self):
         """
         Test that the API endpoints are still accessible and not shadowed by the frontend mount.
         """
-        response = self.client.get("/agents")
+        response = self.client.get("/v1/entities")
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/json"
         agents = response.json()
@@ -57,13 +59,11 @@ class TestFrontendIntegration:
 
     def test_static_asset(self):
         """
-        Test that a sub-resource like /favicon.ico or a built static file is served.
+        Test that a sub-resource like /sidestage/favicon.ico or a built static file is served.
         """
-        # We don't know the exact hash of vite files, but /favicon.ico is common or check assets
-        response = self.client.get("/favicon.ico")
+        response = self.client.get("/sidestage/favicon.ico")
         if response.status_code == 200:
             pass # Good
         else:
-            # Check for vite assets? Just ensure we don't 404 on the root
-            response = self.client.get("/")
+            response = self.client.get("/sidestage/")
             assert response.status_code == 200

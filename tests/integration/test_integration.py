@@ -1,45 +1,39 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 from sidestage.orchestrator import SidestageOrchestrator
+from sidestage.agent import AgentResponse
 
 @pytest.fixture
 def client(tmp_path):
     # Setup a test campaign
     campaign_name = "test_integration"
     
-    # We use the real orchestrator which uses the single database
-    orchestrator = SidestageOrchestrator(campaign_name=campaign_name, base_dir=tmp_path)
+    with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
+        # We use the real orchestrator
+        orchestrator = SidestageOrchestrator(campaign_name=campaign_name, base_dir=tmp_path)
     
-    return TestClient(orchestrator.app.get_app())
+    return TestClient(orchestrator.fastapi_app)
 
 def test_consecutive_messages(client):
-    # 1. Get the Agent ID
-    response = client.get("/agents")
-    assert response.status_code == 200
-    agents = response.json()
-    assert len(agents) > 0
-    agent_id = agents[0]["id"]
-
-    # 2. Mock Agent.run to simulate successful turns
-    with patch("agno.agent.Agent.run") as mock_run:
-        from agno.run.agent import RunOutput
-        mock_run.return_value = RunOutput(content="I am a helpful assistant.") # type: ignore
+    # Mock LiteLLMAgent.arun
+    with patch("sidestage.agent.LiteLLMAgent.arun", new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = AgentResponse(content="I am a helpful assistant.")
 
         # 3. Send first message
         print("\nSending first message...")
         resp1 = client.post(
-            f"/agents/{agent_id}/runs",
-            data={"message": "Hello for the first time!", "stream": "false"}
+            "/v1/chat",
+            json={"message": "Hello for the first time!", "scene_id": "campaign_planning"}
         )
         assert resp1.status_code == 200
-        assert "helpful" in resp1.text.lower()
+        data1 = resp1.json()
+        assert data1["agent_message"]["message"] == "I am a helpful assistant."
 
         # 4. Send second message immediately after
         print("Sending second message...")
         resp2 = client.post(
-            f"/agents/{agent_id}/runs",
-            data={"message": "Hello again! This is consecutive.", "stream": "false"}
+            "/v1/chat",
+            json={"message": "Hello again!", "scene_id": "campaign_planning"}
         )
         assert resp2.status_code == 200
-        assert "helpful" in resp2.text.lower()

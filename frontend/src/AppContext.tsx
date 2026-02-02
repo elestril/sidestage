@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { Scene, Entity, Message, WebSocketMessage } from './types';
+import type { Scene, Entity, ChatMessage, WebSocketMessage } from './types';
 
 interface AppContextType {
   scenes: Scene[];
@@ -13,7 +13,7 @@ interface AppContextType {
   saveEntity: (id: string, data: any) => Promise<void>;
   syncSocketMessage: (data: any) => void;
   onSync: (callback: (data: any) => void) => () => void;
-  messages: Message[];
+  messages: ChatMessage[];
   activeScene: Scene | undefined;
 }
 
@@ -23,11 +23,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [currentSceneId, setCurrentSceneId] = useState('campaign_planning');
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const loadScenes = useCallback(async () => {
     try {
-      const response = await fetch('/sidestage/scenes');
+      const response = await fetch('/v1/scenes');
       if (response.ok) {
         const data = await response.json();
         setScenes(data);
@@ -39,7 +39,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadEntities = useCallback(async () => {
     try {
-      const response = await fetch('/sidestage/entities');
+      const response = await fetch('/v1/entities');
       if (response.ok) {
         const data = await response.json();
         setEntities(data);
@@ -51,7 +51,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadMessages = useCallback(async (sceneId: string) => {
     try {
-      const response = await fetch(`/sidestage/scenes/${sceneId}/messages`);
+      const response = await fetch(`/v1/scenes/${sceneId}/messages`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data);
@@ -63,7 +63,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendMessage = async (text: string) => {
     try {
-      const response = await fetch('/sidestage/chat', {
+      const response = await fetch('/v1/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, scene_id: currentSceneId })
@@ -76,7 +76,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveEntityMarkdown = async (id: string, markdown: string) => {
     try {
-      const response = await fetch(`/sidestage/entities/${id}/markdown`, {
+      const response = await fetch(`/v1/entities/${id}/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markdown })
@@ -90,7 +90,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveEntity = async (id: string, data: any) => {
     try {
-      const response = await fetch(`/sidestage/entities/${id}`, {
+      const response = await fetch(`/v1/entities/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -127,7 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const s = new WebSocket(`${protocol}//${window.location.host}/sidestage/ws`);
+    const s = new WebSocket(`${protocol}//${window.location.host}/v1/ws`);
 
     s.onopen = () => {
       console.log('WebSocket connection established');
@@ -141,11 +141,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           loadEntities();
         } else if (data.type === 'chat_message') {
           if (data.scene_id === currentSceneId) {
-            setMessages(prev => [...prev, { 
-              role: data.sender === 'user' ? 'user' : 'assistant', 
-              content: data.text,
-              widget: data.widget 
-            } as any]);
+            setMessages(prev => [...prev, data.message]);
           }
         } else if (data.type === 'scene_updated') {
           loadScenes();

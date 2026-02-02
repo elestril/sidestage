@@ -14,7 +14,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     const name = prompt('Enter scene name:');
     if (!name) return;
     try {
-      const response = await fetch('/sidestage/scenes', {
+      const response = await fetch('/v1/scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })

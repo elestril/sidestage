@@ -1,12 +1,10 @@
 import pytest
-from agno.db.sqlite import SqliteDb
 from sidestage.tools import WorldTools
 from sidestage.storage import Storage
 
 def test_world_tools_wrapper(tmp_path):
     """Test the WorldTools wrapper logic separately."""
-    db = SqliteDb(db_file=str(tmp_path / "world.db"))
-    storage = Storage(db=db)
+    storage = Storage(db_path=tmp_path / "world.db")
     tools = WorldTools(storage=storage)
     
     # Test create
@@ -20,6 +18,7 @@ def test_world_tools_wrapper(tmp_path):
     assert "Updated body" in update_resp
     
     updated_npc = storage.get_npc(npc_id)
+    assert updated_npc is not None
     assert updated_npc.body == "Updated body"
     
     # Test list

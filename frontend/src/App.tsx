@@ -111,7 +111,7 @@ const AppContent: React.FC = () => {
 function App() {
   return (
     <AppProvider>
-      <BrowserRouter>
+      <BrowserRouter basename="/sidestage">
         <AppContent />
       </BrowserRouter>
     </AppProvider>

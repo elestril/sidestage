@@ -1,5 +1,4 @@
 from pathlib import Path
-from agno.db.sqlite import SqliteDb
 from sidestage.storage import Storage
 from sidestage.models import NPC, Location, Item
 
@@ -8,8 +7,7 @@ def seed():
     if not db_path.parent.exists():
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
-    db = SqliteDb(db_file=str(db_path))
-    storage = Storage(db=db)
+    storage = Storage(db_path=db_path)
     
     # NPCs
     storage.add_npc(NPC(id="npc_barnaby", name="Barnaby the Bold", body="A retired knight with a penchant for telling tall tales at the local tavern."))

@@ -11,6 +11,22 @@
 6. **Git Commits:** The AI agent MUST NOT perform any git commits unless specifically instructed by the user (e.g., "commit the changes"). In all other cases, the agent will prepare the code and the commit message, but the user is responsible for executing the commit.
 7. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
 
+## Documentation & Schema Standards
+
+To ensure the system is maintainable and transparent, the following standards must be met:
+
+1.  **Up-to-Date Documentation (`docs/`):**
+    -   The `docs/` folder must be the single source of truth for all user-visible properties.
+    -   It must strictly track:
+        -   **JSON APIs:** Complete reference of all endpoints, schemas, request/response examples.
+        -   **Web Interface:** Structure of HTML pages, URL routing, and UI functionality.
+        -   **Features:** Comprehensive list of all supported system features.
+        -   **User Journeys:** Documentation of key user workflows and interactions.
+
+2.  **Canonical JSON Schemas:**
+    -   All APIs (internal and external) must have canonical JSON schemas defined.
+    -   **Validation:** Both the Python backend and the Frontend must be tested against these schemas to ensure strict conformity.
+
 ## Task Workflow
 
 All tasks follow a strict lifecycle:
@@ -102,20 +118,14 @@ Before marking any task complete, verify:
 
 - [ ] All tests pass
 - [ ] Tests validate all documented features for the task
+- [ ] API changes are reflected in canonical JSON schemas
+- [ ] Backend and Frontend are tested for schema compliance
+- [ ] `docs/` folder is updated (APIs, UI, Features, Journeys)
 - [ ] Code follows project's code style guidelines (as defined in `code_styleguides/`)
 - [ ] All public functions/methods are documented (e.g., docstrings, JSDoc, GoDoc)
 - [ ] Type safety is enforced (e.g., type hints, TypeScript types, Go types)
 - [ ] No linting or static analysis errors (using the project's configured tools)
 - [ ] Works correctly on mobile (if applicable)
-- [ ] Documentation updated if needed
-- [ ] No security vulnerabilities introduced
-
-- [ ] Code follows project's code style guidelines (as defined in `code_styleguides/`)
-- [ ] All public functions/methods are documented (e.g., docstrings, JSDoc, GoDoc)
-- [ ] Type safety is enforced (e.g., type hints, TypeScript types, Go types)
-- [ ] No linting or static analysis errors (using the project's configured tools)
-- [ ] Works correctly on mobile (if applicable)
-- [ ] Documentation updated if needed
 - [ ] No security vulnerabilities introduced
 
 ## Development Commands

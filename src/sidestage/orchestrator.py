@@ -1,462 +1,210 @@
-import yaml
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pathlib import Path
-from pydantic import BaseModel, Field
 
-from agno.agent import Agent
-from agno.db.sqlite import SqliteDb
-from agno.models.base import Model
-from agno.models.llama_cpp import LlamaCpp
-from agno.models.message import Message
-from agno.os import AgentOS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 import json
 import asyncio
 
-from sidestage.storage import Storage
-from sidestage.tools import WorldTools
-from sidestage.entities import entity_to_markdown, markdown_to_entity, NPC, Location, Item, Scene, Event
-from sidestage.time import Gametime
+from sidestage.campaign import Campaign
 from sidestage.sync import SyncManager
+from sidestage.schemas import (
+    SceneCreateRequest, 
+    EntityMarkdownUpdateRequest, 
+    ChatRequest, 
+    EntityListResponse, 
+    EntityMarkdownResponse, 
+    StatusResponse,
+    ExportResponse,
+    ImportResponse,
+    ChatResponse
+)
 
 logger = logging.getLogger(__name__)
 
-class SidestageConfig(BaseModel):
-    # LLM Configuration
-    llm_provider: str = Field(default="llama_cpp", description="LLM provider to use: 'llama_cpp' or 'gemini'")
-    
-    # Llama.cpp Configuration
-    llama_cpp_base_url: str = "http://medusa:8080/v1"
-    llama_cpp_api_key: str = "sk-no-key-required"
-    llama_cpp_model: str = "default"
-
-    # Gemini Configuration
-    gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-1.5-flash"
-
 class SidestageOrchestrator:
     def __init__(self, campaign_name: str, base_dir: Optional[Path] = None):
-        self.campaign_name = campaign_name
         self.base_dir = base_dir or (Path.home() / ".sidestage")
-        self.campaign_dir = self.base_dir / campaign_name
-        self._ensure_campaign_dir()
         
-        # Setup logging to campaign directory
-        self._setup_logging()
+        # API Dispatching: SyncManager owned by Orchestrator
+        self.sync_manager = SyncManager()
 
-        self.config_path = self.campaign_dir / "config.yml"
-        self.config = self._load_or_create_config()
+        # Manage multiple campaigns
+        self.campaigns: Dict[str, Campaign] = {}
+        self.active_campaign_name = campaign_name
         
-        # Single database for everything
-        self.db = SqliteDb(db_file=str(self.campaign_dir / "sidestage.db"))
-        self.storage = Storage(db=self.db)
-        self.manager = SyncManager()
-
-        # Define a callback for WorldTools to notify of changes
-        def on_world_change():
-            if self.manager:
-                # We need to bridge sync tool call to async broadcast
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        loop.create_task(self.manager.broadcast({"type": "entities_updated"}))
-                    else:
-                        asyncio.run(self.manager.broadcast({"type": "entities_updated"}))
-                except Exception as e:
-                    logger.error(f"Error broadcasting world change: {e}")
-
-        self.world_tools = WorldTools(storage=self.storage, on_change=on_world_change)
-        self.model = self.get_llm_model()
-        self.agent = self.create_agent() # No storage passed here
-
-        # Ensure default scene exists
-        self._ensure_default_scenes()
-
-        self.app = AgentOS(
-            name="Sidestage Core",
+        # Initialize the requested campaign
+        self._load_campaign(campaign_name)
+        
+        # Initialize FastAPI app
+        self.fastapi_app = FastAPI(
+            title="Sidestage Core",
             version="0.1.0",
-            agents=[self.agent],
-            db=self.db,
-            tracing=True
         )
         
-        # Cache the FastAPI app instance to ensure modifications (like mounting) persist
-        self.fastapi_app = self.app.get_app()
+        self._setup_routes()
+        self._mount_frontend()
 
-        # Add custom endpoints under /sidestage prefix
-        @self.fastapi_app.websocket("/sidestage/ws")
+    def _load_campaign(self, name: str):
+        if name not in self.campaigns:
+            self.campaigns[name] = Campaign(name, self.base_dir)
+        return self.campaigns[name]
+
+    @property
+    def campaign(self) -> Campaign:
+        """Helper to access the active campaign."""
+        return self.campaigns[self.active_campaign_name]
+
+    def _setup_routes(self):
+        # WebSocket
+        @self.fastapi_app.websocket("/v1/ws")
         async def websocket_endpoint(websocket: WebSocket):
-            await self.manager.connect(websocket)
+            await self.sync_manager.connect(websocket)
             try:
                 while True:
                     data = await websocket.receive_text()
-                    await self.manager.handle_message(websocket, data)
+                    await self.sync_manager.handle_message(websocket, data)
             except WebSocketDisconnect:
-                self.manager.disconnect(websocket)
+                self.sync_manager.disconnect(websocket)
 
-        @self.fastapi_app.get("/sidestage/entities")
+        # Entities
+        @self.fastapi_app.get("/v1/entities")
         async def list_entities():
-            entities = self.storage.list_all_entities()
-            result = []
-            for e in entities:
-                d = e.model_dump()
-                d["type"] = e.__class__.__name__
-                result.append(d)
-            return result
+            return self.campaign.list_entities()
 
-        @self.fastapi_app.get("/sidestage/scenes")
-        async def list_scenes():
-            scenes = self.storage.list_scenes()
-            return [s.model_dump() for s in scenes]
-
-        @self.fastapi_app.get("/sidestage/scenes/{scene_id}/messages")
-        async def get_scene_messages(scene_id: str):
-            scene = self.storage.get_scene(scene_id)
-            if not scene:
-                raise HTTPException(status_code=404, detail="Scene not found")
-            return scene.messages
-
-        class SceneCreateRequest(BaseModel):
-            name: str
-            description: str = ""
-            current_gametime: Optional[int] = None
-
-        @self.fastapi_app.post("/sidestage/scenes")
-        async def create_scene(request: SceneCreateRequest):
-            import uuid
-            scene_id = f"scene_{str(uuid.uuid4())[:8]}"
-            scene = Scene(
-                id=scene_id,
-                name=request.name,
-                body=request.description,
-                current_gametime=request.current_gametime
-            )
-            self.storage.add_scene(scene)
-            await self.manager.broadcast({"type": "scene_updated"})
-            return scene.model_dump()
-
-        @self.fastapi_app.get("/sidestage/entities/{entity_id}/markdown")
+        @self.fastapi_app.get("/v1/entities/{entity_id}/markdown")
         async def get_entity_markdown(entity_id: str):
-            entities = self.storage.list_all_entities()
-            entity = next((e for e in entities if e.id == entity_id), None)
-            if not entity:
+            markdown = self.campaign.get_entity_markdown(entity_id)
+            if not markdown:
                 raise HTTPException(status_code=404, detail="Entity not found")
-            return {"markdown": entity_to_markdown(entity)}
+            return {"markdown": markdown}
 
-        class EntityMarkdownUpdateRequest(BaseModel):
-            markdown: str
-
-        @self.fastapi_app.post("/sidestage/entities/{entity_id}/markdown")
+        @self.fastapi_app.post("/v1/entities/{entity_id}/markdown")
         async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
-            try:
-                entity = markdown_to_entity(request.markdown)
-                entity.id = entity_id
-                
-                if isinstance(entity, NPC):
-                    self.storage.update_npc(entity)
-                elif isinstance(entity, Location):
-                    self.storage.update_location(entity)
-                elif isinstance(entity, Item):
-                    self.storage.update_item(entity)
-                elif isinstance(entity, Scene):
-                    self.storage.update_scene(entity)
-                
-                await self.manager.broadcast({"type": "entities_updated"})
-                return {"status": "ok"}
-            except Exception as e:
-                logger.error(f"Error updating entity {entity_id}: {e}")
-                raise HTTPException(status_code=400, detail=str(e))
-
-        @self.fastapi_app.post("/sidestage/entities/{entity_id}")
-        async def update_entity(entity_id: str, data: dict):
-            try:
-                # Detect type and validate with Pydantic
-                entity_type = data.get("type")
-                if not entity_type:
-                    # Try to infer from ID or existing data
-                    existing = next((e for e in self.storage.list_all_entities() if e.id == entity_id), None)
-                    if existing:
-                        entity_type = existing.__class__.__name__
-                
-                if entity_type == "NPC":
-                    obj = NPC(**data)
-                elif entity_type == "Location":
-                    obj = Location(**data)
-                elif entity_type == "Item":
-                    obj = Item(**data)
-                elif entity_type == "Scene":
-                    obj = Scene(**data)
-                else:
-                    raise ValueError(f"Unknown entity type: {entity_type}")
-                
-                obj.id = entity_id
-                
-                if isinstance(obj, NPC):
-                    self.storage.update_npc(obj)
-                elif isinstance(obj, Location):
-                    self.storage.update_location(obj)
-                elif isinstance(obj, Item):
-                    self.storage.update_item(obj)
-                elif isinstance(obj, Scene):
-                    self.storage.update_scene(obj)
-                
-                await self.manager.broadcast({"type": "entities_updated"})
-                return {"status": "ok"}
-            except Exception as e:
-                logger.error(f"Error updating entity {entity_id}: {e}")
-                raise HTTPException(status_code=400, detail=str(e))
-
-        @self.fastapi_app.post("/sidestage/entities/export")
-        async def export_entities():
-            logger.info("Exporting entities...")
-            entities_dir = self.campaign_dir / "entities"
-            entities_dir.mkdir(parents=True, exist_ok=True)
-            
-            entities = self.storage.list_all_entities()
-            count = 0
-            for entity in entities:
-                md_content = entity_to_markdown(entity)
-                filename = f"{entity.id}.md"
-                (entities_dir / filename).write_text(md_content)
-                count += 1
-            
-            logger.info(f"Successfully exported {count} entities.")
-            return {"message": f"Exported {count} entities to {entities_dir}"}
-
-        @self.fastapi_app.post("/sidestage/entities/import")
-        async def import_entities():
-            logger.info("Importing entities...")
-            entities_dir = self.campaign_dir / "entities"
-            if not entities_dir.exists():
-                logger.warning("Import failed: entities directory does not exist.")
-                return {"message": "No entities directory found for import.", "count": 0}
-            
-            count = 0
-            for md_file in entities_dir.glob("*.md"):
-                try:
-                    md_content = md_file.read_text()
-                    entity = markdown_to_entity(md_content)
-                    
-                    if isinstance(entity, NPC):
-                        self.storage.add_npc(entity)
-                    elif isinstance(entity, Location):
-                        self.storage.add_location(entity)
-                    elif isinstance(entity, Item):
-                        self.storage.add_item(entity)
-                    elif isinstance(entity, Scene):
-                        self.storage.add_scene(entity)
-                    elif isinstance(entity, Event):
-                        self.storage.add_event(entity)
-                    count += 1
-                except Exception as e:
-                    logger.error(f"Error importing {md_file.name}: {e}")
-            
-            logger.info(f"Successfully imported {count} entities.")
-            await self.manager.broadcast({"type": "entities_updated"})
-            return {"message": f"Successfully imported {count} entities."}
-
-        class ChatRequest(BaseModel):
-            message: str
-            scene_id: str = "campaign_planning"
-
-        @self.fastapi_app.post("/sidestage/chat")
-        async def chat_endpoint(request: ChatRequest):
-            message = request.message
-            scene_id = request.scene_id
-            
-            logger.info(f"Chat request received for scene {scene_id}: {message[:20]}...")
-            
-            scene = self.storage.get_scene(scene_id)
-            if not scene:
-                raise HTTPException(status_code=404, detail="Scene not found")
-
-            user_msg = {"role": "user", "content": message}
-            scene.messages.append(user_msg)
-            self.storage.update_scene(scene)
-            
-            await self.manager.broadcast({
-                "type": "chat_message",
-                "text": message,
-                "sender": "user",
-                "scene_id": scene_id
-            })
-            
-            response = await self.agent.arun(message, stream=False)
-            response_content = str(response.content) if hasattr(response, 'content') and response.content is not None else str(response)
-
-            agent_msg = {"role": "assistant", "content": response_content}
-            scene.messages.append(agent_msg)
-            self.storage.update_scene(scene)
-
-            widget = None
-            entities = self.storage.list_all_entities()
-            for e in entities:
-                if e.id in response_content:
-                    widget = e.model_dump()
-                    widget["type"] = "entity"
-                    widget["entity_type"] = e.__class__.__name__
-                    break
-
-            await self.manager.broadcast({
-                "type": "chat_message",
-                "text": response_content,
-                "sender": "agent",
-                "scene_id": scene_id,
-                "widget": widget
-            })
-            
+            success = await self.campaign.update_entity_markdown(entity_id, request.markdown)
+            if not success:
+                raise HTTPException(status_code=400, detail="Failed to update entity")
+            await self.sync_manager.broadcast({"type": "entities_updated"})
             return {"status": "ok"}
 
-        # Catch-all route for SPA
-        @self.fastapi_app.get("/{full_path:path}")
-        async def catch_all(full_path: str):
-            # Ignore requests to /sidestage, /agents, /sessions, /traces which are API/internal
-            if full_path.startswith(("sidestage", "agents", "sessions", "traces")):
-                raise HTTPException(status_code=404)
+        @self.fastapi_app.post("/v1/entities/{entity_id}")
+        async def update_entity(entity_id: str, data: dict):
+            success = await self.campaign.update_entity(entity_id, data)
+            if not success:
+                raise HTTPException(status_code=400, detail="Failed to update entity")
+            await self.sync_manager.broadcast({"type": "entities_updated"})
+            return {"status": "ok"}
 
+        @self.fastapi_app.post("/v1/entities/export")
+        async def export_entities():
+            count = self.campaign.export_entities()
+            return {"message": f"Exported {count} entities to disk"}
+
+        @self.fastapi_app.post("/v1/entities/import")
+        async def import_entities():
+            count = await self.campaign.import_entities()
+            if count > 0:
+                await self.sync_manager.broadcast({"type": "entities_updated"})
+            return {"message": f"Successfully imported {count} entities."}
+
+        # Scenes
+        @self.fastapi_app.get("/v1/scenes")
+        async def list_scenes():
+            return self.campaign.list_scenes()
+
+        @self.fastapi_app.post("/v1/scenes")
+        async def create_scene(request: SceneCreateRequest):
+            scene = await self.campaign.create_scene(
+                name=request.name,
+                description=request.description,
+                current_gametime=request.current_gametime
+            )
+            await self.sync_manager.broadcast({"type": "scene_updated"})
+            return scene.model_dump()
+
+        @self.fastapi_app.get("/v1/scenes/{scene_id}/messages")
+        async def get_scene_messages(scene_id: str):
+            messages = self.campaign.get_scene_messages(scene_id)
+            if messages is None:
+                raise HTTPException(status_code=404, detail="Scene not found")
+            return messages
+
+        # Chat
+        @self.fastapi_app.post("/v1/chat", response_model=ChatResponse)
+        async def chat_endpoint(request: ChatRequest):
+            # 1. Get Scene object
+            scene = self.campaign.get_scene_object(request.scene_id)
+            if not scene:
+                raise HTTPException(status_code=404, detail="Scene not found")
+
+            # 2. Create user message object (Logic handled by Scene factory)
+            user_msg = scene.create_message(actor="user", text=request.message)
+            
+            # 3. Broadcast user message immediately (non-blocking for UI)
+            # Persistance will happen inside scene.chat
+            await self.sync_manager.broadcast({
+                "type": "chat_message",
+                "message": user_msg.model_dump(),
+                "scene_id": request.scene_id
+            })
+            
+            # 4. Call chat generator (which handles persistance of user and agent messages)
+            agent_msg = None
+            async for msg in scene.chat(user_msg):
+                await self.sync_manager.broadcast({
+                    "type": "chat_message",
+                    "message": msg.model_dump(),
+                    "scene_id": request.scene_id
+                })
+                agent_msg = msg
+            
+            if not agent_msg:
+                 raise HTTPException(status_code=500, detail="Agent failed to respond")
+
+            return ChatResponse(user_message=user_msg, agent_message=agent_msg)
+
+        # Redirect root to /sidestage
+        @self.fastapi_app.get("/")
+        async def root_redirect():
+            return RedirectResponse(url="/sidestage")
+
+        # Redirect legacy routes
+        @self.fastapi_app.get("/scenes")
+        @self.fastapi_app.get("/scenes/{rest:path}")
+        async def scenes_redirect(rest: str = ""):
+            return RedirectResponse(url=f"/sidestage/scenes/{rest}")
+
+        @self.fastapi_app.get("/entities")
+        @self.fastapi_app.get("/entities/{rest:path}")
+        async def entities_redirect(rest: str = ""):
+            return RedirectResponse(url=f"/sidestage/entities/{rest}")
+
+        # UI Catch-all for SPA routing
+        @self.fastapi_app.get("/sidestage/{full_path:path}")
+        async def ui_catch_all(full_path: str):
             dist_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
+            
+            # Check if it's a direct file request (e.g. assets)
             file_path = dist_dir / full_path
             if full_path != "" and file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
             
+            # Otherwise serve index.html for SPA
             index_path = dist_dir / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
             raise HTTPException(status_code=404)
-
-        # Mount frontend static files
-        self._mount_frontend()
-
-    def _ensure_default_scenes(self):
-        """
-        Creates the default 'Campaign Planning' scene if it doesn't exist.
-        """
-        planning_scene = self.storage.get_scene("campaign_planning")
-        if not planning_scene:
-            logger.info("Creating default 'Campaign Planning' scene.")
-            self.storage.add_scene(Scene(
-                id="campaign_planning",
-                name="Campaign Planning",
-                body="The default space for discussing the campaign world, characters, and plot.",
-                current_gametime=None # Planning is meta-level, no gametime
-            ))
-
-
-    def _setup_logging(self):
-        log_file = self.campaign_dir / "server.log"
-        
-        # Configure the root logger
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        
-        # Avoid adding multiple handlers if the orchestrator is re-initialized in the same process
-        if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file.absolute()) for h in root_logger.handlers):
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-            root_logger.addHandler(file_handler)
-            
-            logger.info(f"Logging initialized. Output redirected to: {log_file}")
 
     def _mount_frontend(self):
         project_root = Path(__file__).parent.parent.parent
         dist_dir = project_root / "frontend" / "dist"
         
         if dist_dir.exists():
-            fastapi_app = self.fastapi_app
-            
-            # Remove default AgentOS root route to allow frontend to serve index.html
-            for route in list(fastapi_app.routes):
-                if getattr(route, "path", None) == "/":
-                    fastapi_app.routes.remove(route)
-                    break
-
-            # Mount the built assets directory
-            fastapi_app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
-            logger.info(f"Frontend mounted from: {dist_dir}")
+            # Mount static files at /sidestage
+            # This handles /sidestage/assets/... and /sidestage/index.html
+            self.fastapi_app.mount("/sidestage", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
+            logger.info(f"Frontend mounted from: {dist_dir} at /sidestage")
         else:
             logger.warning(f"Built frontend directory not found at {dist_dir}. No frontend will be served.")
-
-    def _ensure_campaign_dir(self):
-        if not self.campaign_dir.exists():
-            logger.info(f"Creating new campaign directory: {self.campaign_dir}")
-            self.campaign_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            logger.info(f"Loading campaign from: {self.campaign_dir}")
-
-    def _load_or_create_config(self) -> SidestageConfig:
-        if self.config_path.exists():
-            with open(self.config_path, "r") as f:
-                try:
-                    data = yaml.safe_load(f) or {}
-                    config = SidestageConfig(**data)
-                except Exception as e:
-                    logger.warning(f"Error loading config.yml ({e}). Using defaults.")
-                    config = SidestageConfig()
-        else:
-            logger.info(f"Creating default configuration at: {self.config_path}")
-            config = SidestageConfig()
-        
-        # Always save back to ensure any new defaults are populated and formatting is consistent
-        self._save_config(config)
-        return config
-
-    def _save_config(self, config: SidestageConfig):
-        with open(self.config_path, "w") as f:
-            yaml.dump(config.model_dump(), f, default_flow_style=False)
-
-    def get_llm_model(self) -> Model:
-        """
-        Factory to return the configured LLM model instance.
-        """
-        provider = self.config.llm_provider.lower()
-
-        if provider == "llama_cpp":
-            return LlamaCpp(
-                id=self.config.llama_cpp_model,
-                base_url=self.config.llama_cpp_base_url,
-            )
-        
-        elif provider == "gemini":
-            raise NotImplementedError("Gemini provider not yet enabled. Please install google-generativeai.")
-
-        else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
-
-    def create_agent(self) -> Agent:
-        """
-        Initializes the Co-Author agent with the configured model and tools.
-        """
-        return Agent(
-            name="Sidestage Co-Author",
-            model=self.model,
-            # description="Sidestage Co-Author: RPG World-Building Assistant",
-            debug_mode=False,
-            add_datetime_to_context=False,
-            add_name_to_context=False,
-            instructions=[
-                "You are the Sidestage Co-Author, a world-building assistant.",
-                "STRICT PERSONA: NEVER identify as a 'large language model'. You are strictly the Sidestage Co-Author.",
-                "DATABASE-ONLY KNOWLEDGE: You know NOTHING about NPCs, locations, or items except what is in your database.",
-                "TOOL-FIRST: If asked about characters, world details, or 'which NPCs do you know?', you MUST call `list_npcs` immediately.",
-                "NEVER list famous characters from other games (like Fallout or Elder Scrolls) unless they were created in THIS campaign.",
-                "TONE: Helpful and collaborative."
-            ],
-            tools=[
-                self.world_tools.create_npc,
-                self.world_tools.update_npc,
-                self.world_tools.get_npc,
-                self.world_tools.list_npcs,
-                self.world_tools.create_location,
-                self.world_tools.update_location,
-                self.world_tools.list_locations,
-                self.world_tools.create_item,
-                self.world_tools.update_item,
-                self.world_tools.list_items,
-            ],
-            stream=True,
-            markdown=True,
-            use_instruction_tags=True,
-        )

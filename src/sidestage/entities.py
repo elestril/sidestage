@@ -1,7 +1,7 @@
 import yaml
 import re
 from typing import Dict, Any, Type, Optional
-from sidestage.models import Entity, NPC, Location, Item, Scene, Event
+from sidestage.models import Entity, NPC, Location, Item, SceneData, Event
 
 def entity_to_markdown(entity: Entity) -> str:
     """
@@ -23,9 +23,10 @@ def entity_to_markdown(entity: Entity) -> str:
     frontmatter = yaml.dump(ordered_data, sort_keys=False).strip()
     return f"---\n{frontmatter}\n---\n\n{body}"
 
-def markdown_to_entity(content: str) -> Entity:
+def markdown_to_entity(content: str, override_id: Optional[str] = None) -> Entity:
     """
     Parses a Markdown string with YAML frontmatter into an Entity object.
+    If override_id is provided, it is used as the entity ID, overriding any ID in the frontmatter.
     """
     pattern = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
     match = pattern.match(content.strip())
@@ -41,13 +42,16 @@ def markdown_to_entity(content: str) -> Entity:
         raise ValueError("Invalid YAML frontmatter")
     
     data["body"] = body
+    if override_id:
+        data["id"] = override_id
+        
     entity_type = data.get("type", "Entity")
     
     type_map: Dict[str, Type[Entity]] = {
         "NPC": NPC,
         "Location": Location,
         "Item": Item,
-        "Scene": Scene,
+        "Scene": SceneData,
         "Event": Event,
         "Entity": Entity
     }

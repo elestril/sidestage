@@ -1,16 +1,12 @@
 import sqlite3
 import json
 from pathlib import Path
-from typing import Type, List, Optional, cast
-from agno.db.sqlite import SqliteDb
-from sidestage.models import NPC, Location, Item, Entity, Scene, Event
+from typing import Type, List, Optional, cast, Union
+from sidestage.models import NPC, Location, Item, Entity, SceneData, Event
 
 class Storage:
-    def __init__(self, db: SqliteDb):
-        self.db = db
-        if db.db_file is None:
-            raise ValueError("SqliteDb must have a db_file defined")
-        self.db_path = Path(db.db_file)
+    def __init__(self, db_path: Union[str, Path]):
+        self.db_path = Path(db_path)
         self._init_db()
 
     def _init_db(self):
@@ -94,20 +90,20 @@ class Storage:
         return cast(List[Item], self._list_entities("items", Item))
 
     # Scene
-    def add_scene(self, scene: Scene):
+    def add_scene(self, scene: SceneData):
         self._save_entity("scenes", scene)
 
-    def update_scene(self, scene: Scene):
+    def update_scene(self, scene: SceneData):
         self._save_entity("scenes", scene)
 
-    def get_scene(self, scene_id: str) -> Optional[Scene]:
-        return cast(Optional[Scene], self._get_entity("scenes", scene_id, Scene))
+    def get_scene(self, scene_id: str) -> Optional[SceneData]:
+        return cast(Optional[SceneData], self._get_entity("scenes", scene_id, SceneData))
 
     def delete_scene(self, scene_id: str):
         self._delete_entity("scenes", scene_id)
 
-    def list_scenes(self) -> List[Scene]:
-        return cast(List[Scene], self._list_entities("scenes", Scene))
+    def list_scenes(self) -> List[SceneData]:
+        return cast(List[SceneData], self._list_entities("scenes", SceneData))
 
     # Event
     def add_event(self, event: Event):

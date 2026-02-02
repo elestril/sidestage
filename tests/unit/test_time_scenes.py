@@ -1,8 +1,7 @@
 import pytest
 from sidestage.time import Gametime
-from sidestage.models import Scene, Event
+from sidestage.models import SceneData, Event
 from sidestage.storage import Storage
-from agno.db.sqlite import SqliteDb
 
 def test_gametime_conversion():
     gt = Gametime(seconds=3600) # 1 hour
@@ -13,11 +12,9 @@ def test_gametime_conversion():
     assert gt2.to_string() == "Day 1, 12:00:00"
 
 def test_scene_crud(tmp_path):
-    db_file = tmp_path / "test.db"
-    db = SqliteDb(db_file=str(db_file))
-    storage = Storage(db=db)
+    storage = Storage(db_path=tmp_path / "test.db")
     
-    scene = Scene(
+    scene = SceneData(
         id="scene_1",
         name="Test Scene",
         body="A test scene",
@@ -26,6 +23,7 @@ def test_scene_crud(tmp_path):
     
     storage.add_scene(scene)
     retrieved = storage.get_scene("scene_1")
+    assert retrieved is not None
     assert retrieved.name == "Test Scene"
     assert retrieved.current_gametime == 3600
     
@@ -34,9 +32,7 @@ def test_scene_crud(tmp_path):
     assert scenes[0].id == "scene_1"
 
 def test_event_storage(tmp_path):
-    db_file = tmp_path / "test.db"
-    db = SqliteDb(db_file=str(db_file))
-    storage = Storage(db=db)
+    storage = Storage(db_path=tmp_path / "test.db")
     
     event = Event(
         id="event_1",
