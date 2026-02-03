@@ -34,10 +34,15 @@ Broadcasted during chat interactions.
 ```json
 {
   "type": "chat_message",
-  "text": "Hello world",
-  "sender": "user" | "agent",
   "scene_id": "scene_id",
-  "widget": { ... } // Optional entity widget data if the agent mentions an entity
+  "message": {
+    "id": "msg_123",
+    "actor": "user" | "agent" | "npc_id",
+    "message": "Hello world",
+    "gametime": 12345,
+    "walltime": "2026-02-02T...",
+    "widget": { ... } // Optional entity widget data if the agent mentions an entity
+  }
 }
 ```
 
@@ -181,11 +186,23 @@ Creates a new scene.
 
 Returns the message history for a scene.
 
-**Response:** `List[Message]`
+**Response:** `List[ChatMessage]`
 ```json
 [
-  { "role": "user", "content": "Hello" },
-  { "role": "assistant", "content": "Hi there" }
+  { 
+    "id": "msg_1",
+    "actor": "user", 
+    "message": "Hello",
+    "gametime": 0,
+    "walltime": "2026-02-02T..."
+  },
+  { 
+    "id": "msg_2",
+    "actor": "agent", 
+    "message": "Hi there",
+    "gametime": 0,
+    "walltime": "2026-02-02T..."
+  }
 ]
 ```
 
@@ -204,9 +221,12 @@ Sends a message to the AI agent within a specific scene context.
 }
 ```
 
-**Response:**
+**Response:** `ChatResponse`
 ```json
-{ "status": "ok" }
+{
+  "user_message": { ...ChatMessage... },
+  "agent_message": { ...ChatMessage... }
+}
 ```
 
 ## Data Models

@@ -230,6 +230,7 @@ class Campaign:
 
     async def update_entity(self, entity_id: str, data: dict) -> bool:
         try:
+            data["id"] = entity_id
             entity_type = data.get("type")
             if not entity_type:
                 existing = next((e for e in self.storage.list_all_entities() if e.id == entity_id), None)
@@ -246,8 +247,6 @@ class Campaign:
                 obj = SceneData(**data)
             else:
                 raise ValueError(f"Unknown entity type: {entity_type}")
-            
-            obj.id = entity_id
             
             if isinstance(obj, NPC):
                 self.storage.update_npc(obj)

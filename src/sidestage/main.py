@@ -42,7 +42,6 @@ def main():
 
     # Start the AgentOS server using the import string and factory mode to enable reload
     logger.info(f"Starting Sidestage Server on {args.host}:{args.port} with reload enabled...")
-    logger.info(f"Observability: Built-in tracing enabled. View traces at http://{args.host}:{args.port}/traces")
     logger.info(f"Campaign data: {os.path.abspath(os.path.join(args.sidestage_dir, args.campaign))}")
     
     uvicorn.run("sidestage.main:get_app", 

@@ -81,6 +81,18 @@ class SidestageOrchestrator:
                 raise HTTPException(status_code=404, detail="Entity not found")
             return {"markdown": markdown}
 
+        @self.fastapi_app.post("/v1/entities/export")
+        async def export_entities():
+            count = self.campaign.export_entities()
+            return {"message": f"Exported {count} entities to disk"}
+
+        @self.fastapi_app.post("/v1/entities/import")
+        async def import_entities():
+            count = await self.campaign.import_entities()
+            if count > 0:
+                await self.sync_manager.broadcast({"type": "entities_updated"})
+            return {"message": f"Successfully imported {count} entities."}
+
         @self.fastapi_app.post("/v1/entities/{entity_id}/markdown")
         async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
             success = await self.campaign.update_entity_markdown(entity_id, request.markdown)
@@ -96,18 +108,6 @@ class SidestageOrchestrator:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
             await self.sync_manager.broadcast({"type": "entities_updated"})
             return {"status": "ok"}
-
-        @self.fastapi_app.post("/v1/entities/export")
-        async def export_entities():
-            count = self.campaign.export_entities()
-            return {"message": f"Exported {count} entities to disk"}
-
-        @self.fastapi_app.post("/v1/entities/import")
-        async def import_entities():
-            count = await self.campaign.import_entities()
-            if count > 0:
-                await self.sync_manager.broadcast({"type": "entities_updated"})
-            return {"message": f"Successfully imported {count} entities."}
 
         # Scenes
         @self.fastapi_app.get("/v1/scenes")

@@ -6,7 +6,7 @@ The Sidestage Web Interface is built as a Single Page Application (SPA) using Re
 The application features a persistent layout consisting of:
 - **Header:**
     - App Title ("Sidestage")
-    - Navigation Links: Scenes, Entities, Traces.
+    - Navigation Links: Scenes, Entities.
 - **Sidebar (Context-Dependent):**
     - **Scenes View:** Displays a list of available scenes and a "New Scene" button.
     - **Entities View:** (Currently handled within the main content area).
