@@ -17,6 +17,8 @@
 - **API:** Native `agno_os` endpoints for integration and external customer interactions.
 
 ## Development & Observability
-- **Observability:** Agno native tracing and observability (via `AgentOS` and `agno_spans`) for prompt introspection and memory state inspection.
-- **Storage:** Agno `SqliteDb` for persistent session memory and `Learned Knowledge`.
+- **Observability:** Custom file-based logging (server.log) and planned OpenTelemetry integration.
+- **Storage:**
+    - **Graph Database:** [FalkorDB](https://falkordb.com/) (Primary storage for Entities, Memories, and World State).
+    - **Relational:** SQLite (For persistent session memory, chat logs, and user management).
 - **Project Structure:** Standard Python project layout managed by Poetry.
