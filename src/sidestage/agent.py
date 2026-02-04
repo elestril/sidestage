@@ -18,9 +18,9 @@ class LiteLLMAgent:
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
         instructions: Optional[List[str]] = None,
-        tools: Optional[List[Callable]] = None,
+        tools: Optional[List[Callable[..., Any]]] = None,
         debug_mode: bool = False,
-        **kwargs
+        **kwargs: Any
     ):
         self.name = name
         self.model = model
@@ -34,7 +34,7 @@ class LiteLLMAgent:
         self.tool_schemas = [self._function_to_schema(t) for t in self.tools]
         self.tool_map = {t.__name__: t for t in self.tools}
 
-    def _function_to_schema(self, func: Callable) -> Dict[str, Any]:
+    def _function_to_schema(self, func: Callable[..., Any]) -> Dict[str, Any]:
         """
         Converts a function to an OpenAI tool schema.
         This is a simplified implementation and might need robustness.

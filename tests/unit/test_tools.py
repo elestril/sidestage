@@ -1,17 +1,18 @@
 import pytest
+from pathlib import Path
 from sidestage.tools import WorldTools
 from sidestage.storage import Storage
 
-def test_world_tools_wrapper(tmp_path):
+def test_world_tools_wrapper(tmp_path: Path):
     """Test the WorldTools wrapper logic separately."""
     storage = Storage(db_path=tmp_path / "world.db")
     tools = WorldTools(storage=storage)
     
     # Test create
-    resp = tools.create_character("TestNPC", "A test guy")
-    assert "TestNPC" in resp
+    resp = tools.create_character("TestCharacter", "A test guy")
+    assert "TestCharacter" in resp
     npc_data = storage.list_characters()[0]
-    assert npc_data.name == "TestNPC"
+    assert npc_data.name == "TestCharacter"
     character_id = npc_data.id
     
     # Update
@@ -24,4 +25,4 @@ def test_world_tools_wrapper(tmp_path):
     
     # Test list
     list_resp = tools.list_characters()
-    assert "TestNPC" in list_resp
+    assert "TestCharacter" in list_resp

@@ -1,9 +1,10 @@
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from sidestage.campaign import Campaign, SidestageConfig
 from sidestage.agent import LiteLLMAgent
 
-def test_campaign_create_agent_llama_cpp(tmp_path):
+def test_campaign_create_agent_llama_cpp(tmp_path: Path):
     """Test that campaign creates LiteLLMAgent with correct settings for Llama.cpp."""
     test_config = SidestageConfig(
         llm_provider="llama_cpp",
@@ -20,7 +21,7 @@ def test_campaign_create_agent_llama_cpp(tmp_path):
         assert agent.model == "openai/test-model"
         assert agent.api_base == "http://test:8080/v1"
 
-def test_agent_tools_configuration(tmp_path):
+def test_agent_tools_configuration(tmp_path: Path):
     """Test that the agent is initialized with the correct tools."""
     with patch('sidestage.campaign.Campaign._ensure_llm_availability'):
         campaign = Campaign(name="test", base_dir=tmp_path)

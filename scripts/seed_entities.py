@@ -1,6 +1,6 @@
 from pathlib import Path
 from sidestage.storage import Storage
-from sidestage.models import NPC, Location, Item
+from sidestage.models import Character, Location, Item
 
 def seed():
     db_path = Path(".workdir/dev/sidestage.db")
@@ -10,8 +10,8 @@ def seed():
     storage = Storage(db_path=db_path)
     
     # NPCs
-    storage.add_npc(NPC(id="npc_barnaby", name="Barnaby the Bold", body="A retired knight with a penchant for telling tall tales at the local tavern."))
-    storage.add_npc(NPC(id="npc_elara", name="Elara the Wise", body="An elven scholar who knows more about the Whispering Woods than she lets on."))
+    storage.add_character(Character(id="npc_barnaby", name="Barnaby the Bold", body="A retired knight with a penchant for telling tall tales at the local tavern."))
+    storage.add_character(Character(id="npc_elara", name="Elara the Wise", body="An elven scholar who knows more about the Whispering Woods than she lets on."))
     
     # Locations
     storage.add_location(Location(id="loc_tavern", name="The Rusty Tankard", body="A bustling tavern where adventurers gather to share stories and find work."))

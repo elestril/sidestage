@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -35,6 +35,9 @@ class SidestageOrchestrator:
         self.campaigns: Dict[str, Campaign] = {}
         self.active_campaign_name = campaign_name
         
+        # Active scenes across all campaigns (scene_id -> SceneLogic)
+        self.active_scenes: Dict[str, Any] = {}
+        
         # Initialize the requested campaign
         self._load_campaign(campaign_name)
         
@@ -57,6 +60,53 @@ class SidestageOrchestrator:
         """Helper to access the active campaign."""
         return self.campaigns[self.active_campaign_name]
 
+    async def get_active_scene(self, scene_id: str) -> Optional[Any]:
+        """Gets or activates a scene."""
+        if scene_id in self.active_scenes:
+            return self.active_scenes[scene_id]
+        
+        scene_logic = self.campaign.get_scene_object(scene_id)
+        if scene_logic:
+            await scene_logic.activate()
+            # Subscribe for broadcasting
+            scene_logic.bus.subscribe(self._on_scene_event)
+            self.active_scenes[scene_id] = scene_logic
+            return scene_logic
+        return None
+
+    async def _on_scene_event(self, event: Any):
+        """Broadcasts events from scene buses to all connected WebSocket clients."""
+        from sidestage.schemas import ChatMessage
+        if isinstance(event, ChatMessage):
+            await self.sync_manager.broadcast({
+                "type": "chat_message",
+                "message": event.model_dump(),
+                "scene_id": event.scene_id
+            })
+
+    async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]):
+        """
+        Internal handler for WebSocket messages.
+        Routes events to Scene buses.
+        """
+        msg_type = message.get("type")
+        scene_id = message.get("scene_id")
+        
+        if msg_type == "chat_message" and scene_id:
+            scene = await self.get_active_scene(scene_id)
+            if scene:
+                # Convert dict to ChatMessage schema
+                # This assumes the frontend sends a format that matches ChatMessage or can be adapted
+                from sidestage.schemas import ChatMessage
+                try:
+                    # If it's a raw text from user, we need to create a proper ChatMessage
+                    text = message.get("text")
+                    if text:
+                        user_msg = scene.create_message(actor_id="user", text=text)
+                        await scene.chat(user_msg)
+                except Exception as e:
+                    logger.error(f"Error publishing to scene bus: {e}")
+
     def _setup_routes(self):
         # WebSocket
         @self.fastapi_app.websocket("/v1/ws")
@@ -65,7 +115,7 @@ class SidestageOrchestrator:
             try:
                 while True:
                     data = await websocket.receive_text()
-                    await self.sync_manager.handle_message(websocket, data)
+                    await self.sync_manager.handle_message(websocket, data, handler=self._handle_ws_message)
             except WebSocketDisconnect:
                 self.sync_manager.disconnect(websocket)
 
@@ -102,10 +152,16 @@ class SidestageOrchestrator:
             return {"status": "ok"}
 
         @self.fastapi_app.post("/v1/entities/{entity_id}")
-        async def update_entity(entity_id: str, data: dict):
+        async def update_entity(entity_id: str, data: Dict[str, Any]):
             success = await self.campaign.update_entity(entity_id, data)
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
+            await self.sync_manager.broadcast({"type": "entities_updated"})
+            return {"status": "ok"}
+
+        @self.fastapi_app.post("/v1/campaign/reload-defaults")
+        async def reload_defaults():
+            self.campaign.reload_defaults()
             await self.sync_manager.broadcast({"type": "entities_updated"})
             return {"status": "ok"}
 
@@ -134,36 +190,20 @@ class SidestageOrchestrator:
         # Chat
         @self.fastapi_app.post("/v1/chat", response_model=ChatResponse)
         async def chat_endpoint(request: ChatRequest):
-            # 1. Get Scene object
-            scene = self.campaign.get_scene_object(request.scene_id)
+            # 1. Get Scene object (Ensures it's activated)
+            scene = await self.get_active_scene(request.scene_id)
             if not scene:
                 raise HTTPException(status_code=404, detail="Scene not found")
 
             # 2. Create user message object (Logic handled by Scene factory)
-            user_msg = scene.create_message(actor="user", text=request.message)
+            user_msg = scene.create_message(actor_id="user", text=request.message)
             
-            # 3. Broadcast user message immediately (non-blocking for UI)
-            # Persistance will happen inside scene.chat
-            await self.sync_manager.broadcast({
-                "type": "chat_message",
-                "message": user_msg.model_dump(),
-                "scene_id": request.scene_id
-            })
+            # 3. Call chat (which publishes to bus)
+            # This is now fire-and-forget regarding the agent response.
+            # Persistence and broadcasting (via _on_scene_event) will happen automatically.
+            await scene.chat(user_msg)
             
-            # 4. Call chat generator (which handles persistance of user and agent messages)
-            agent_msg = None
-            async for msg in scene.chat(user_msg):
-                await self.sync_manager.broadcast({
-                    "type": "chat_message",
-                    "message": msg.model_dump(),
-                    "scene_id": request.scene_id
-                })
-                agent_msg = msg
-            
-            if not agent_msg:
-                 raise HTTPException(status_code=500, detail="Agent failed to respond")
-
-            return ChatResponse(user_message=user_msg, agent_message=agent_msg)
+            return ChatResponse(user_message=user_msg)
 
         # Redirect root to /sidestage
         @self.fastapi_app.get("/")

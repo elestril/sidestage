@@ -1,13 +1,15 @@
 import pytest
 import json
+from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
 from sidestage.schemas import Character
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
+@pytest.mark.timeout(5)
 class TestSyncIntegration:
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path: Path) -> TestClient:
         campaign_name = "test_sync_campaign"
         with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
             orchestrator = SidestageOrchestrator(
@@ -18,7 +20,7 @@ class TestSyncIntegration:
             # but orchestrator already handles it.
         return TestClient(orchestrator.fastapi_app)
 
-    def test_websocket_broadcast_on_entity_update(self, client):
+    def test_websocket_broadcast_on_entity_update(self, client: TestClient):
         # Create a dummy entity via REST
         char_data = {"id": "sync_char", "name": "Sync Character", "body": "Original", "type": "Character"}
         
@@ -31,7 +33,7 @@ class TestSyncIntegration:
             data = websocket.receive_json()
             assert data["type"] == "entities_updated"
 
-    def test_collaborative_editing_relay(self, client):
+    def test_collaborative_editing_relay(self, client: TestClient):
         # Connect two clients
         with client.websocket_connect("/v1/ws") as ws1:
             with client.websocket_connect("/v1/ws") as ws2:
@@ -52,11 +54,22 @@ class TestSyncIntegration:
                 # In implementation: await self.broadcast(message, exclude=websocket)
                 # So it should be excluded.
 
-    def test_chat_broadcast(self, client):
+    def test_chat_broadcast(self, client: TestClient):
         # Mocking the agent to avoid LLM calls
-        with patch("sidestage.agent.LiteLLMAgent.arun") as mock_arun:
-            from sidestage.agent import AgentResponse
-            mock_arun.return_value = AgentResponse(content="AI Response")
+        from sidestage.agent import AgentResponse
+        from unittest.mock import MagicMock
+        
+        mock_agent = MagicMock()
+        mock_agent.arun = AsyncMock(return_value=AgentResponse(content="AI Response"))
+        # Need to set other attributes accessed by AgentActor init or usage
+        mock_agent.model = "test-model"
+        mock_agent.api_base = "http://test"
+        mock_agent.api_key = "sk-test"
+        mock_agent.tools = []
+        mock_agent.debug_mode = False
+
+        # Patch LiteLLMAgent in character.py so AgentActor gets our mock
+        with patch("sidestage.character.LiteLLMAgent", return_value=mock_agent):
             
             with client.websocket_connect("/v1/ws") as ws:
                 # Trigger chat via REST
@@ -68,6 +81,9 @@ class TestSyncIntegration:
                 assert msg1["message"]["character_id"] == "user"
                 
                 # Receive agent message broadcast
+                # Note: Multiple agents might reply (Co-Author, Narrator). 
+                # We just check we get AT LEAST one agent message.
                 msg2 = ws.receive_json()
                 assert msg2["type"] == "chat_message"
-                assert msg2["message"]["character_id"] == "char_co_author"
+                # It could be either character, so just check it's not user
+                assert msg2["message"]["actor_id"] == "agent"

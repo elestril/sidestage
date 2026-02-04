@@ -1,5 +1,6 @@
 import logging
-from typing import List, Dict, Any, Optional
+import json
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class SyncManager:
                 # Disconnect will handle cleanup eventually, but log if it's unusual
                 pass
 
-    async def handle_message(self, websocket: WebSocket, data: str):
+    async def handle_message(self, websocket: WebSocket, data: str, handler: Optional[Callable[[WebSocket, Dict[str, Any]], Awaitable[None]]] = None):
         """
         Handles incoming messages from clients and routes them accordingly.
         """
@@ -48,10 +49,10 @@ class SyncManager:
                 # Broadcast the keystroke update to all OTHER clients
                 await self.broadcast(message, exclude=websocket)
             
-            # Future message types (like cursor position) can be added here
+            if handler:
+                await handler(websocket, message)
             
         except Exception as e:
             logger.error(f"Sync: Error handling message: {e}")
 
 # Global instance for easy access if needed, though Orchestrator should own it.
-import json

@@ -150,16 +150,36 @@ class Campaign:
                 current_gametime=None
             ))
         
-        # Ensure default co-author character exists
-        co_author = self.storage.get_character("char_co_author")
-        if not co_author:
-            logger.info("Creating default 'Co-Author' character.")
-            self.storage.add_character(Character(
-                id="char_co_author",
-                name="Co-Author",
-                body="I am the Sidestage Co-Author, a world-building assistant.",
-                unseen=True
-            ))
+        # Ensure default characters from data directory are loaded
+        self.reload_defaults()
+
+    def reload_defaults(self):
+        """
+        Loads default characters and other entities from the project's data directory.
+        """
+        logger.info("Reloading default content from data directory...")
+        
+        # Use project root to find data directory
+        project_root = Path(__file__).parent.parent.parent
+        data_dir = project_root / "data"
+        
+        if not data_dir.exists():
+            logger.warning(f"Data directory not found at {data_dir}. Skipping default content loading.")
+            return
+
+        # Load Characters
+        char_dir = data_dir / "characters"
+        if char_dir.exists():
+            for char_file in char_dir.glob("*.md"):
+                try:
+                    content = char_file.read_text()
+                    char = markdown_to_entity(content)
+                    if isinstance(char, Character):
+                        # Use add_character which is INSERT OR REPLACE
+                        self.storage.add_character(char)
+                        logger.info(f"Loaded default character: {char.name} ({char.id})")
+                except Exception as e:
+                    logger.error(f"Error loading default character from {char_file}: {e}")
 
     def _ensure_llm_availability(self):
         """
@@ -240,7 +260,7 @@ class Campaign:
             logger.error(f"Error updating entity {entity_id}: {e}")
             return False
 
-    async def update_entity(self, entity_id: str, data: dict) -> bool:
+    async def update_entity(self, entity_id: str, data: Dict[str, Any]) -> bool:
         try:
             data["id"] = entity_id
             entity_type = data.get("type")
@@ -334,4 +354,4 @@ class Campaign:
         data = self.storage.get_scene(scene_id)
         if not data:
             return None
-        return SceneLogic(self, data)
+        return SceneLogic(self.storage, self.agent, data)

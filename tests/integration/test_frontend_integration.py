@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 class TestFrontendIntegration:
     @pytest.fixture(autouse=True)
-    def setup_server(self, tmp_path):
+    def setup_server(self, tmp_path: Path):
         """
         Setup a real orchestrator in a temp directory.
         We need to ensure it finds the 'frontend/out' directory.

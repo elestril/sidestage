@@ -169,7 +169,7 @@ export const EntityEditor: React.FC<EntityEditorProps> = ({ entityId }) => {
         <div className="p-6 flex flex-col gap-6 bg-black/10">
           <h4 className="text-[10px] uppercase font-bold text-[#666] tracking-widest">Metadata</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {entity?.type === 'NPC' && (
+            {entity?.type === 'Character' && (
               <>
                 <div className="flex flex-col gap-2">
                   <label className="text-[10px] uppercase font-bold text-[#444] flex items-center gap-2"><MapPin size={10} /> Location ID</label>
@@ -257,7 +257,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
 
   const getEntityIcon = (type: string) => {
     switch (type) {
-      case 'NPC': return <User size={14} className="text-orange-400" />;
+      case 'Character': return <User size={14} className="text-orange-400" />;
       case 'Location': return <MapPin size={14} className="text-green-400" />;
       case 'Item': return <Package size={14} className="text-blue-400" />;
       case 'Scene': return <Film size={14} className="text-purple-400" />;
@@ -297,7 +297,7 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
             </div>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
-            {['all', 'NPC', 'Location', 'Item', 'Scene'].map(f => (
+            {['all', 'Character', 'Location', 'Item', 'Scene'].map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}

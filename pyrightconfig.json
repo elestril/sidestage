@@ -5,5 +5,7 @@
   "venv": ".venv",
   "reportMissingImports": true,
   "reportMissingTypeStubs": false,
+  "reportUnknownParameterType": true,
+  "reportMissingParameterType": true,
   "pythonVersion": "3.12"
 }

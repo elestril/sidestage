@@ -38,6 +38,7 @@ dev = [
     "types-pyyaml (>=6.0.12.20250915,<7.0.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "mcp-server-git (>=2026.1.14,<2027.0.0)",
+    "pytest-timeout (>=2.4.0,<3.0.0)",
 ]
 
 [tool.pytest.ini_options]

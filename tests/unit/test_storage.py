@@ -4,11 +4,11 @@ from sidestage.models import Character, Location, Item
 from sidestage.storage import Storage
 
 @pytest.fixture
-def storage(tmp_path):
+def storage(tmp_path: Path) -> Storage:
     db_file = tmp_path / "world.db"
     return Storage(db_path=db_file)
 
-def test_character_crud(storage):
+def test_character_crud(storage: Storage):
     char = Character(id="char_1", name="Grog", body="A big barbarian")
     
     # Create
@@ -22,27 +22,28 @@ def test_character_crud(storage):
     char.body = "A very big barbarian"
     storage.update_character(char)
     retrieved_updated = storage.get_character("char_1")
+    assert retrieved_updated is not None
     assert retrieved_updated.body == "A very big barbarian"
     
     # Delete
     storage.delete_character("char_1")
     assert storage.get_character("char_1") is None
 
-def test_location_crud(storage):
+def test_location_crud(storage: Storage):
     loc = Location(id="loc_1", name="Tavern", body="A noisy place")
     storage.add_location(loc)
     assert storage.get_location("loc_1") == loc
     storage.delete_location("loc_1")
     assert storage.get_location("loc_1") is None
 
-def test_item_crud(storage):
+def test_item_crud(storage: Storage):
     item = Item(id="item_1", name="Sword", body="Sharp")
     storage.add_item(item)
     assert storage.get_item("item_1") == item
     storage.delete_item("item_1")
     assert storage.get_item("item_1") is None
 
-def test_list_entities(storage):
+def test_list_entities(storage: Storage):
     storage.add_character(Character(id="n1", name="A", body=""))
     storage.add_character(Character(id="n2", name="B", body=""))
     

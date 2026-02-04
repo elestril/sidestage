@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
 from sidestage.schemas import (
@@ -6,29 +7,37 @@ from sidestage.schemas import (
     SceneCreateRequest, EntityMarkdownUpdateRequest, ChatRequest,
     EntityListResponse, EntityMarkdownResponse, StatusResponse
 )
+from sidestage.agent import AgentResponse
 from unittest.mock import MagicMock, AsyncMock
 
 class TestApiCompliance:
     @pytest.fixture(autouse=True)
-    def setup_server(self, tmp_path):
+    def setup_server(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         self.campaign_name = "test_compliance_campaign"
         
         # Mock the agent creation and LLM availability check
-        with pytest.MonkeyPatch.context() as m:
-            m.setattr("sidestage.campaign.Campaign._ensure_llm_availability", lambda s: None)
-            
-            mock_agent = MagicMock()
-            mock_agent.arun = AsyncMock(return_value="I am a mocked agent.")
-            m.setattr("sidestage.campaign.Campaign.create_agent", lambda s: mock_agent)
-            
-            self.orchestrator = SidestageOrchestrator(
-                campaign_name=self.campaign_name,
-                base_dir=tmp_path
-            )
-            # Create a mock agent explicitly if the patch didn't catch it in __init__
-            self.orchestrator.campaign.agent = mock_agent
-            
-            self.client = TestClient(self.orchestrator.fastapi_app)
+        monkeypatch.setattr("sidestage.campaign.Campaign._ensure_llm_availability", lambda s: None)
+        
+        mock_agent = MagicMock()
+        mock_agent.arun = AsyncMock(return_value=AgentResponse(content="I am a mocked agent."))
+        mock_agent.model = "gpt-3.5-turbo" # Valid string for LiteLLM
+        mock_agent.api_base = "http://localhost:8080"
+        mock_agent.api_key = "sk-dummy"
+        mock_agent.tools = []
+        mock_agent.debug_mode = False
+        
+        monkeypatch.setattr("sidestage.campaign.Campaign.create_agent", lambda s: mock_agent)
+        # Also patch LiteLLMAgent in character.py because AgentActor creates new instances
+        monkeypatch.setattr("sidestage.character.LiteLLMAgent", lambda **kwargs: mock_agent)
+        
+        self.orchestrator = SidestageOrchestrator(
+            campaign_name=self.campaign_name,
+            base_dir=tmp_path
+        )
+        # Create a mock agent explicitly if the patch didn't catch it in __init__
+        self.orchestrator.campaign.agent = mock_agent
+        
+        self.client = TestClient(self.orchestrator.fastapi_app)
 
     def test_list_entities_schema(self):
         # Create a dummy entity
@@ -89,7 +98,7 @@ class TestApiCompliance:
         assert "user_message" in data
         assert "agent_message" in data
         assert data["user_message"]["character_id"] == "user" # Fallback logic in scene.py sets this
-        assert data["agent_message"]["character_id"] == "char_co_author"
+        assert data["agent_message"] is None # Asynchronous architecture means None in response
 
     def test_get_entity_markdown(self):
         char = Character(id="char_md", name="MD Character", body="MD Body")
@@ -111,6 +120,7 @@ class TestApiCompliance:
         assert response.json()["status"] == "ok"
         
         updated = self.orchestrator.campaign.storage.get_character("char_data")
+        assert updated is not None
         assert updated.name == "New Name"
 
     def test_list_scenes(self):
@@ -122,16 +132,11 @@ class TestApiCompliance:
         assert any(s["id"] == "scene_list" for s in data)
 
     def test_get_scene_messages(self):
-        # Fix ChatMessage instantiation to include required character_id if needed,
-        # but ChatMessage schema was just updated to require character_id.
-        # Wait, the previous test failure was due to ImportErrors.
-        # I need to check ChatMessage schema again.
-        # It has character_id now.
-        
+        # Fix ChatMessage instantiation to include required character_id and actor_id
         msg = ChatMessage(
             id="msg_1", name="M1", body="B1", scene_id="scene_msg", 
-            gametime=0, walltime="now", actor="user", message="Hello",
-            character_id="char_user" # Added required field
+            gametime=0, walltime="now", actor_id="user", message="Hello",
+            character_id="char_user"
         )
         self.orchestrator.campaign.storage.add_scene(Scene(id="scene_msg", name="S Msg", body="B", messages=[msg]))
         
@@ -167,5 +172,6 @@ class TestApiCompliance:
         # Depending on how import works (add vs update), it might or might not update if ID exists.
         # Storage.add_character uses INSERT OR REPLACE, so it should update.
         # Let's verify.
+        assert updated is not None
         assert updated.name == "Imported Character"
 

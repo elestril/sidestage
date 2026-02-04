@@ -31,6 +31,38 @@ class ChatMessage(Event):
     message: str = Field(..., description="The content of the chat message")
     widget: Optional[Dict[str, Any]] = Field(default=None, description="Optional interactive widget data")
 
+    @model_validator(mode='before')
+    @classmethod
+    def backfill_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Handle missing character_id
+            if "character_id" not in data:
+                # Legacy data might have 'actor' field
+                actor = data.get("actor")
+                if actor:
+                    # Map 'actor' to 'actor_id' if missing
+                    if "actor_id" not in data:
+                        data["actor_id"] = actor
+                    
+                    # Map 'actor' to 'character_id'
+                    # If actor was 'user', character_id is likely 'user' (or whatever default)
+                    # If actor was 'agent', character_id was likely 'char_co_author'
+                    if actor == "agent":
+                        data["character_id"] = "char_co_author"
+                    elif actor == "user":
+                        data["character_id"] = "user" # Or 'char_user' if we standardized that
+                    else:
+                        data["character_id"] = actor
+                else:
+                    # Fallback if no actor info either (shouldn't happen for valid messages)
+                    data["character_id"] = "unknown"
+            
+            # Handle missing actor_id if we just have character_id (less likely for legacy, but possible)
+            if "actor_id" not in data and "actor" in data:
+                data["actor_id"] = data["actor"]
+
+        return data
+
 class JoinEvent(Event):
     actor_id: str = Field(..., description="ID of the Actor who joined")
 
@@ -92,4 +124,4 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     user_message: ChatMessage
-    agent_message: ChatMessage
+    agent_message: Optional[ChatMessage] = None

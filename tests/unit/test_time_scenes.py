@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from sidestage.time import Gametime
 from sidestage.models import Scene, Event
 from sidestage.storage import Storage
@@ -11,7 +12,7 @@ def test_gametime_conversion():
     assert gt2.seconds == (24 * 3600) + (12 * 3600)
     assert gt2.to_string() == "Day 1, 12:00:00"
 
-def test_scene_crud(tmp_path):
+def test_scene_crud(tmp_path: Path):
     storage = Storage(db_path=tmp_path / "test.db")
     
     scene = Scene(
@@ -31,7 +32,7 @@ def test_scene_crud(tmp_path):
     assert len(scenes) == 1
     assert scenes[0].id == "scene_1"
 
-def test_event_storage(tmp_path):
+def test_event_storage(tmp_path: Path):
     storage = Storage(db_path=tmp_path / "test.db")
     
     event = Event(

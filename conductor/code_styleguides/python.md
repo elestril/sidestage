@@ -17,8 +17,9 @@ This document summarizes key rules and best practices from the Google Python Sty
 - **Indentation:** 4 spaces per indentation level. Never use tabs.
 - **Blank Lines:** Two blank lines between top-level definitions (classes, functions). One blank line between method definitions.
 - **Whitespace:** Avoid extraneous whitespace. Surround binary operators with single spaces.
-- **Docstrings:** Use `"""triple double quotes"""`. Every public module, function, class, and method must have a docstring.
+- **Docstrings:** Use `"""triple double quotes"""`. Every public module, function, class, and method (including **test methods**) must have a comprehensive docstring.
   - **Format:** Start with a one-line summary. Include `Args:`, `Returns:`, and `Raises:` sections.
+- **File Structure:** Adhere to the "One Class Per File" rule. Each class should be defined in its own file to improve discoverability and maintainability, unless it is a small helper class strongly coupled to the main class in the file.
 - **Strings:** Use f-strings for formatting. Be consistent with single (`'`) or double (`"`) quotes.
 - **`TODO` Comments:** Use `TODO(username): Fix this.` format.
 - **Imports Formatting:** Imports should be on separate lines and grouped: standard library, third-party, and your own application's imports.

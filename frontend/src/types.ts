@@ -20,7 +20,8 @@ export interface Scene {
 
 export interface ChatMessage {
   id: string;
-  actor: string;
+  actor_id: string;
+  character_id: string;
   message: string;
   scene_id: string;
   gametime: number;

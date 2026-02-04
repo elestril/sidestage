@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-def test_logging_to_campaign_server_log(tmp_path):
+def test_logging_to_campaign_server_log(tmp_path: Path):
     # Use a temporary directory for the test to avoid side effects
     os.chdir(tmp_path)
     

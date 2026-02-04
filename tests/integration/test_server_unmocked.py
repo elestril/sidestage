@@ -16,7 +16,7 @@ def is_backend_up():
 @pytest.mark.skipif(not is_backend_up(), reason="Backend at http://medusa:8080/health is unreachable")
 class TestServerUnmocked:
     @pytest.fixture(autouse=True)
-    def setup_server(self, tmp_path):
+    def setup_server(self, tmp_path: Path):
         """
         Setup a real orchestrator in a temp directory.
         No mocking of agents or models here.
@@ -53,7 +53,7 @@ class TestServerUnmocked:
         assert len(scene.messages) >= 2 # User msg + Agent msg
         
         last_msg = scene.messages[-1]
-        assert last_msg.actor == "agent"
+        assert last_msg.actor_id == "agent"
         content = last_msg.message
         
         print(f"Received response: {content}")
