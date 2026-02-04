@@ -1,9 +1,9 @@
-from sidestage.models import NPC, Location, Item
+from sidestage.models import Character, Location, Item
 
-def test_npc_model():
-    npc = NPC(id="test", name="Test", body="Test body")
-    assert npc.name == "Test"
-    assert npc.body == "Test body"
+def test_character_model():
+    char = Character(id="test", name="Test", body="Test body")
+    assert char.name == "Test"
+    assert char.body == "Test body"
 
 def test_location_model():
     loc = Location(id="test", name="Test", body="Test body")

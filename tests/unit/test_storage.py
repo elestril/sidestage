@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from sidestage.models import NPC, Location, Item
+from sidestage.models import Character, Location, Item
 from sidestage.storage import Storage
 
 @pytest.fixture
@@ -8,25 +8,25 @@ def storage(tmp_path):
     db_file = tmp_path / "world.db"
     return Storage(db_path=db_file)
 
-def test_npc_crud(storage):
-    npc = NPC(id="npc_1", name="Grog", body="A big barbarian")
+def test_character_crud(storage):
+    char = Character(id="char_1", name="Grog", body="A big barbarian")
     
     # Create
-    storage.add_npc(npc)
+    storage.add_character(char)
     
     # Read
-    retrieved = storage.get_npc("npc_1")
-    assert retrieved == npc
+    retrieved = storage.get_character("char_1")
+    assert retrieved == char
     
     # Update
-    npc.body = "A very big barbarian"
-    storage.update_npc(npc)
-    retrieved_updated = storage.get_npc("npc_1")
+    char.body = "A very big barbarian"
+    storage.update_character(char)
+    retrieved_updated = storage.get_character("char_1")
     assert retrieved_updated.body == "A very big barbarian"
     
     # Delete
-    storage.delete_npc("npc_1")
-    assert storage.get_npc("npc_1") is None
+    storage.delete_character("char_1")
+    assert storage.get_character("char_1") is None
 
 def test_location_crud(storage):
     loc = Location(id="loc_1", name="Tavern", body="A noisy place")
@@ -43,9 +43,9 @@ def test_item_crud(storage):
     assert storage.get_item("item_1") is None
 
 def test_list_entities(storage):
-    storage.add_npc(NPC(id="n1", name="A", body=""))
-    storage.add_npc(NPC(id="n2", name="B", body=""))
+    storage.add_character(Character(id="n1", name="A", body=""))
+    storage.add_character(Character(id="n2", name="B", body=""))
     
-    npcs = storage.list_npcs()
-    assert len(npcs) == 2
-    assert {n.id for n in npcs} == {"n1", "n2"}
+    chars = storage.list_characters()
+    assert len(chars) == 2
+    assert {c.id for c in chars} == {"n1", "n2"}

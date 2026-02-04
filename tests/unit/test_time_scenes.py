@@ -1,6 +1,6 @@
 import pytest
 from sidestage.time import Gametime
-from sidestage.models import SceneData, Event
+from sidestage.models import Scene, Event
 from sidestage.storage import Storage
 
 def test_gametime_conversion():
@@ -14,7 +14,7 @@ def test_gametime_conversion():
 def test_scene_crud(tmp_path):
     storage = Storage(db_path=tmp_path / "test.db")
     
-    scene = SceneData(
+    scene = Scene(
         id="scene_1",
         name="Test Scene",
         body="A test scene",

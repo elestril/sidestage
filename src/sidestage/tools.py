@@ -1,7 +1,7 @@
 from typing import List, Optional, Callable, Any
 import json
 from sidestage.storage import Storage
-from sidestage.models import NPC, Location, Item
+from sidestage.models import Character, Location, Item
 
 class WorldTools:
     def __init__(self, storage: Storage, on_change: Optional[Callable[[], Any]] = None):
@@ -12,78 +12,78 @@ class WorldTools:
         if self.on_change:
             self.on_change()
 
-    def create_npc(self, name: str, body: str, location_id: Optional[str] = None) -> str:
+    def create_character(self, name: str, body: str, location_id: Optional[str] = None) -> str:
         """
-        Creates a new NPC in the world.
+        Creates a new Character in the world.
         
         Args:
-            name: Name of the NPC.
-            body: Markdown description of the NPC.
-            location_id: Optional ID of the location where the NPC starts.
+            name: Name of the Character.
+            body: Markdown description of the Character.
+            location_id: Optional ID of the location where the Character starts.
             
         Returns:
-            JSON string of the created NPC.
+            JSON string of the created Character.
         """
         import uuid
-        entity_id = f"npc_{str(uuid.uuid4())[:8]}"
+        entity_id = f"char_{str(uuid.uuid4())[:8]}"
         
-        npc = NPC(id=entity_id, name=name, body=body, location_id=location_id)
-        self.storage.add_npc(npc)
+        char = Character(id=entity_id, name=name, body=body, location_id=location_id)
+        self.storage.add_character(char)
         self._notify_change()
-        return npc.model_dump_json()
+        return char.model_dump_json()
 
-    def update_npc(self, npc_id: str, name: Optional[str] = None, body: Optional[str] = None, location_id: Optional[str] = None) -> str:
+    def update_character(self, character_id: str, name: Optional[str] = None, body: Optional[str] = None, location_id: Optional[str] = None) -> str:
         """
-        Updates an existing NPC.
+        Updates an existing Character.
         
         Args:
-            npc_id: The ID of the NPC to update.
+            character_id: The ID of the Character to update.
             name: New name (optional).
             body: New markdown body (optional).
             location_id: New location ID (optional).
             
         Returns:
-            JSON string of the updated NPC or error message.
+            JSON string of the updated Character or error message.
         """
-        npc = self.storage.get_npc(npc_id)
-        if not npc:
-            return f"Error: NPC with ID {npc_id} not found."
+        char = self.storage.get_character(character_id)
+        if not char:
+            return f"Error: Character with ID {character_id} not found."
             
         if name is not None:
-            npc.name = name
+            char.name = name
         if body is not None:
-            npc.body = body
+            char.body = body
         if location_id is not None:
-            npc.location_id = location_id
+            char.location_id = location_id
             
-        self.storage.update_npc(npc)
+        self.storage.update_character(char)
         self._notify_change()
-        return npc.model_dump_json()
+        return char.model_dump_json()
 
-    def get_npc(self, npc_id: str) -> str:
+    def get_character(self, character_id: str) -> str:
         """
-        Retrieves details of an NPC by ID.
+        Retrieves details of a Character by ID.
         
         Args:
-            npc_id: The unique ID of the NPC.
+            character_id: The unique ID of the Character.
             
         Returns:
-            JSON string of the NPC details or "Not found".
+            JSON string of the Character details or "Not found".
         """
-        npc = self.storage.get_npc(npc_id)
-        if npc:
-            return npc.model_dump_json()
-        return "NPC not found."
+        char = self.storage.get_character(character_id)
+        if char:
+            return char.model_dump_json()
+        return "Character not found."
 
-    def list_npcs(self) -> str:
+    def list_characters(self) -> str:
         """
-        Lists all NPCs in the world.
+        Lists all Characters in the world.
         
         Returns:
-            JSON list of all NPCs.
+            JSON list of all Characters.
         """
-        npcs = self.storage.list_npcs()
-        return json.dumps([n.model_dump() for n in npcs])
+        chars = self.storage.list_characters()
+        return json.dumps([n.model_dump() for n in chars])
 
     def create_location(self, name: str, body: str) -> str:
         """

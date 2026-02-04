@@ -26,9 +26,9 @@ def test_agent_tools_configuration(tmp_path):
         campaign = Campaign(name="test", base_dir=tmp_path)
         agent = campaign.agent
     
-    assert agent.tools is not None
-    tool_names = [t.__name__ for t in agent.tools]
-    assert "create_npc" in tool_names
-    assert "update_npc" in tool_names
-    assert "list_npcs" in tool_names
-    assert "create_location" in tool_names
+        assert agent.tools is not None
+        tool_names = [t.__name__ for t in agent.tools]
+        assert "create_character" in tool_names
+        assert "update_character" in tool_names
+        assert "list_characters" in tool_names
+        assert "create_location" in tool_names

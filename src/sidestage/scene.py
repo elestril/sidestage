@@ -3,13 +3,13 @@ from typing import AsyncGenerator, Optional
 from datetime import datetime
 import uuid
 
-from sidestage.schemas import SceneData, ChatRequest, ChatMessage
+from sidestage.schemas import Scene, ChatRequest, ChatMessage
 from sidestage.entities import entity_to_markdown
 
 logger = logging.getLogger(__name__)
 
-class Scene:
-    def __init__(self, campaign, data: SceneData):
+class SceneLogic:
+    def __init__(self, campaign, data: Scene):
         self.campaign = campaign
         self.data = data
 
@@ -21,13 +21,17 @@ class Scene:
     def messages(self) -> list[ChatMessage]:
         return self.data.messages
 
-    def create_message(self, actor: str, text: str) -> ChatMessage:
+    def create_message(self, actor: str, text: str, character_id: Optional[str] = None) -> ChatMessage:
         """
         Factory to create a ChatMessage associated with this scene.
         Does NOT add it to the scene (use add_message for that).
         """
         import uuid
         from datetime import datetime
+        
+        # Fallback for now until Actor system is fully integrated
+        final_character_id = character_id or actor
+        
         return ChatMessage(
             id=f"msg_{str(uuid.uuid4())[:8]}",
             name=f"{actor.capitalize()} Message",
@@ -36,6 +40,7 @@ class Scene:
             gametime=self.data.current_gametime or 0,
             walltime=datetime.now().isoformat(),
             actor=actor,
+            character_id=final_character_id,
             message=text
         )
 
@@ -68,6 +73,7 @@ class Scene:
             gametime=self.data.current_gametime or 0,
             walltime=datetime.now().isoformat(),
             actor="agent",
+            character_id="char_co_author", # Default to co-author for now
             message=response_content
         )
         

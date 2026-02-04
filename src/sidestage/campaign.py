@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
-from sidestage.scene import Scene
-from sidestage.schemas import SceneData, NPC, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
+from sidestage.scene import SceneLogic
+from sidestage.schemas import Scene, Character, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
 from sidestage.entities import entity_to_markdown, markdown_to_entity
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,8 @@ class Campaign:
         
         self.agent = self.create_agent()
 
-        # Ensure default scene exists
-        self._ensure_default_scenes()
+        # Ensure default scene and characters exist
+        self._ensure_defaults()
 
     def _ensure_campaign_dir(self):
         if not self.campaign_dir.exists():
@@ -118,16 +118,16 @@ class Campaign:
             instructions=[
                 "You are the Sidestage Co-Author, a world-building assistant.",
                 "STRICT PERSONA: NEVER identify as a 'large language model'. You are strictly the Sidestage Co-Author.",
-                "DATABASE-ONLY KNOWLEDGE: You know NOTHING about NPCs, locations, or items except what is in your database.",
-                "TOOL-FIRST: If asked about characters, world details, or 'which NPCs do you know?', you MUST call `list_npcs` immediately.",
+                "DATABASE-ONLY KNOWLEDGE: You know NOTHING about Characters, locations, or items except what is in your database.",
+                "TOOL-FIRST: If asked about characters, world details, or 'which characters do you know?', you MUST call `list_characters` immediately.",
                 "NEVER list famous characters from other games (like Fallout or Elder Scrolls) unless they were created in THIS campaign.",
                 "TONE: Helpful and collaborative."
             ],
             tools=[
-                self.world_tools.create_npc,
-                self.world_tools.update_npc,
-                self.world_tools.get_npc,
-                self.world_tools.list_npcs,
+                self.world_tools.create_character,
+                self.world_tools.update_character,
+                self.world_tools.get_character,
+                self.world_tools.list_characters,
                 self.world_tools.create_location,
                 self.world_tools.update_location,
                 self.world_tools.list_locations,
@@ -138,15 +138,27 @@ class Campaign:
             debug_mode=False
         )
 
-    def _ensure_default_scenes(self):
+    def _ensure_defaults(self):
+        # Ensure default scene exists
         planning_scene = self.storage.get_scene("campaign_planning")
         if not planning_scene:
             logger.info("Creating default 'Campaign Planning' scene.")
-            self.storage.add_scene(SceneData(
+            self.storage.add_scene(Scene(
                 id="campaign_planning",
                 name="Campaign Planning",
                 body="The default space for discussing the campaign world, characters, and plot.",
                 current_gametime=None
+            ))
+        
+        # Ensure default co-author character exists
+        co_author = self.storage.get_character("char_co_author")
+        if not co_author:
+            logger.info("Creating default 'Co-Author' character.")
+            self.storage.add_character(Character(
+                id="char_co_author",
+                name="Co-Author",
+                body="I am the Sidestage Co-Author, a world-building assistant.",
+                unseen=True
             ))
 
     def _ensure_llm_availability(self):
@@ -215,13 +227,13 @@ class Campaign:
     async def update_entity_markdown(self, entity_id: str, markdown: str) -> bool:
         try:
             entity = markdown_to_entity(markdown, override_id=entity_id)
-            if isinstance(entity, NPC):
-                self.storage.update_npc(entity)
+            if isinstance(entity, Character):
+                self.storage.update_character(entity)
             elif isinstance(entity, Location):
                 self.storage.update_location(entity)
             elif isinstance(entity, Item):
                 self.storage.update_item(entity)
-            elif isinstance(entity, SceneData):
+            elif isinstance(entity, Scene):
                 self.storage.update_scene(entity)
             return True
         except Exception as e:
@@ -237,25 +249,19 @@ class Campaign:
                 if existing:
                     entity_type = existing.__class__.__name__
             
-            if entity_type == "NPC":
-                obj = NPC(**data)
+            if entity_type == "Character":
+                obj = Character(**data)
             elif entity_type == "Location":
                 obj = Location(**data)
             elif entity_type == "Item":
                 obj = Item(**data)
-            elif entity_type == "Scene" or entity_type == "SceneData":
-                obj = SceneData(**data)
+            elif entity_type == "Scene":
+                obj = Scene(**data)
             else:
                 raise ValueError(f"Unknown entity type: {entity_type}")
             
-            if isinstance(obj, NPC):
-                self.storage.update_npc(obj)
-            elif isinstance(obj, Location):
-                self.storage.update_location(obj)
-            elif isinstance(obj, Item):
-                self.storage.update_item(obj)
-            elif isinstance(obj, SceneData):
-                self.storage.update_scene(obj)
+            if isinstance(obj, Character):
+                self.storage.update_character(obj)
             return True
         except Exception as e:
             logger.error(f"Error updating entity {entity_id}: {e}")
@@ -284,13 +290,13 @@ class Campaign:
             try:
                 md_content = md_file.read_text()
                 entity = markdown_to_entity(md_content)
-                if isinstance(entity, NPC):
-                    self.storage.add_npc(entity)
+                if isinstance(entity, Character):
+                    self.storage.add_character(entity)
                 elif isinstance(entity, Location):
                     self.storage.add_location(entity)
                 elif isinstance(entity, Item):
                     self.storage.add_item(entity)
-                elif isinstance(entity, SceneData):
+                elif isinstance(entity, Scene):
                     self.storage.add_scene(entity)
                 elif isinstance(entity, Event):
                     self.storage.add_event(entity)
@@ -303,10 +309,10 @@ class Campaign:
         scenes = self.storage.list_scenes()
         return [s.model_dump() for s in scenes]
 
-    async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> SceneData:
+    async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> Scene:
         import uuid
         scene_id = f"scene_{str(uuid.uuid4())[:8]}"
-        scene = SceneData(
+        scene = Scene(
             id=scene_id,
             name=name,
             body=description,
@@ -316,16 +322,16 @@ class Campaign:
         return scene
 
     def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessage]]:
-        scene_data = self.storage.get_scene(scene_id)
-        if not scene_data:
+        scene_schema = self.storage.get_scene(scene_id)
+        if not scene_schema:
             return None
-        return scene_data.messages
+        return scene_schema.messages
 
-    def get_scene_object(self, scene_id: str) -> Optional[Scene]:
+    def get_scene_object(self, scene_id: str) -> Optional[SceneLogic]:
         """
-        Returns a Scene logic object for the given ID.
+        Returns a SceneLogic logic object for the given ID.
         """
         data = self.storage.get_scene(scene_id)
         if not data:
             return None
-        return Scene(self, data)
+        return SceneLogic(self, data)

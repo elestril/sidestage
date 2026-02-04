@@ -2,7 +2,7 @@ import pytest
 import json
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
-from sidestage.schemas import NPC
+from sidestage.schemas import Character
 from unittest.mock import patch
 
 class TestSyncIntegration:
@@ -20,11 +20,11 @@ class TestSyncIntegration:
 
     def test_websocket_broadcast_on_entity_update(self, client):
         # Create a dummy entity via REST
-        npc_data = {"id": "sync_npc", "name": "Sync NPC", "body": "Original", "type": "NPC"}
+        char_data = {"id": "sync_char", "name": "Sync Character", "body": "Original", "type": "Character"}
         
         with client.websocket_connect("/v1/ws") as websocket:
             # Trigger an update via REST
-            resp = client.post("/v1/entities/sync_npc", json={"name": "Updated Sync NPC", "type": "NPC", "body": "New"})
+            resp = client.post("/v1/entities/sync_char", json={"name": "Updated Sync Char", "type": "Character", "body": "New"})
             assert resp.status_code == 200
             
             # Receive broadcast
@@ -38,7 +38,7 @@ class TestSyncIntegration:
                 # Client 1 sends a sync message
                 sync_msg = {
                     "type": "entity_content_sync",
-                    "entity_id": "npc_1",
+                    "entity_id": "char_1",
                     "body": "User 1 is typing..."
                 }
                 ws1.send_json(sync_msg)
@@ -65,9 +65,9 @@ class TestSyncIntegration:
                 # Receive user message broadcast
                 msg1 = ws.receive_json()
                 assert msg1["type"] == "chat_message"
-                assert msg1["message"]["actor"] == "user"
+                assert msg1["message"]["character_id"] == "user"
                 
                 # Receive agent message broadcast
                 msg2 = ws.receive_json()
                 assert msg2["type"] == "chat_message"
-                assert msg2["message"]["actor"] == "agent"
+                assert msg2["message"]["character_id"] == "char_co_author"

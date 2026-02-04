@@ -2,7 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import Type, List, Optional, cast, Union
-from sidestage.models import NPC, Location, Item, Entity, SceneData, Event
+from sidestage.models import Character, Location, Item, Entity, Scene, Event
 
 class Storage:
     def __init__(self, db_path: Union[str, Path]):
@@ -11,7 +11,7 @@ class Storage:
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS npcs (id TEXT PRIMARY KEY, data TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS characters (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS locations (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, data TEXT)")
@@ -41,21 +41,21 @@ class Storage:
             cursor = conn.execute(f"SELECT data FROM {table}")
             return [model_cls.model_validate_json(row[0]) for row in cursor.fetchall()]
 
-    # NPC
-    def add_npc(self, npc: NPC):
-        self._save_entity("npcs", npc)
+    # Character
+    def add_character(self, character: Character):
+        self._save_entity("characters", character)
     
-    def update_npc(self, npc: NPC):
-        self._save_entity("npcs", npc)
+    def update_character(self, character: Character):
+        self._save_entity("characters", character)
 
-    def get_npc(self, npc_id: str) -> Optional[NPC]:
-        return cast(Optional[NPC], self._get_entity("npcs", npc_id, NPC))
+    def get_character(self, character_id: str) -> Optional[Character]:
+        return cast(Optional[Character], self._get_entity("characters", character_id, Character))
 
-    def delete_npc(self, npc_id: str):
-        self._delete_entity("npcs", npc_id)
+    def delete_character(self, character_id: str):
+        self._delete_entity("characters", character_id)
 
-    def list_npcs(self) -> List[NPC]:
-        return cast(List[NPC], self._list_entities("npcs", NPC))
+    def list_characters(self) -> List[Character]:
+        return cast(List[Character], self._list_entities("characters", Character))
 
     # Location
     def add_location(self, location: Location):
@@ -90,20 +90,20 @@ class Storage:
         return cast(List[Item], self._list_entities("items", Item))
 
     # Scene
-    def add_scene(self, scene: SceneData):
+    def add_scene(self, scene: Scene):
         self._save_entity("scenes", scene)
 
-    def update_scene(self, scene: SceneData):
+    def update_scene(self, scene: Scene):
         self._save_entity("scenes", scene)
 
-    def get_scene(self, scene_id: str) -> Optional[SceneData]:
-        return cast(Optional[SceneData], self._get_entity("scenes", scene_id, SceneData))
+    def get_scene(self, scene_id: str) -> Optional[Scene]:
+        return cast(Optional[Scene], self._get_entity("scenes", scene_id, Scene))
 
     def delete_scene(self, scene_id: str):
         self._delete_entity("scenes", scene_id)
 
-    def list_scenes(self) -> List[SceneData]:
-        return cast(List[SceneData], self._list_entities("scenes", SceneData))
+    def list_scenes(self) -> List[Scene]:
+        return cast(List[Scene], self._list_entities("scenes", Scene))
 
     # Event
     def add_event(self, event: Event):
@@ -115,7 +115,7 @@ class Storage:
 
     def list_all_entities(self) -> List[Entity]:
         all_entities: List[Entity] = []
-        all_entities.extend(self.list_npcs())
+        all_entities.extend(self.list_characters())
         all_entities.extend(self.list_locations())
         all_entities.extend(self.list_items())
         all_entities.extend(self.list_scenes())

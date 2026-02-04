@@ -8,19 +8,20 @@ def test_world_tools_wrapper(tmp_path):
     tools = WorldTools(storage=storage)
     
     # Test create
-    resp = tools.create_npc("TestNPC", "A test guy")
+    resp = tools.create_character("TestNPC", "A test guy")
     assert "TestNPC" in resp
-    npc_data = storage.list_npcs()[0]
-    npc_id = npc_data.id
+    npc_data = storage.list_characters()[0]
+    assert npc_data.name == "TestNPC"
+    character_id = npc_data.id
     
     # Update
-    update_resp = tools.update_npc(npc_id, body="Updated body")
+    update_resp = tools.update_character(character_id, body="Updated body")
     assert "Updated body" in update_resp
     
-    updated_npc = storage.get_npc(npc_id)
-    assert updated_npc is not None
-    assert updated_npc.body == "Updated body"
+    updated_char = storage.get_character(character_id)
+    assert updated_char is not None
+    assert updated_char.body == "Updated body"
     
     # Test list
-    list_resp = tools.list_npcs()
+    list_resp = tools.list_characters()
     assert "TestNPC" in list_resp

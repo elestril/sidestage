@@ -1,7 +1,7 @@
 import yaml
 import re
 from typing import Dict, Any, Type, Optional
-from sidestage.models import Entity, NPC, Location, Item, SceneData, Event
+from sidestage.models import Entity, Character, Location, Item, Scene, Event
 
 def entity_to_markdown(entity: Entity) -> str:
     """
@@ -45,13 +45,13 @@ def markdown_to_entity(content: str, override_id: Optional[str] = None) -> Entit
     if override_id:
         data["id"] = override_id
         
-    entity_type = data.get("type", "Entity")
+    entity_type = data.get("type", "Character")
     
     type_map: Dict[str, Type[Entity]] = {
-        "NPC": NPC,
+        "Character": Character,
         "Location": Location,
         "Item": Item,
-        "Scene": SceneData,
+        "Scene": Scene,
         "Event": Event,
         "Entity": Entity
     }

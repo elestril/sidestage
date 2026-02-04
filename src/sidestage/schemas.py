@@ -15,8 +15,9 @@ class Item(Entity):
 class Location(Entity):
     connected_locations: List[str] = Field(default_factory=list, description="IDs of connected locations")
 
-class NPC(Entity):
-    location_id: Optional[str] = Field(default=None, description="ID of the location where the NPC is currently present")
+class Character(Entity):
+    unseen: bool = Field(default=False, description="If true, this character is not perceived by other in-game entities.")
+    location_id: Optional[str] = Field(default=None, description="ID of the location where the character is currently present")
     inventory: List[str] = Field(default_factory=list, description="IDs of items in possession")
 
 class Event(Entity):
@@ -25,30 +26,21 @@ class Event(Entity):
     walltime: str = Field(..., description="ISO formatted walltime when the event occurred")
 
 class ChatMessage(Event):
-    actor: str = Field(..., description="ID of the NPC or 'user'/'agent' who sent the message")
+    character_id: str = Field(..., description="ID of the Character persona who sent the message")
+    actor_id: Optional[str] = Field(default=None, description="ID of the Actor who originated the message (for audit)")
     message: str = Field(..., description="The content of the chat message")
     widget: Optional[Dict[str, Any]] = Field(default=None, description="Optional interactive widget data")
 
-    @model_validator(mode='before')
-    @classmethod
-    def handle_legacy_format(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "role" in data and "content" in data:
-            # Migration logic for legacy messages
-            import uuid
-            from datetime import datetime
-            return {
-                "id": f"msg_legacy_{str(uuid.uuid4())[:8]}",
-                "name": "Legacy Message",
-                "body": data["content"],
-                "scene_id": "unknown", # We don't know the scene from the message dict alone
-                "gametime": 0,
-                "walltime": datetime.now().isoformat(),
-                "actor": "user" if data["role"] == "user" else "agent",
-                "message": data["content"]
-            }
-        return data
+class JoinEvent(Event):
+    actor_id: str = Field(..., description="ID of the Actor who joined")
 
-class SceneData(Entity):
+class LeaveEvent(Event):
+    actor_id: str = Field(..., description="ID of the Actor who left")
+
+class FastForwardEvent(Event):
+    duration_str: str = Field(..., description="A string describing the time jump, e.g. '2 hours'")
+
+class Scene(Entity):
     current_gametime: Optional[int] = Field(default=None, description="Current gametime in seconds. None if inactive.")
     location_id: Optional[str] = Field(default=None, description="Primary location of the scene")
     events: List[str] = Field(default_factory=list, description="IDs of events in this scene")
