@@ -19,7 +19,7 @@ const renderMarkdown = (text: string) => {
 
 const ScenesPage: React.FC = () => {
   const { sceneId } = useParams<{ sceneId: string }>();
-  const { setCurrentSceneId, activeScene } = useAppContext();
+  const { setCurrentSceneId, activeScene, entities } = useAppContext();
   const [scenesSplitterPos, setScenesSplitterPos] = useState(40); // Percentage for prose vs chat
   const [isResizingScenes, setIsResizingScenes] = useState(false);
 
@@ -37,6 +37,8 @@ const ScenesPage: React.FC = () => {
       setScenesSplitterPos(newPos);
     }
   };
+
+  const characters = entities.filter(e => e.type === 'Character');
 
   return (
     <div 
@@ -69,10 +71,25 @@ const ScenesPage: React.FC = () => {
       </div>
 
       {/* Right Bar: Actor Selector */}
-      <aside className="w-64 bg-black p-4 flex flex-col gap-4">
-        <h3 className="text-[10px] uppercase tracking-wider text-[#666] font-bold">Actors</h3>
-        <div className="flex-1 text-xs text-[#444] italic">
-          Actor selector coming soon...
+      <aside className="w-64 bg-black p-4 flex flex-col gap-4 overflow-y-auto">
+        <h3 className="text-[10px] uppercase tracking-wider text-[#666] font-bold">Cast</h3>
+        <div className="flex flex-col gap-2">
+          {characters.map(char => (
+            <div 
+              key={char.id} 
+              className={cn(
+                "p-2 rounded bg-[#1e1e1e] flex items-center gap-2",
+                char.unseen ? "opacity-50 border border-dashed border-[#444]" : "border border-transparent hover:border-[#bb86fc]"
+              )}
+            >
+              <div className={cn("w-2 h-2 rounded-full", char.unseen ? "bg-gray-500" : "bg-green-500")} />
+              <div className="flex-1 overflow-hidden">
+                <div className="text-sm font-bold truncate">{char.name}</div>
+                {char.unseen && <div className="text-[10px] uppercase text-[#888]">Unseen</div>}
+              </div>
+            </div>
+          ))}
+          {characters.length === 0 && <div className="text-xs text-[#444] italic">No characters found.</div>}
         </div>
       </aside>
     </div>

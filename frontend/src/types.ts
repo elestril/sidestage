@@ -7,6 +7,7 @@ export interface Entity {
   location_id?: string | null;
   inventory?: string[];
   connected_locations?: string[];
+  unseen?: boolean;
 }
 
 export interface Scene {

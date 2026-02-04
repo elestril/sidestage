@@ -38,4 +38,4 @@
 - [x] Frontend: Update ChatWidget to render based on `character_id` name/avatar.
 - [x] Frontend: Add visual distinction for `unseen` characters.
 - [x] Frontend: Add a "Reload Default Characters" button to the UI that calls the new endpoint.
-- [ ] Frontend: "Actors" panel (if scope permits).
+- [x] Frontend: "Actors" panel (if scope permits).
