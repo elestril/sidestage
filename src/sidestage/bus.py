@@ -12,26 +12,40 @@ InsertHook = Callable[[Event], Awaitable[Optional[Event]]]
 
 class SceneMessageBus:
     """
-    An asynchronous message bus for a single Scene.
-    Supports multiple listeners and a single insert hook for pre-processing.
+    An asynchronous message bus dedicated to a single Scene.
+    
+    The SceneMessageBus facilitates decoupled communication between components 
+    within a scene (e.g., Characters, Orchestrator, UI Sync). It supports:
+    - Multiple async subscribers (listeners).
+    - A single 'insert hook' for pre-processing or persistence before dispatch.
+    - Asynchronous publishing and processing via an asyncio Queue.
     """
     def __init__(self):
+        """Initialize the SceneMessageBus with an empty listener list and queue."""
         self.listeners: List[EventListener] = []
         self.insert_hook: Optional[InsertHook] = None
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self):
-        """Starts the background worker to process the queue."""
+    async def start(self) -> None:
+        """
+        Start the background worker task to process events from the queue.
+        
+        This method is idempotent; calling it on an already running bus does nothing.
+        """
         if self._running:
             return
         self._running = True
         self._task = asyncio.create_task(self._worker())
         logger.info("SceneMessageBus started.")
 
-    async def stop(self):
-        """Stops the background worker."""
+    async def stop(self) -> None:
+        """
+        Stop the background worker task and cancel any pending processing.
+        
+        This ensures the worker loop exits cleanly.
+        """
         self._running = False
         if self._task:
             self._task.cancel()
@@ -41,24 +55,47 @@ class SceneMessageBus:
                 pass
         logger.info("SceneMessageBus stopped.")
 
-    def subscribe(self, listener: EventListener):
-        """Adds a listener to the bus."""
+    def subscribe(self, listener: EventListener) -> None:
+        """
+        Add a listener to the bus.
+        
+        Args:
+            listener (EventListener): An async function to be called when an event is processed.
+        """
         if listener not in self.listeners:
             self.listeners.append(listener)
 
-    def unsubscribe(self, listener: EventListener):
-        """Removes a listener from the bus."""
+    def unsubscribe(self, listener: EventListener) -> None:
+        """
+        Remove a listener from the bus.
+        
+        Args:
+            listener (EventListener): The listener function to remove.
+        """
         if listener in self.listeners:
             self.listeners.remove(listener)
 
-    def set_insert_hook(self, hook: InsertHook):
-        """Sets the insert hook for the bus."""
+    def set_insert_hook(self, hook: InsertHook) -> None:
+        """
+        Set the insert hook for the bus.
+        
+        The insert hook is called immediately upon `publish()`, BEFORE the event 
+        is added to the queue. It is useful for persistence, validation, or modification.
+        
+        Args:
+            hook (InsertHook): An async function that takes an Event and returns an Event (or None).
+        """
         self.insert_hook = hook
 
-    async def publish(self, event: Event):
+    async def publish(self, event: Event) -> None:
         """
-        Publishes an event to the bus. 
-        It first passes through the insert hook if one is set.
+        Publish an event to the bus.
+        
+        The event first passes through the insert hook (if configured). 
+        If the hook returns an event, it is added to the processing queue.
+        
+        Args:
+            event (Event): The event to publish.
         """
         processed_event: Optional[Event] = event
         if self.insert_hook:
@@ -73,8 +110,12 @@ class SceneMessageBus:
         if processed_event:
             await self.queue.put(processed_event)
 
-    async def _worker(self):
-        """Background worker that pulls events from the queue and dispatches to listeners."""
+    async def _worker(self) -> None:
+        """
+        Background worker loop that pulls events from the queue and dispatches them to listeners.
+        
+        Listeners are invoked concurrently using `asyncio.wait`.
+        """
         while self._running:
             try:
                 event = await self.queue.get()

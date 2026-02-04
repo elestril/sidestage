@@ -1,5 +1,5 @@
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any
+from typing import AsyncGenerator, Optional, Dict, Any, List
 from datetime import datetime
 import uuid
 
@@ -13,7 +13,24 @@ from sidestage.agent import LiteLLMAgent
 logger = logging.getLogger(__name__)
 
 class SceneLogic:
+    """
+    Manages the runtime state and logic of a specific Scene.
+    
+    This class orchestrates:
+    - The SceneMessageBus for event distribution.
+    - Active CharacterLogic instances (agents).
+    - Persistence of scene data via Storage.
+    - Creation and routing of chat messages.
+    """
     def __init__(self, storage: Storage, agent: LiteLLMAgent, data: Scene):
+        """
+        Initialize the SceneLogic.
+
+        Args:
+            storage (Storage): The persistence layer.
+            agent (LiteLLMAgent): The default agent configuration used for spawning characters.
+            data (Scene): The underlying data model for the scene.
+        """
         self.storage = storage
         self.agent = agent
         self.data = data
@@ -25,7 +42,18 @@ class SceneLogic:
         self.bus.set_insert_hook(self._on_publish_hook)
 
     async def _on_publish_hook(self, event: Event) -> Optional[Event]:
-        """Hook called before an event is published to the bus. Handles persistence."""
+        """
+        Hook called before an event is published to the bus.
+        
+        This hook is responsible for persisting relevant events (like ChatMessage)
+        to the scene's history in the database.
+        
+        Args:
+            event (Event): The event being published.
+            
+        Returns:
+            Optional[Event]: The event to proceed with (usually unchanged).
+        """
         if isinstance(event, ChatMessage):
             # 1. Persist to scene data
             self.data.messages.append(event)
@@ -37,8 +65,13 @@ class SceneLogic:
         
         return event
 
-    async def activate(self):
-        """Activates the scene, starting the message bus and activating characters."""
+    async def activate(self) -> None:
+        """
+        Activate the scene.
+        
+        Starts the message bus and activates all characters present in the campaign/scene.
+        This prepares the scene for interactive events.
+        """
         if self._active:
             return
         
@@ -58,8 +91,12 @@ class SceneLogic:
         self._active = True
         logger.info(f"Scene {self.id} activated with {len(self.characters)} characters.")
 
-    async def deactivate(self):
-        """Deactivates the scene, stopping the message bus and characters."""
+    async def deactivate(self) -> None:
+        """
+        Deactivate the scene.
+        
+        Stops the message bus and deactivates all characters.
+        """
         if not self._active:
             return
         
@@ -73,16 +110,28 @@ class SceneLogic:
 
     @property
     def id(self) -> str:
+        """Get the unique identifier of the scene."""
         return self.data.id
 
     @property
-    def messages(self) -> list[ChatMessage]:
+    def messages(self) -> List[ChatMessage]:
+        """Get the list of messages in this scene."""
         return self.data.messages
 
     def create_message(self, actor_id: str, text: str, character_id: Optional[str] = None) -> ChatMessage:
         """
-        Factory to create a ChatMessage associated with this scene.
-        Does NOT add it to the scene (use add_message for that).
+        Factory method to create a ChatMessage associated with this scene.
+        
+        This creates the object but does NOT publish or persist it. 
+        Use `bus.publish(message)` to send it.
+
+        Args:
+            actor_id (str): The ID of the actor (e.g., 'user', 'agent').
+            text (str): The content of the message.
+            character_id (Optional[str]): The ID of the character persona. Defaults to actor_id if None.
+
+        Returns:
+            ChatMessage: The constructed message object.
         """
         import uuid
         from datetime import datetime
@@ -102,18 +151,23 @@ class SceneLogic:
             message=text
         )
 
-    def add_message(self, message: ChatMessage):
+    def add_message(self, message: ChatMessage) -> None:
         """
-        Adds a message to the scene and persists the scene.
-        Deprecated: Use bus.publish(message) instead.
+        Legacy method to add a message directly.
+        
+        Deprecated: Use `bus.publish(message)` instead to ensure event distribution.
         """
         self.data.messages.append(message)
         self.storage.update_scene(self.data)
 
-    async def chat(self, user_message: ChatMessage):
+    async def chat(self, user_message: ChatMessage) -> None:
         """
-        Publishes the user message to the bus.
-        Agent responses will be generated asynchronously by AgentActors listening to the bus.
+        Entry point for user chat interaction.
+        
+        Publishes the user message to the bus, which will trigger any listening 
+        AgentActors to generate responses asynchronously.
+
+        Args:
+            user_message (ChatMessage): The message from the user.
         """
         await self.bus.publish(user_message)
-

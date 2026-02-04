@@ -2,7 +2,7 @@
   "id": "npc_agents_20260202",
   "name": "NPC Agents & Actor System",
   "description": "Refactor NPC entity to Character and introduce Actor system for multi-agent support.",
-  "status": "planned",
+  "status": "completed",
   "created_at": "2026-02-02",
   "owner": "harald"
 }

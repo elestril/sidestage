@@ -16,6 +16,9 @@ from sidestage.entities import entity_to_markdown, markdown_to_entity
 logger = logging.getLogger(__name__)
 
 class SidestageConfig(BaseModel):
+    """
+    Configuration model for Sidestage settings, primarily LLM connection details.
+    """
     # LLM Configuration
     llm_provider: str = Field(default="llama_cpp", description="LLM provider to use: 'llama_cpp' or 'gemini'")
     
@@ -29,7 +32,24 @@ class SidestageConfig(BaseModel):
     gemini_model: str = "gemini-1.5-flash"
 
 class Campaign:
+    """
+    Represents a specific Campaign (a distinct save/world).
+    
+    The Campaign class serves as the container for:
+    - Configuration (LLM settings)
+    - Storage (Database connection)
+    - World Tools (Entity manipulation logic)
+    - The 'Co-Author' Agent (System-level assistant)
+    - Defaults/Seeding (Characters, Scenes)
+    """
     def __init__(self, name: str, base_dir: Path):
+        """
+        Initialize the Campaign.
+
+        Args:
+            name (str): The name of the campaign.
+            base_dir (Path): The root directory where campaign data is stored.
+        """
         self.name = name
         self.base_dir = base_dir
         self.campaign_dir = self.base_dir / name
@@ -54,14 +74,16 @@ class Campaign:
         # Ensure default scene and characters exist
         self._ensure_defaults()
 
-    def _ensure_campaign_dir(self):
+    def _ensure_campaign_dir(self) -> None:
+        """Create the campaign directory if it doesn't exist."""
         if not self.campaign_dir.exists():
             logger.info(f"Creating new campaign directory: {self.campaign_dir}")
             self.campaign_dir.mkdir(parents=True, exist_ok=True)
         else:
             logger.info(f"Loading campaign from: {self.campaign_dir}")
 
-    def _setup_logging(self):
+    def _setup_logging(self) -> None:
+        """Configure file-based logging to the campaign directory."""
         log_file = self.campaign_dir / "server.log"
         
         root_logger = logging.getLogger()
@@ -75,6 +97,7 @@ class Campaign:
             logger.info(f"Logging initialized. Output redirected to: {log_file}")
 
     def _load_or_create_config(self) -> SidestageConfig:
+        """Load configuration from config.yml or create default."""
         if self.config_path.exists():
             with open(self.config_path, "r") as f:
                 try:
@@ -90,11 +113,18 @@ class Campaign:
         self._save_config(config)
         return config
 
-    def _save_config(self, config: SidestageConfig):
+    def _save_config(self, config: SidestageConfig) -> None:
+        """Save the current configuration to config.yml."""
         with open(self.config_path, "w") as f:
             yaml.dump(config.model_dump(), f, default_flow_style=False)
 
     def create_agent(self) -> LiteLLMAgent:
+        """
+        Instantiate the main Co-Author agent based on campaign config.
+        
+        Returns:
+            LiteLLMAgent: The configured agent instance.
+        """
         provider = self.config.llm_provider.lower()
         model_name = ""
         api_base = None
@@ -138,7 +168,8 @@ class Campaign:
             debug_mode=False
         )
 
-    def _ensure_defaults(self):
+    def _ensure_defaults(self) -> None:
+        """Ensure that necessary default entities (scenes, characters) exist in the database."""
         # Ensure default scene exists
         planning_scene = self.storage.get_scene("campaign_planning")
         if not planning_scene:
@@ -153,9 +184,12 @@ class Campaign:
         # Ensure default characters from data directory are loaded
         self.reload_defaults()
 
-    def reload_defaults(self):
+    def reload_defaults(self) -> None:
         """
-        Loads default characters and other entities from the project's data directory.
+        Load default characters and other entities from the project's data directory.
+        
+        This scans the 'data/characters' folder for markdown files and upserts them
+        into the database.
         """
         logger.info("Reloading default content from data directory...")
         
@@ -181,9 +215,12 @@ class Campaign:
                 except Exception as e:
                     logger.error(f"Error loading default character from {char_file}: {e}")
 
-    def _ensure_llm_availability(self):
+    def _ensure_llm_availability(self) -> None:
         """
-        Calls /v1/models on the configured provider to ensure specified models are available.
+        Verify that the configured LLM endpoint is reachable and the model exists.
+        
+        Raises:
+            RuntimeError: If the LLM is unreachable or the model is missing.
         """
         provider = self.config.llm_provider.lower()
         
@@ -229,6 +266,7 @@ class Campaign:
     # --- Campaign Logic Methods ---
 
     def list_entities(self) -> List[Dict[str, Any]]:
+        """List all entities as dictionaries with an added 'type' field."""
         entities = self.storage.list_all_entities()
         result = []
         for e in entities:
@@ -238,6 +276,7 @@ class Campaign:
         return result
 
     def get_entity_markdown(self, entity_id: str) -> Optional[str]:
+        """Retrieve the markdown representation of an entity by ID."""
         entities = self.storage.list_all_entities()
         entity = next((e for e in entities if e.id == entity_id), None)
         if not entity:
@@ -245,6 +284,7 @@ class Campaign:
         return entity_to_markdown(entity)
 
     async def update_entity_markdown(self, entity_id: str, markdown: str) -> bool:
+        """Update an entity based on its markdown representation."""
         try:
             entity = markdown_to_entity(markdown, override_id=entity_id)
             if isinstance(entity, Character):
@@ -261,6 +301,7 @@ class Campaign:
             return False
 
     async def update_entity(self, entity_id: str, data: Dict[str, Any]) -> bool:
+        """Update an entity with a dictionary of fields."""
         try:
             data["id"] = entity_id
             entity_type = data.get("type")
@@ -288,6 +329,7 @@ class Campaign:
             return False
 
     def export_entities(self) -> int:
+        """Export all entities to markdown files in the campaign directory."""
         logger.info("Exporting entities...")
         entities_dir = self.campaign_dir / "entities"
         entities_dir.mkdir(parents=True, exist_ok=True)
@@ -301,6 +343,7 @@ class Campaign:
         return count
 
     async def import_entities(self) -> int:
+        """Import all entities from markdown files in the campaign directory."""
         logger.info("Importing entities...")
         entities_dir = self.campaign_dir / "entities"
         if not entities_dir.exists():
@@ -326,10 +369,12 @@ class Campaign:
         return count
 
     def list_scenes(self) -> List[Dict[str, Any]]:
+        """List all scenes in the campaign."""
         scenes = self.storage.list_scenes()
         return [s.model_dump() for s in scenes]
 
     async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> Scene:
+        """Create and persist a new scene."""
         import uuid
         scene_id = f"scene_{str(uuid.uuid4())[:8]}"
         scene = Scene(
@@ -342,6 +387,7 @@ class Campaign:
         return scene
 
     def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessage]]:
+        """Get the message history for a specific scene."""
         scene_schema = self.storage.get_scene(scene_id)
         if not scene_schema:
             return None
@@ -349,7 +395,13 @@ class Campaign:
 
     def get_scene_object(self, scene_id: str) -> Optional[SceneLogic]:
         """
-        Returns a SceneLogic logic object for the given ID.
+        Factory to get a SceneLogic object for the given ID.
+        
+        Args:
+            scene_id (str): The scene ID.
+
+        Returns:
+            Optional[SceneLogic]: The logic object, or None if scene doesn't exist.
         """
         data = self.storage.get_scene(scene_id)
         if not data:

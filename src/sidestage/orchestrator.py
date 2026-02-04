@@ -25,7 +25,24 @@ from sidestage.schemas import (
 logger = logging.getLogger(__name__)
 
 class SidestageOrchestrator:
+    """
+    The central coordinator for the Sidestage application.
+    
+    The Orchestrator is responsible for:
+    1. Initializing the FastAPI application and routes.
+    2. Managing the lifecycle of Campaigns.
+    3. Handling WebSocket connections via SyncManager.
+    4. Routing API requests to the appropriate Campaign or Scene components.
+    5. Serving the frontend static assets.
+    """
     def __init__(self, campaign_name: str, base_dir: Optional[Path] = None):
+        """
+        Initialize the Orchestrator.
+
+        Args:
+            campaign_name (str): The name of the campaign to load/create.
+            base_dir (Optional[Path]): The base directory for data storage. Defaults to ~/.sidestage.
+        """
         self.base_dir = base_dir or (Path.home() / ".sidestage")
         
         # API Dispatching: SyncManager owned by Orchestrator
@@ -50,18 +67,38 @@ class SidestageOrchestrator:
         self._setup_routes()
         self._mount_frontend()
 
-    def _load_campaign(self, name: str):
+    def _load_campaign(self, name: str) -> Campaign:
+        """
+        Load a campaign by name, creating it if it doesn't exist.
+
+        Args:
+            name (str): The name of the campaign.
+
+        Returns:
+            Campaign: The campaign instance.
+        """
         if name not in self.campaigns:
             self.campaigns[name] = Campaign(name, self.base_dir)
         return self.campaigns[name]
 
     @property
     def campaign(self) -> Campaign:
-        """Helper to access the active campaign."""
+        """Helper to access the currently active campaign."""
         return self.campaigns[self.active_campaign_name]
 
     async def get_active_scene(self, scene_id: str) -> Optional[Any]:
-        """Gets or activates a scene."""
+        """
+        Retrieve or activate a scene by ID.
+        
+        If the scene is not already active in memory, it loads it from the campaign
+        and activates it (starting its message bus and agents).
+
+        Args:
+            scene_id (str): The ID of the scene.
+
+        Returns:
+            Optional[Any]: The active SceneLogic instance, or None if not found.
+        """
         if scene_id in self.active_scenes:
             return self.active_scenes[scene_id]
         
@@ -74,8 +111,13 @@ class SidestageOrchestrator:
             return scene_logic
         return None
 
-    async def _on_scene_event(self, event: Any):
-        """Broadcasts events from scene buses to all connected WebSocket clients."""
+    async def _on_scene_event(self, event: Any) -> None:
+        """
+        Callback for scene events. Broadcasts chat messages to all connected WebSocket clients.
+
+        Args:
+            event (Any): The event received from a scene bus.
+        """
         from sidestage.schemas import ChatMessage
         if isinstance(event, ChatMessage):
             await self.sync_manager.broadcast({
@@ -84,10 +126,15 @@ class SidestageOrchestrator:
                 "scene_id": event.scene_id
             })
 
-    async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]):
+    async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
         """
-        Internal handler for WebSocket messages.
-        Routes events to Scene buses.
+        Internal handler for incoming WebSocket messages from clients.
+        
+        Routes 'chat_message' type messages to the appropriate active Scene bus.
+
+        Args:
+            websocket (WebSocket): The client connection.
+            message (Dict[str, Any]): The parsed JSON message.
         """
         msg_type = message.get("type")
         scene_id = message.get("scene_id")
@@ -107,7 +154,8 @@ class SidestageOrchestrator:
                 except Exception as e:
                     logger.error(f"Error publishing to scene bus: {e}")
 
-    def _setup_routes(self):
+    def _setup_routes(self) -> None:
+        """Define and register all FastAPI routes."""
         # WebSocket
         @self.fastapi_app.websocket("/v1/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -122,10 +170,12 @@ class SidestageOrchestrator:
         # Entities
         @self.fastapi_app.get("/v1/entities")
         async def list_entities():
+            """List all entities in the active campaign."""
             return self.campaign.list_entities()
 
         @self.fastapi_app.get("/v1/entities/{entity_id}/markdown")
         async def get_entity_markdown(entity_id: str):
+            """Get the markdown body of a specific entity."""
             markdown = self.campaign.get_entity_markdown(entity_id)
             if not markdown:
                 raise HTTPException(status_code=404, detail="Entity not found")
@@ -133,11 +183,13 @@ class SidestageOrchestrator:
 
         @self.fastapi_app.post("/v1/entities/export")
         async def export_entities():
+            """Export all entities to the file system."""
             count = self.campaign.export_entities()
             return {"message": f"Exported {count} entities to disk"}
 
         @self.fastapi_app.post("/v1/entities/import")
         async def import_entities():
+            """Import entities from the file system, updating the database."""
             count = await self.campaign.import_entities()
             if count > 0:
                 await self.sync_manager.broadcast({"type": "entities_updated"})
@@ -145,6 +197,7 @@ class SidestageOrchestrator:
 
         @self.fastapi_app.post("/v1/entities/{entity_id}/markdown")
         async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
+            """Update the markdown body of an entity."""
             success = await self.campaign.update_entity_markdown(entity_id, request.markdown)
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
@@ -153,6 +206,7 @@ class SidestageOrchestrator:
 
         @self.fastapi_app.post("/v1/entities/{entity_id}")
         async def update_entity(entity_id: str, data: Dict[str, Any]):
+            """Update arbitrary fields of an entity."""
             success = await self.campaign.update_entity(entity_id, data)
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
@@ -161,6 +215,7 @@ class SidestageOrchestrator:
 
         @self.fastapi_app.post("/v1/campaign/reload-defaults")
         async def reload_defaults():
+            """Reload default characters and prompts from the data directory."""
             self.campaign.reload_defaults()
             await self.sync_manager.broadcast({"type": "entities_updated"})
             return {"status": "ok"}
@@ -168,10 +223,12 @@ class SidestageOrchestrator:
         # Scenes
         @self.fastapi_app.get("/v1/scenes")
         async def list_scenes():
+            """List all scenes."""
             return self.campaign.list_scenes()
 
         @self.fastapi_app.post("/v1/scenes")
         async def create_scene(request: SceneCreateRequest):
+            """Create a new scene."""
             scene = await self.campaign.create_scene(
                 name=request.name,
                 description=request.description,
@@ -182,6 +239,7 @@ class SidestageOrchestrator:
 
         @self.fastapi_app.get("/v1/scenes/{scene_id}/messages")
         async def get_scene_messages(scene_id: str):
+            """Get message history for a scene."""
             messages = self.campaign.get_scene_messages(scene_id)
             if messages is None:
                 raise HTTPException(status_code=404, detail="Scene not found")
@@ -190,6 +248,12 @@ class SidestageOrchestrator:
         # Chat
         @self.fastapi_app.post("/v1/chat", response_model=ChatResponse)
         async def chat_endpoint(request: ChatRequest):
+            """
+            Send a chat message to a scene.
+            
+            This endpoint handles the user's message, creating a ChatMessage event
+            and publishing it to the scene's message bus. Agent responses occur asynchronously.
+            """
             # 1. Get Scene object (Ensures it's activated)
             scene = await self.get_active_scene(request.scene_id)
             if not scene:
@@ -237,7 +301,8 @@ class SidestageOrchestrator:
                 return FileResponse(index_path)
             raise HTTPException(status_code=404)
 
-    def _mount_frontend(self):
+    def _mount_frontend(self) -> None:
+        """Mount the frontend static files if they exist."""
         project_root = Path(__file__).parent.parent.parent
         dist_dir = project_root / "frontend" / "dist"
         

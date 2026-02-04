@@ -8,6 +8,16 @@ from sidestage.orchestrator import SidestageOrchestrator
 
 # Global app instance for Uvicorn reload support
 def get_app():
+    """
+    Factory function for Uvicorn to create the FastAPI app instance.
+    
+    This function relies on environment variables (SIDESTAGE_CAMPAIGN, SIDESTAGE_DIR)
+    to configure the Orchestrator, as Uvicorn reload spawns new processes that 
+    cannot receive direct function arguments.
+
+    Returns:
+        FastAPI: The initialized FastAPI application.
+    """
     campaign = os.getenv("SIDESTAGE_CAMPAIGN")
     sidestage_dir = os.getenv("SIDESTAGE_DIR")
     if not campaign:
@@ -21,6 +31,12 @@ def get_app():
     return orchestrator.fastapi_app
 
 def main():
+    """
+    Main entry point for the Sidestage CLI.
+    
+    Parses command-line arguments, sets up the environment for the factory pattern,
+    and starts the Uvicorn server with hot-reloading enabled.
+    """
     parser = argparse.ArgumentParser(
         description="Sidestage: AI Co-Author for Roleplaying Games",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -51,5 +67,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
