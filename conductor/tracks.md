@@ -12,7 +12,7 @@ This file tracks all major tracks for the project. Each track has its own detail
   *Link: [./tracks/universal_console_20260130/](./tracks/universal_console_20260130/)*
 - [x] **Track: Time and Scenes - Gametime, Scene Entities, and Temporal Orchestration**
   *Link: [./tracks/time_and_scenes_20260130/](./tracks/time_and_scenes_20260130/)*
-- [ ] **Track: NPC Agents & Actor System**
+- [x] **Track: NPC Agents & Actor System**
   *Link: [./tracks/npc_agents_20260202/](./tracks/npc_agents_20260202/)*
 - [ ] **Track: Memory & Graph Database**
   *Link: [./tracks/memory_20260202/](./tracks/memory_20260202/)*
