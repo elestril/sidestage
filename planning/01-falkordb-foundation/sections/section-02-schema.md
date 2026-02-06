@@ -319,3 +319,21 @@ Queries are executed via `client.graph.query(cypher_string)`. The FalkorDB Pytho
 7. Create `/home/harald/src/sidestage/tests/unit/test_graph_schema.py` with all test stubs
 8. Implement all tests using mocked `GraphClient` (mock `client.graph.query()`)
 9. Verify tests pass with `poetry run pytest tests/unit/test_graph_schema.py`
+
+## Implementation Notes (post-build)
+
+### Files created/modified
+- **Created:** `src/sidestage/graph/schema.py` -- schema initialization with migration framework
+- **Created:** `tests/unit/test_graph_schema.py` -- 11 tests (22 with asyncio+trio)
+- **Modified:** `src/sidestage/graph/client.py` -- wired `initialize_schema()` into `connect()` (lazy import to avoid circular dependency)
+- **Modified:** `tests/unit/test_graph_client.py` -- added `initialize_schema` mock to all `connect()` tests; updated `test_connect_calls_schema_initialization` to verify `initialize_schema` is actually called
+
+### Deviations from plan
+- **Circular import handling:** `schema.py` uses `TYPE_CHECKING` guard for `GraphClient` import; `client.py` uses a lazy import inside `connect()` to avoid circular dependency
+- **Version downgrade guard:** Added check in `initialize_schema()` that raises `SchemaError` if the database schema version is ahead of `CURRENT_VERSION` (prevents silent data corruption on code downgrade)
+- **Granular error messages:** `_migrate_v1()` wraps individual index/constraint creation failures in `SchemaError` with specific context (e.g., "Failed to create index on Entity.id: ...")
+- **Test coverage:** Added `updated_at` ISO timestamp validation in `test_initialize_schema_creates_schema_version_node`
+
+### Test results
+- 11 schema tests + 80 total unit tests all passing
+- Tests use `pytest-anyio` running against both asyncio and trio backends

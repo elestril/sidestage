@@ -73,7 +73,8 @@ def test_sanitize_empty_becomes_default():
 async def test_connect_creates_connection_pool():
     """connect() creates a BlockingConnectionPool with the configured max_connections."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock):
         mock_pool = MagicMock()
         mock_pool_cls.return_value = mock_pool
         mock_db = MagicMock()
@@ -93,7 +94,8 @@ async def test_connect_creates_connection_pool():
 async def test_connect_selects_graph_with_configured_name():
     """connect() calls db.select_graph() with the graph_name from config."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock):
         mock_pool_cls.return_value = MagicMock()
         mock_db = MagicMock()
         mock_graph = MagicMock()
@@ -111,7 +113,8 @@ async def test_connect_selects_graph_with_configured_name():
 async def test_connect_derives_graph_name_from_campaign_name():
     """When graph_name is None, connect() derives it from campaign_name parameter."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock):
         mock_pool_cls.return_value = MagicMock()
         mock_db = MagicMock()
         mock_db.select_graph.return_value = MagicMock()
@@ -128,7 +131,8 @@ async def test_connect_derives_graph_name_from_campaign_name():
 async def test_connect_sanitizes_campaign_name_for_graph_name():
     """Derived graph_name is lowercased, spaces become underscores, special chars stripped."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock):
         mock_pool_cls.return_value = MagicMock()
         mock_db = MagicMock()
         mock_db.select_graph.return_value = MagicMock()
@@ -144,7 +148,8 @@ async def test_connect_sanitizes_campaign_name_for_graph_name():
 async def test_connect_with_custom_host_port_password():
     """connect() passes host, port, password to the connection pool."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock):
         mock_pool_cls.return_value = MagicMock()
         mock_db = MagicMock()
         mock_db.select_graph.return_value = MagicMock()
@@ -185,13 +190,10 @@ async def test_connect_raises_connection_error_on_redis_connection_error():
 
 @pytest.mark.anyio
 async def test_connect_calls_schema_initialization():
-    """After establishing connection, connect() calls schema initialization.
-
-    TODO: Section-02 will wire in real schema init. This test verifies
-    the hook point exists and connect() succeeds with the placeholder.
-    """
+    """After establishing connection, connect() calls initialize_schema."""
     with patch("sidestage.graph.client.BlockingConnectionPool") as mock_pool_cls, \
-         patch("sidestage.graph.client.FalkorDB") as mock_db_cls:
+         patch("sidestage.graph.client.FalkorDB") as mock_db_cls, \
+         patch("sidestage.graph.schema.initialize_schema", new_callable=AsyncMock) as mock_init:
         mock_pool_cls.return_value = MagicMock()
         mock_db = MagicMock()
         mock_db.select_graph.return_value = MagicMock()
@@ -200,8 +202,7 @@ async def test_connect_calls_schema_initialization():
         config = GraphConfig(graph_name="test")
         client = await connect(config)
 
-        # Placeholder: connect() succeeds without calling schema init
-        assert client is not None
+        mock_init.assert_awaited_once_with(client)
 
 
 # --- close() ---

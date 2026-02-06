@@ -75,10 +75,12 @@ async def connect(config: GraphConfig, campaign_name: str = "default") -> GraphC
             f"FalkorDB unreachable at {config.host}:{config.port}: {exc}"
         ) from exc
 
-    # Placeholder for schema initialization (wired in section-02)
-    # await initialize_schema(client)
+    client = GraphClient(pool=pool, db=db, graph=graph, graph_name=graph_name)
 
-    return GraphClient(pool=pool, db=db, graph=graph, graph_name=graph_name)
+    from sidestage.graph.schema import initialize_schema
+    await initialize_schema(client)
+
+    return client
 
 
 async def close(client: GraphClient) -> None:
