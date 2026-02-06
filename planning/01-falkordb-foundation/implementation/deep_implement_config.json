@@ -14,7 +14,16 @@
     "section-05-queries",
     "section-06-integration"
   ],
-  "sections_state": {},
+  "sections_state": {
+    "section-01-errors-and-client": {
+      "status": "complete",
+      "commit_hash": "5639161"
+    },
+    "section-02-schema": {
+      "status": "complete",
+      "commit_hash": "7330302"
+    }
+  },
   "pre_commit": {
     "present": false,
     "type": "none",
