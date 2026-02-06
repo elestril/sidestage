@@ -1,0 +1,27 @@
+{
+  "plugin_root": "/home/harald/.claude/plugins/cache/piercelamb-plugins/deep-implement/0.2.0",
+  "sections_dir": "/home/harald/src/sidestage/planning/01-falkordb-foundation/sections",
+  "target_dir": "/home/harald/src/sidestage",
+  "state_dir": "/home/harald/src/sidestage/planning/01-falkordb-foundation/implementation",
+  "git_root": "/home/harald/src/sidestage",
+  "commit_style": "conventional",
+  "test_command": "uv run pytest",
+  "sections": [
+    "section-01-errors-and-client",
+    "section-02-schema",
+    "section-03-entities",
+    "section-04-relationships",
+    "section-05-queries",
+    "section-06-integration"
+  ],
+  "sections_state": {},
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-02-06T06:51:56.617689+00:00"
+}

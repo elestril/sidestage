@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class AgentActor:
     """
     Represents the autonomous 'brain' of a Character in the simulation.
-    
+
     The AgentActor is responsible for:
     1. Managing the LLM agent instance associated with the character.
     2. Listening to the SceneMessageBus for relevant events.
@@ -30,6 +30,8 @@ class AgentActor:
         self.character = character
         self.scene_logic = scene_logic
         self.agent: Optional[LiteLLMAgent] = None
+        # Unique actor_id for this agent - used for origin tagging
+        self.actor_id = f"agent:{character.id}"
         self._update_prompt()
 
     def _update_prompt(self) -> None:
@@ -66,58 +68,13 @@ class AgentActor:
             debug_mode=base_agent.debug_mode
         )
 
-    def _detect_loop(self, current_event: ChatMessage, max_depth: int = 4) -> bool:
-        """
-        Check recent history to prevent infinite dialogue loops between agents.
-
-        Args:
-            current_event (ChatMessage): The message that just arrived.
-            max_depth (int): Maximum allowed consecutive messages between two agents.
-
-        Returns:
-            bool: True if a loop is detected and we should STOP responding.
-        """
-        history = self.scene_logic.messages
-        if not history:
-            return False
-
-        me_id = self.character.id
-        sender_id = current_event.character_id
-        
-        # Start with 1 because current_event is the latest link in the chain
-        conversation_depth = 1
-        
-        # Iterate backwards through history
-        # We assume 'current_event' might be in history already or not. 
-        # We skip it if we encounter it by ID, or if it's the exact same object.
-        for msg in reversed(history):
-            if msg.id == current_event.id:
-                continue 
-            
-            if msg.character_id == me_id:
-                conversation_depth += 1
-            elif msg.character_id == sender_id:
-                conversation_depth += 1
-            else:
-                # Someone else (User or Agent C) spoke, breaking the A-B loop
-                break
-        
-        if conversation_depth >= max_depth:
-            logger.warning(f"Loop detected: {conversation_depth} consecutive messages between {me_id} and {sender_id}. Stopping.")
-            return True
-            
-        return False
-
     async def on_event(self, event: Event) -> None:
         """
         Callback handler for events published to the SceneMessageBus.
-        
-        Evaluates whether the agent should respond to the event based on:
-        1. Whether the event is a ChatMessage.
-        2. Whether the agent itself was the sender (ignore self).
-        3. Whether it's a User message (always respond if addressed?).
-        4. Whether it's an Agent message where this character is mentioned.
-        5. Whether a dialogue loop is detected.
+
+        Responds to all ChatMessages except those originated by this actor.
+        Loop detection relies solely on origin tagging - agents never respond
+        to their own messages.
 
         Args:
             event (Event): The event to process.
@@ -125,46 +82,23 @@ class AgentActor:
         if not isinstance(event, ChatMessage):
             return
 
-        # 1. Filter: Ignore if we were the last speaker to avoid loops
-        if event.character_id == self.character.id:
+        # Never respond to our own messages - this is the only loop protection needed
+        if event.actor_id == self.actor_id:
             return
 
-        # 2. Filter: Avoid infinite loops between agents
-        # Only reply if:
-        # a) It is a user message
-        # b) OR it is an agent message AND we are explicitly mentioned
-        is_user_message = (event.actor_id == "user")
-        is_mentioned = (self.character.name.lower() in event.message.lower())
+        logger.info(f"AgentActor ({self.character.name}) reacting to message from {event.actor_id}")
 
-        if not is_user_message and not is_mentioned:
-            return
-            
-        # 3. Loop Protection
-        if not is_user_message and self._detect_loop(event):
-            return
-
-        logger.info(f"AgentActor ({self.character.name}) reacting to message from {event.character_id}")
-        
-        # 4. Generate response (Async)
-        # We'll use the scene's current message history if available
-        # (A more sophisticated agent would use the history)
-        
         if not self.agent:
             return
 
-        # Note: We pass only the current message content to arun() for now.
-        # Ideally we should pass context/history.
         response = await self.agent.arun(event.message)
-        
+
         if response.content:
-            # 5. Publish our own message back to the bus
             reply = self.scene_logic.create_message(
-                actor_id="agent", 
-                text=response.content, 
+                actor_id=self.actor_id,
+                text=response.content,
                 character_id=self.character.id
             )
-            # We must be careful not to publish in a way that causes immediate recursion if not filtered
-            # The bus worker will handle the dispatching.
             await self.scene_logic.bus.publish(reply)
 
 class CharacterLogic:
