@@ -397,6 +397,30 @@ This allows section-01 to be completed and tested independently. Section-02 will
 
 ---
 
+## Implementation Notes (Actual)
+
+### Deviations from Plan
+
+1. **Exception catch narrowed**: Plan specified catching `redis.exceptions.ConnectionError` and `OSError`. Initial implementation incorrectly used `(OSError, Exception)` which was too broad. Fixed during code review to `(OSError, RedisConnectionError)` with explicit `from redis.exceptions import ConnectionError as RedisConnectionError`.
+
+2. **GraphConfig as dataclass, not Pydantic**: Plan mentioned Pydantic `BaseModel` as an option. Used `@dataclass` from stdlib since no validation logic is needed and it avoids adding Pydantic as a dependency.
+
+3. **Idempotent `close()`**: Added `_closed` flag to `GraphClient` to guard against double-close, which the plan's docstring implied but didn't implement.
+
+4. **Additional tests added during review**:
+   - `test_connect_raises_connection_error_on_redis_connection_error` - verifies `redis.exceptions.ConnectionError` wrapping
+   - `test_connect_calls_schema_initialization` - placeholder test for schema init hook
+   - `test_close_is_idempotent` - verifies double-close safety
+   - 4 standalone `sanitize_graph_name` tests (lowercases, spaces, special chars, empty fallback)
+
+### Final Test Count
+
+- `test_graph_errors.py`: 8 tests (all pass)
+- `test_graph_client.py`: 16 tests (run as 26 with asyncio+trio backends, all pass)
+- **Total: 34 passing tests**
+
+---
+
 ## Key Design Decisions
 
 | Decision | Choice | Rationale |
@@ -407,3 +431,5 @@ This allows section-01 to be completed and tested independently. Section-02 will
 | Fail-fast errors | No retries or fallback | Campaign depends on graph DB being available |
 | Pool type | BlockingConnectionPool | Blocks until connection available rather than erroring under load |
 | decode_responses | True | Auto-decode Redis responses; avoids bytes everywhere |
+| Exception catch | OSError + RedisConnectionError | Narrow catch avoids masking programming bugs (code review fix) |
+| Close idempotency | _closed flag guard | Prevents double-close errors on BlockingConnectionPool |
