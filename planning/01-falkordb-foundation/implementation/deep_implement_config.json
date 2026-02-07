@@ -30,6 +30,10 @@
     "section-04-relationships": {
       "status": "complete",
       "commit_hash": "404182a02436744a10c86e6b9c296fec84e8a1c2"
+    },
+    "section-05-queries": {
+      "status": "complete",
+      "commit_hash": "3d0a7dcd423ec083748d8a28cdb4705e9ef92a49"
     }
   },
   "pre_commit": {

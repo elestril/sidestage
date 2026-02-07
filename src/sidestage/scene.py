@@ -10,6 +10,10 @@ from sidestage.character import CharacterLogic
 from sidestage.storage import Storage
 from sidestage.agent import LiteLLMAgent
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from sidestage.graph.client import GraphClient
+
 logger = logging.getLogger(__name__)
 
 class SceneLogic:
@@ -22,7 +26,8 @@ class SceneLogic:
     - Persistence of scene data via Storage.
     - Creation and routing of chat messages.
     """
-    def __init__(self, storage: Storage, agent: LiteLLMAgent, data: Scene):
+    def __init__(self, storage: Storage, agent: LiteLLMAgent, data: Scene,
+                 graph_client: "GraphClient | None" = None):
         """
         Initialize the SceneLogic.
 
@@ -30,10 +35,12 @@ class SceneLogic:
             storage (Storage): The persistence layer.
             agent (LiteLLMAgent): The default agent configuration used for spawning characters.
             data (Scene): The underlying data model for the scene.
+            graph_client: Optional GraphClient for graph-based persistence.
         """
         self.storage = storage
         self.agent = agent
         self.data = data
+        self.graph_client = graph_client
         self.bus = SceneMessageBus()
         self.characters: Dict[str, CharacterLogic] = {}
         self._active = False
@@ -55,14 +62,21 @@ class SceneLogic:
             Optional[Event]: The event to proceed with (usually unchanged).
         """
         if isinstance(event, ChatMessage):
-            # 1. Persist to scene data
+            # 1. Persist to scene data (Storage for backward compat)
             self.data.messages.append(event)
             self.storage.update_scene(self.data)
-            
-            # 2. Sync to clients (broadcasting handled by Orchestrator usually, 
-            # but we can also do it here if we have a callback or just let the bus listeners handle it)
-            # Actually, the Orchestrator should probably be a listener on the bus for broadcasting.
-        
+
+            # 2. Persist to graph when available
+            if self.graph_client is not None:
+                from sidestage.graph import create_entity, link
+                try:
+                    await create_entity(self.graph_client, event)
+                    await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
+                    if event.character_id:
+                        await link(self.graph_client, event.id, "INVOLVES", event.character_id)
+                except Exception:
+                    logger.exception("Failed to persist event %s to graph", event.id)
+
         return event
 
     async def activate(self) -> None:
@@ -77,12 +91,13 @@ class SceneLogic:
         
         # Start the bus
         await self.bus.start()
-        
-        # Activate all characters in this scene
-        # For now, we load ALL characters in the campaign into every scene? 
-        # Or should scenes have a list of present characters?
-        # The schema doesn't have a list of characters yet, so let's load all for now or just Co-Author and Narrator.
-        all_chars = self.storage.list_characters()
+
+        # Load characters: prefer graph when available, fall back to Storage
+        if self.graph_client is not None:
+            from sidestage.graph import list_entities
+            all_chars = await list_entities(self.graph_client, entity_type="Character")
+        else:
+            all_chars = self.storage.list_characters()
         for char_data in all_chars:
             char_logic = CharacterLogic(char_data, self)
             self.characters[char_data.id] = char_logic

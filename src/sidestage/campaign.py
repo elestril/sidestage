@@ -12,6 +12,11 @@ from sidestage.tools import WorldTools
 from sidestage.scene import SceneLogic
 from sidestage.schemas import Scene, Character, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
 from sidestage.entities import entity_to_markdown, markdown_to_entity
+from sidestage.graph import GraphConfig, GraphClient, connect, close
+from sidestage.graph import create_entity as graph_create_entity
+from sidestage.graph import get_entity as graph_get_entity
+from sidestage.graph import update_entity as graph_update_entity
+from sidestage.graph import list_entities as graph_list_entities
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,9 @@ class SidestageConfig(BaseModel):
     # Gemini Configuration
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-1.5-flash"
+
+    # Graph Database Configuration
+    graph: GraphConfig = Field(default_factory=GraphConfig, description="FalkorDB graph database configuration")
 
 class Campaign:
     """
@@ -64,8 +72,9 @@ class Campaign:
         # Storage handles SQLite connection
         self.storage = Storage(db_path=self.campaign_dir / "sidestage.db")
 
-        self.world_tools = WorldTools(storage=self.storage)
-        
+        self.graph_client: GraphClient | None = None
+        self.world_tools = WorldTools(storage=self.storage, graph_client=self.graph_client)
+
         # Ensure LLM is available before proceeding
         self._ensure_llm_availability()
         
@@ -263,11 +272,33 @@ class Campaign:
             # Skipping for now as it doesn't fit the /v1/models requirement as cleanly.
             pass
 
+    async def start_graph(self) -> None:
+        """Initialize the FalkorDB graph connection.
+
+        Must be called after __init__ and before any graph operations.
+        Derives graph_name from campaign name if not configured.
+        """
+        config = self.config.graph
+        self.graph_client = await connect(config, campaign_name=self.name)
+        self.world_tools.graph_client = self.graph_client
+        logger.info("Graph connection established for campaign '%s'", self.name)
+
+    async def shutdown(self) -> None:
+        """Shut down the campaign, closing graph connections."""
+        if self.graph_client is not None:
+            await close(self.graph_client)
+            self.graph_client = None
+            self.world_tools.graph_client = None
+            logger.info("Graph connection closed for campaign '%s'", self.name)
+
     # --- Campaign Logic Methods ---
 
-    def list_entities(self) -> List[Dict[str, Any]]:
+    async def list_entities(self) -> List[Dict[str, Any]]:
         """List all entities as dictionaries with an added 'type' field."""
-        entities = self.storage.list_all_entities()
+        if self.graph_client is not None:
+            entities = await graph_list_entities(self.graph_client)
+        else:
+            entities = self.storage.list_all_entities()
         result = []
         for e in entities:
             d = e.model_dump()
@@ -275,10 +306,13 @@ class Campaign:
             result.append(d)
         return result
 
-    def get_entity_markdown(self, entity_id: str) -> Optional[str]:
+    async def get_entity_markdown(self, entity_id: str) -> Optional[str]:
         """Retrieve the markdown representation of an entity by ID."""
-        entities = self.storage.list_all_entities()
-        entity = next((e for e in entities if e.id == entity_id), None)
+        if self.graph_client is not None:
+            entity = await graph_get_entity(self.graph_client, entity_id)
+        else:
+            entities = self.storage.list_all_entities()
+            entity = next((e for e in entities if e.id == entity_id), None)
         if not entity:
             return None
         return entity_to_markdown(entity)
@@ -287,14 +321,21 @@ class Campaign:
         """Update an entity based on its markdown representation."""
         try:
             entity = markdown_to_entity(markdown, override_id=entity_id)
-            if isinstance(entity, Character):
-                self.storage.update_character(entity)
-            elif isinstance(entity, Location):
-                self.storage.update_location(entity)
-            elif isinstance(entity, Item):
-                self.storage.update_item(entity)
-            elif isinstance(entity, Scene):
-                self.storage.update_scene(entity)
+            if self.graph_client is not None:
+                from sidestage.graph.entities import entity_to_properties
+                props = entity_to_properties(entity)
+                props.pop("id", None)
+                if props:
+                    await graph_update_entity(self.graph_client, entity_id, props)
+            else:
+                if isinstance(entity, Character):
+                    self.storage.update_character(entity)
+                elif isinstance(entity, Location):
+                    self.storage.update_location(entity)
+                elif isinstance(entity, Item):
+                    self.storage.update_item(entity)
+                elif isinstance(entity, Scene):
+                    self.storage.update_scene(entity)
             return True
         except Exception as e:
             logger.error(f"Error updating entity {entity_id}: {e}")
@@ -303,13 +344,19 @@ class Campaign:
     async def update_entity(self, entity_id: str, data: Dict[str, Any]) -> bool:
         """Update an entity with a dictionary of fields."""
         try:
+            if self.graph_client is not None:
+                updates = {k: v for k, v in data.items() if k not in ("id", "type")}
+                if updates:
+                    await graph_update_entity(self.graph_client, entity_id, updates)
+                return True
+
             data["id"] = entity_id
             entity_type = data.get("type")
             if not entity_type:
                 existing = next((e for e in self.storage.list_all_entities() if e.id == entity_id), None)
                 if existing:
                     entity_type = existing.__class__.__name__
-            
+
             if entity_type == "Character":
                 obj = Character(**data)
             elif entity_type == "Location":
@@ -320,7 +367,7 @@ class Campaign:
                 obj = Scene(**data)
             else:
                 raise ValueError(f"Unknown entity type: {entity_type}")
-            
+
             if isinstance(obj, Character):
                 self.storage.update_character(obj)
             return True
@@ -328,12 +375,15 @@ class Campaign:
             logger.error(f"Error updating entity {entity_id}: {e}")
             return False
 
-    def export_entities(self) -> int:
+    async def export_entities(self) -> int:
         """Export all entities to markdown files in the campaign directory."""
         logger.info("Exporting entities...")
         entities_dir = self.campaign_dir / "entities"
         entities_dir.mkdir(parents=True, exist_ok=True)
-        entities = self.storage.list_all_entities()
+        if self.graph_client is not None:
+            entities = await graph_list_entities(self.graph_client)
+        else:
+            entities = self.storage.list_all_entities()
         count = 0
         for entity in entities:
             md_content = entity_to_markdown(entity)
@@ -353,24 +403,30 @@ class Campaign:
             try:
                 md_content = md_file.read_text()
                 entity = markdown_to_entity(md_content)
-                if isinstance(entity, Character):
-                    self.storage.add_character(entity)
-                elif isinstance(entity, Location):
-                    self.storage.add_location(entity)
-                elif isinstance(entity, Item):
-                    self.storage.add_item(entity)
-                elif isinstance(entity, Scene):
-                    self.storage.add_scene(entity)
-                elif isinstance(entity, Event):
-                    self.storage.add_event(entity)
+                if self.graph_client is not None:
+                    await graph_create_entity(self.graph_client, entity)
+                else:
+                    if isinstance(entity, Character):
+                        self.storage.add_character(entity)
+                    elif isinstance(entity, Location):
+                        self.storage.add_location(entity)
+                    elif isinstance(entity, Item):
+                        self.storage.add_item(entity)
+                    elif isinstance(entity, Scene):
+                        self.storage.add_scene(entity)
+                    elif isinstance(entity, Event):
+                        self.storage.add_event(entity)
                 count += 1
             except Exception as e:
                 logger.error(f"Error importing {md_file.name}: {e}")
         return count
 
-    def list_scenes(self) -> List[Dict[str, Any]]:
+    async def list_scenes(self) -> List[Dict[str, Any]]:
         """List all scenes in the campaign."""
-        scenes = self.storage.list_scenes()
+        if self.graph_client is not None:
+            scenes = await graph_list_entities(self.graph_client, entity_type="Scene")
+        else:
+            scenes = self.storage.list_scenes()
         return [s.model_dump() for s in scenes]
 
     async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> Scene:
@@ -383,7 +439,10 @@ class Campaign:
             body=description,
             current_gametime=current_gametime
         )
-        self.storage.add_scene(scene)
+        if self.graph_client is not None:
+            await graph_create_entity(self.graph_client, scene)
+        else:
+            self.storage.add_scene(scene)
         return scene
 
     def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessage]]:
@@ -406,4 +465,4 @@ class Campaign:
         data = self.storage.get_scene(scene_id)
         if not data:
             return None
-        return SceneLogic(self.storage, self.agent, data)
+        return SceneLogic(self.storage, self.agent, data, graph_client=self.graph_client)

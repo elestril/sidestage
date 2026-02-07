@@ -171,12 +171,12 @@ class SidestageOrchestrator:
         @self.fastapi_app.get("/v1/entities")
         async def list_entities():
             """List all entities in the active campaign."""
-            return self.campaign.list_entities()
+            return await self.campaign.list_entities()
 
         @self.fastapi_app.get("/v1/entities/{entity_id}/markdown")
         async def get_entity_markdown(entity_id: str):
             """Get the markdown body of a specific entity."""
-            markdown = self.campaign.get_entity_markdown(entity_id)
+            markdown = await self.campaign.get_entity_markdown(entity_id)
             if not markdown:
                 raise HTTPException(status_code=404, detail="Entity not found")
             return {"markdown": markdown}
@@ -184,7 +184,7 @@ class SidestageOrchestrator:
         @self.fastapi_app.post("/v1/entities/export")
         async def export_entities():
             """Export all entities to the file system."""
-            count = self.campaign.export_entities()
+            count = await self.campaign.export_entities()
             return {"message": f"Exported {count} entities to disk"}
 
         @self.fastapi_app.post("/v1/entities/import")
@@ -224,7 +224,7 @@ class SidestageOrchestrator:
         @self.fastapi_app.get("/v1/scenes")
         async def list_scenes():
             """List all scenes."""
-            return self.campaign.list_scenes()
+            return await self.campaign.list_scenes()
 
         @self.fastapi_app.post("/v1/scenes")
         async def create_scene(request: SceneCreateRequest):

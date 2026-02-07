@@ -48,6 +48,7 @@ def sanitize_graph_name(name: str) -> str:
     """
     result = name.lower()
     result = result.replace(" ", "_")
+    result = result.replace("-", "_")
     result = re.sub(r"[^a-z0-9_]", "", result)
     return result if result else "default"
 

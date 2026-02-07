@@ -126,6 +126,8 @@ class LiteLLMAgent:
                                 arguments = json.loads(arguments_str)
                                 tool_func = self.tool_map[function_name]
                                 result = tool_func(**arguments)
+                                if inspect.iscoroutine(result):
+                                    result = await result
                                 
                                 messages.append({
                                     "tool_call_id": tool_call.id,
