@@ -24,6 +24,10 @@
     "section-02-schema-migration": {
       "status": "complete",
       "commit_hash": "f01e78b"
+    },
+    "section-03-memory-store": {
+      "status": "complete",
+      "commit_hash": "447227b"
     }
   },
   "pre_commit": {

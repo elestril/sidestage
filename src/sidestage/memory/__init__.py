@@ -17,3 +17,9 @@ from sidestage.memory.store import (
     touch_memory,
     search_similar,
 )
+from sidestage.memory.embeddings import (
+    EmbeddingError,
+    embed_text,
+    embed_and_update,
+    validate_embed_config,
+)
