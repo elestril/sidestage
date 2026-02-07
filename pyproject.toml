@@ -48,3 +48,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = "src"
 testpaths = ["tests"]
+markers = [
+    "llm: tests requiring a live LLM instance at localhost:8080",
+]

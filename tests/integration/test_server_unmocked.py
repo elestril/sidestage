@@ -1,19 +1,11 @@
 import pytest
-import httpx
+import time
 from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
-import time
 
-def is_backend_up():
-    """Checks if the medusa backend is reachable and healthy."""
-    try:
-        response = httpx.get("http://medusa:8080/health", timeout=2.0)
-        return response.status_code == 200
-    except Exception:
-        return False
 
-@pytest.mark.skipif(not is_backend_up(), reason="Backend at http://medusa:8080/health is unreachable")
+@pytest.mark.llm
 class TestServerUnmocked:
     @pytest.fixture(autouse=True)
     def setup_server(self, tmp_path: Path):
@@ -34,28 +26,34 @@ class TestServerUnmocked:
         Sends a message and expects a non-empty response from the LLM.
         """
         message = "Respond with the single word 'Sausage'."
-        
+
         # Send a real message to the backend via Sidestage Chat API
         resp = self.client.post(
             "/v1/chat",
             json={"message": message, "scene_id": "campaign_planning"}
         )
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "user_message" in data
-        assert "agent_message" in data
-        
-        # Verify we got a real response containing our keyword in the storage
-        # The agent.arun call is awaited in the endpoint, so it should be there.
-        scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
+
+        # Agent responses are async (fire-and-forget via the bus).
+        # Poll storage until at least one agent reply appears.
+        deadline = time.time() + 15
+        scene = None
+        while time.time() < deadline:
+            scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
+            if scene and len(scene.messages) >= 2:
+                break
+            time.sleep(0.5)
+
         assert scene is not None
-        assert len(scene.messages) >= 2 # User msg + Agent msg
-        
+        assert len(scene.messages) >= 2  # User msg + Agent msg
+
         last_msg = scene.messages[-1]
-        assert last_msg.actor_id == "agent"
+        assert last_msg.actor_id.startswith("agent")
         content = last_msg.message
-        
+
         print(f"Received response: {content}")
         assert "sausage" in content.lower()
 
@@ -70,13 +68,29 @@ class TestServerUnmocked:
         )
         assert resp1.status_code == 200
 
+        # Wait for first agent response before sending second message
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
+            if scene and len(scene.messages) >= 2:
+                break
+            time.sleep(0.5)
+
         # Second message (consecutive)
         resp2 = self.client.post(
             "/v1/chat",
             json={"message": "Second message.", "scene_id": "campaign_planning"}
         )
         assert resp2.status_code == 200
-        
+
+        # Wait for second agent response
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
+            if scene and len(scene.messages) >= 4:
+                break
+            time.sleep(0.5)
+
         scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
         # Should have User1, Agent1, User2, Agent2 = 4 messages (or more if history preserved)
         assert scene is not None

@@ -1,0 +1,29 @@
+{
+  "plugin_root": "/home/harald/.claude/plugins/cache/piercelamb-plugins/deep-implement/0.2.0",
+  "sections_dir": "/home/harald/src/sidestage/planning/02-memory-and-embedding/sections",
+  "target_dir": "/home/harald/src/sidestage",
+  "state_dir": "/home/harald/src/sidestage/planning/02-memory-and-embedding/implementation",
+  "git_root": "/home/harald/src/sidestage",
+  "commit_style": "simple",
+  "test_command": "uv run pytest",
+  "sections": [
+    "section-01-models-and-health",
+    "section-02-schema-migration",
+    "section-03-memory-store",
+    "section-04-embeddings",
+    "section-05-memory-tools",
+    "section-06-context-assembly",
+    "section-07-agent-integration",
+    "section-08-scene-integration"
+  ],
+  "sections_state": {},
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-02-07T21:05:59.938509+00:00"
+}

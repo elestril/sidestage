@@ -86,4 +86,4 @@ class TestSyncIntegration:
                 msg2 = ws.receive_json()
                 assert msg2["type"] == "chat_message"
                 # It could be either character, so just check it's not user
-                assert msg2["message"]["actor_id"] == "agent"
+                assert msg2["message"]["actor_id"].startswith("agent")

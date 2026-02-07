@@ -29,6 +29,28 @@ def test_sidestage_config_graph_custom_values():
     assert config.graph.max_connections == 8
 
 
+def test_sidestage_config_has_llms_dict():
+    """SidestageConfig has an llms dict with a default entry."""
+    from sidestage.campaign import SidestageConfig, LLMConfig
+    config = SidestageConfig()
+    assert "default" in config.llms
+    assert isinstance(config.llms["default"], LLMConfig)
+    assert config.llms["default"].provider == "llama_cpp"
+    assert config.llms["default"].model == "default"
+
+
+def test_sidestage_config_multi_llm():
+    """SidestageConfig accepts multiple LLM entries."""
+    from sidestage.campaign import SidestageConfig
+    config = SidestageConfig(llms={
+        "default": {"provider": "llama_cpp", "model": "default"},
+        "embed": {"provider": "llama_cpp", "model": "embed", "base_url": "http://localhost:8080/v1"},
+    })
+    assert "default" in config.llms
+    assert "embed" in config.llms
+    assert config.llms["embed"].model == "embed"
+
+
 # --- Campaign graph lifecycle ---
 
 

@@ -20,21 +20,19 @@ from sidestage.graph import list_entities as graph_list_entities
 
 logger = logging.getLogger(__name__)
 
-class SidestageConfig(BaseModel):
-    """
-    Configuration model for Sidestage settings, primarily LLM connection details.
-    """
-    # LLM Configuration
-    llm_provider: str = Field(default="llama_cpp", description="LLM provider to use: 'llama_cpp' or 'gemini'")
-    
-    # Llama.cpp Configuration
-    llama_cpp_base_url: str = Field(default="http://medusa:8080/v1", description="Base URL for Llama.cpp server")
-    llama_cpp_api_key: str = Field(default="sk-no-key-required", description="API Key for Llama.cpp (if required)")
-    llama_cpp_model: str = Field(default="default", description="Model name to request (e.g. 'gpt-3.5-turbo' or filename)")
+class LLMConfig(BaseModel):
+    """Configuration for a single LLM endpoint."""
+    provider: str = Field(default="llama_cpp", description="LLM provider: 'llama_cpp' or 'gemini'")
+    base_url: str = Field(default="http://localhost:8080/v1", description="Base URL for OpenAI-compatible API")
+    api_key: str = Field(default="sk-no-key-required", description="API key")
+    model: str = Field(default="default", description="Model name to request")
 
-    # Gemini Configuration
-    gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-1.5-flash"
+class SidestageConfig(BaseModel):
+    """Configuration model for Sidestage settings."""
+    llms: Dict[str, LLMConfig] = Field(
+        default_factory=lambda: {"default": LLMConfig()},
+        description="Named LLM configurations"
+    )
 
     # Graph Database Configuration
     graph: GraphConfig = Field(default_factory=GraphConfig, description="FalkorDB graph database configuration")
@@ -127,33 +125,41 @@ class Campaign:
         with open(self.config_path, "w") as f:
             yaml.dump(config.model_dump(), f, default_flow_style=False)
 
+    def get_llm_config(self, name: str = "default") -> LLMConfig:
+        """Get a named LLM configuration.
+
+        Args:
+            name: The LLM config name (e.g. 'default', 'embed').
+
+        Raises:
+            KeyError: If the named LLM config doesn't exist.
+        """
+        if name not in self.config.llms:
+            raise KeyError(f"LLM config '{name}' not found. Available: {list(self.config.llms.keys())}")
+        return self.config.llms[name]
+
     def create_agent(self) -> LiteLLMAgent:
         """
         Instantiate the main Co-Author agent based on campaign config.
-        
+
         Returns:
             LiteLLMAgent: The configured agent instance.
         """
-        provider = self.config.llm_provider.lower()
-        model_name = ""
-        api_base = None
-        api_key = None
+        llm = self.get_llm_config("default")
+        provider = llm.provider.lower()
 
         if provider == "llama_cpp":
-            model_name = f"openai/{self.config.llama_cpp_model}"
-            api_base = self.config.llama_cpp_base_url
-            api_key = self.config.llama_cpp_api_key
+            model_name = f"openai/{llm.model}"
         elif provider == "gemini":
-             model_name = f"gemini/{self.config.gemini_model}"
-             api_key = self.config.gemini_api_key
+            model_name = f"gemini/{llm.model}"
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
         return LiteLLMAgent(
             name="Sidestage Co-Author",
             model=model_name,
-            api_base=api_base,
-            api_key=api_key,
+            api_base=llm.base_url,
+            api_key=llm.api_key,
             instructions=[
                 "You are the Sidestage Co-Author, a world-building assistant.",
                 "STRICT PERSONA: NEVER identify as a 'large language model'. You are strictly the Sidestage Co-Author.",
@@ -226,51 +232,56 @@ class Campaign:
 
     def _ensure_llm_availability(self) -> None:
         """
-        Verify that the configured LLM endpoint is reachable and the model exists.
-        
+        Verify that the default LLM endpoint is reachable and the model exists.
+
+        Checks /health for liveness, then /models for model availability.
+
         Raises:
             RuntimeError: If the LLM is unreachable or the model is missing.
         """
-        provider = self.config.llm_provider.lower()
-        
-        if provider == "llama_cpp":
-            base_url = self.config.llama_cpp_base_url.rstrip("/")
-            url = f"{base_url}/models"
-            target_model = self.config.llama_cpp_model
-            
-            try:
-                logger.info(f"Checking LLM availability at {url}...")
-                resp = httpx.get(url, timeout=10.0)
-                resp.raise_for_status()
-                
-                data = resp.json()
-                # OpenAI /v1/models format usually has 'data' list
-                available_models = data.get("data", [])
-                available_ids = [m.get("id") for m in available_models if m.get("id")]
-                
-                if target_model not in available_ids:
-                    # If there's only one model and it's not named 'default', but user asked for 'default', 
-                    # we might be permissive if it's llama.cpp, but here we enforce as requested.
-                    error_msg = f"Specified model '{target_model}' not found at {url}. Available models: {available_ids}"
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg)
-                
-                logger.info(f"Verified LLM availability: '{target_model}' is online.")
-                
-            except httpx.RequestError as e:
-                error_msg = f"Failed to connect to LLM provider at {url}: {e}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg) from e
-            except Exception as e:
-                error_msg = f"Error verifying LLM availability: {e}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg) from e
-        
-        elif provider == "gemini":
-            # For Gemini, we could check via litellm or google-generativeai, 
-            # but usually we assume cloud providers are 'available' unless credentials fail.
-            # Skipping for now as it doesn't fit the /v1/models requirement as cleanly.
-            pass
+        llm = self.get_llm_config("default")
+        provider = llm.provider.lower()
+
+        if provider == "gemini":
+            # Cloud providers: assume available unless credentials fail at call time.
+            return
+
+        base_url = llm.base_url.rstrip("/")
+        # Derive server root from base_url (strip /v1 suffix if present)
+        server_root = base_url.rsplit("/v1", 1)[0] if "/v1" in base_url else base_url
+
+        # 1. Health check
+        health_url = f"{server_root}/health"
+        try:
+            logger.info(f"Checking LLM health at {health_url}...")
+            resp = httpx.get(health_url, timeout=10.0)
+            resp.raise_for_status()
+        except httpx.RequestError as e:
+            raise RuntimeError(f"LLM unreachable at {health_url}: {e}") from e
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"LLM health check failed at {health_url}: {e}") from e
+
+        # 2. Model availability
+        models_url = f"{base_url}/models"
+        target_model = llm.model
+        try:
+            logger.info(f"Checking model '{target_model}' at {models_url}...")
+            resp = httpx.get(models_url, timeout=10.0)
+            resp.raise_for_status()
+
+            data = resp.json()
+            available_models = data.get("data", [])
+            available_ids = [m.get("id") for m in available_models if m.get("id")]
+
+            if target_model not in available_ids:
+                raise RuntimeError(
+                    f"Model '{target_model}' not found at {models_url}. Available: {available_ids}"
+                )
+
+            logger.info(f"LLM verified: '{target_model}' is online.")
+
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Failed to query models at {models_url}: {e}") from e
 
     async def start_graph(self) -> None:
         """Initialize the FalkorDB graph connection.
