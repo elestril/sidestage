@@ -379,3 +379,27 @@ Use Python's `logging` module with logger name `sidestage.graph.entities`. Log a
 3. Implement serialization helpers in `src/sidestage/graph/entities.py`: `LABEL_TO_MODEL`, `MODEL_TO_LABELS`, `EXCLUDED_FIELDS`, `entity_to_labels()`, `entity_to_properties()`, `node_to_entity()`.
 4. Implement CRUD functions in `src/sidestage/graph/entities.py`: `create_entity()`, `get_entity()`, `update_entity()`, `delete_entity()`, `list_entities()`, `find_entities()`.
 5. Verify all tests pass with `poetry run pytest tests/unit/test_graph_serialization.py tests/unit/test_graph_entities.py`.
+
+---
+
+## Implementation Notes (Actual)
+
+### Deviations from Plan
+
+1. **Event subtypes added to registries:** `JoinEvent`, `LeaveEvent`, `FastForwardEvent` were added to `LABEL_TO_MODEL` and `MODEL_TO_LABELS` (not originally listed in the plan's tables but needed for completeness since they exist in `schemas.py`).
+
+2. **Property key validation added:** `_validate_property_keys()` helper validates property keys in `update_entity()` and `find_entities()` against known Entity field names, preventing Cypher injection via key interpolation.
+
+3. **Differentiated exception handling in `create_entity`:** Instead of catching all exceptions as `DuplicateEntityError`, the implementation checks for constraint-related keywords ("unique", "already exists", "constraint") in the exception message and wraps other errors as `QueryError`.
+
+4. **All CRUD functions wrap raw exceptions:** Every function (`get_entity`, `update_entity`, `delete_entity`, `list_entities`, `find_entities`) wraps raw FalkorDB/Redis exceptions in `QueryError`.
+
+5. **Empty updates guard:** `update_entity()` raises `QueryError("No updates provided")` on empty dict.
+
+6. **`delete_entity` silent on non-existent:** Design choice: silent success when deleting non-existent entity (no `EntityNotFoundError`).
+
+### Test Counts
+
+- `test_graph_serialization.py`: 21 tests (label registry, entity_to_labels for all 9 types, entity_to_properties, node_to_entity)
+- `test_graph_entities.py`: 48 tests (24 test functions × 2 backends: asyncio + trio via anyio)
+- Total: 69 tests, all passing
