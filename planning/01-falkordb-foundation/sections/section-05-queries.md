@@ -242,6 +242,16 @@ from sidestage.schemas import Character, Location, Event, Entity
 
 No module-level constants are needed. The Cypher query strings are defined inline within each function. If query strings become long or are reused, they can be extracted to module-level string constants, but for four focused functions inline is clearer.
 
+## Code Review Changes
+
+- Added runtime validation for `depth` parameter in `entity_graph` to prevent Cypher injection (`isinstance(depth, int) and depth >= 1`)
+- Refactored `scene_events` to build query incrementally instead of duplicating the base Cypher string
+
+## Tests
+
+- `tests/unit/test_graph_queries.py`: 17 tests (planned: 7, added QueryError tests + depth validation test)
+- All tests run on both asyncio and trio backends (34 total test runs)
+
 ## Relationship to Other Sections
 
 - **section-06-integration** will wire these query functions into `WorldTools` (for AI agent context) and `SceneLogic` (for scene event retrieval). The `entity_graph` function is particularly important for building rich context for AI agents.

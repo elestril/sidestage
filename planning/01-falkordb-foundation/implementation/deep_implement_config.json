@@ -26,6 +26,10 @@
     "section-03-entities": {
       "status": "complete",
       "commit_hash": "66f4564"
+    },
+    "section-04-relationships": {
+      "status": "complete",
+      "commit_hash": "404182a02436744a10c86e6b9c296fec84e8a1c2"
     }
   },
   "pre_commit": {
