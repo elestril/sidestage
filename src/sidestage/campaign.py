@@ -13,6 +13,7 @@ from sidestage.scene import SceneLogic
 from sidestage.schemas import Scene, Character, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
 from sidestage.entities import entity_to_markdown, markdown_to_entity
 from sidestage.graph import GraphConfig, GraphClient, connect, close
+from sidestage.health import CampaignHealth, HealthStatus
 from sidestage.graph import create_entity as graph_create_entity
 from sidestage.graph import get_entity as graph_get_entity
 from sidestage.graph import update_entity as graph_update_entity
@@ -73,6 +74,7 @@ class Campaign:
         self.storage = Storage(db_path=self.campaign_dir / "sidestage.db")
 
         self.graph_client: GraphClient | None = None
+        self.health = CampaignHealth()
         self.world_tools = WorldTools(storage=self.storage, graph_client=self.graph_client)
 
         # Ensure LLM is available before proceeding
@@ -294,6 +296,19 @@ class Campaign:
         config = self.config.graph
         self.graph_client = await connect(config, campaign_name=self.name)
         self.world_tools.graph_client = self.graph_client
+
+        # Validate embed config if present
+        if "embed" in self.config.llms:
+            embed_llm = self.get_llm_config("embed")
+            from sidestage.memory.embeddings import validate_embed_config
+            dimension = await validate_embed_config(embed_llm)
+            if dimension is not None:
+                config.vector_dimension = dimension
+                logger.info("Embedding validated: dimension=%d", dimension)
+            else:
+                logger.warning("Embedding validation failed")
+                await self.health.set_status(HealthStatus.DEGRADED, "Embedding unavailable")
+
         logger.info("Graph connection established for campaign '%s'", self.name)
 
     async def shutdown(self) -> None:

@@ -82,12 +82,15 @@ class LiteLLMAgent:
             }
         }
 
-    async def arun(self, message: str, stream: bool = False) -> AgentResponse:
+    async def arun(self, message: str, context: str | None = None, stream: bool = False) -> AgentResponse:
         messages = []
         if self.instructions:
             system_msg = "\n".join(self.instructions)
             messages.append({"role": "system", "content": system_msg})
-        
+
+        if context:
+            messages.append({"role": "system", "content": context})
+
         messages.append({"role": "user", "content": message})
         
         # Maximum turns to prevent infinite loops

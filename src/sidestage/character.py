@@ -1,11 +1,16 @@
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
 from sidestage.schemas import Character, Event, ChatMessage
 from sidestage.bus import SceneMessageBus
 from sidestage.agent import LiteLLMAgent
+
+if TYPE_CHECKING:
+    from sidestage.graph.client import GraphClient
+    from sidestage.campaign import LLMConfig
+    from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +24,25 @@ class AgentActor:
     3. Deciding when to respond to events (filtering logic).
     4. Generating responses via the LLM and publishing them back to the bus.
     """
-    def __init__(self, character: Character, scene_logic: Any):
-        """
-        Initialize the AgentActor.
-
-        Args:
-            character (Character): The static character data (schema).
-            scene_logic (Any): Reference to the parent SceneLogic instance (runtime).
-        """
+    def __init__(
+        self,
+        character: Character,
+        scene_logic: Any,
+        graph_client: "GraphClient | None" = None,
+        embed_config: "LLMConfig | None" = None,
+        health: "CampaignHealth | None" = None,
+        scene_id: str | None = None,
+        present_character_ids: list[str] | None = None,
+        context_limit: int = 4096,
+    ):
         self.character = character
         self.scene_logic = scene_logic
+        self.graph_client = graph_client
+        self.embed_config = embed_config
+        self.health = health
+        self.scene_id = scene_id
+        self.present_character_ids = present_character_ids
+        self.context_limit = context_limit
         self.agent: Optional[LiteLLMAgent] = None
         # Unique actor_id for this agent - used for origin tagging
         self.actor_id = f"agent:{character.id}"
@@ -58,13 +72,31 @@ class AgentActor:
 
         # Get the scene's agent config to instantiate a new agent for this actor
         base_agent = self.scene_logic.agent
+
+        # Add memory tools when graph and health are available
+        if self.graph_client is not None and self.scene_id is not None and self.health is not None:
+            from sidestage.memory.tools import MemoryTools
+            memory_tools = MemoryTools(
+                client=self.graph_client,
+                embed_config=self.embed_config,
+                health=self.health,
+                owner_id=self.character.id,
+                scene_id=self.scene_id,
+            )
+            tools = list(base_agent.tools) + [
+                memory_tools.update_scene_memory,
+                memory_tools.update_character_memory,
+            ]
+        else:
+            tools = base_agent.tools
+
         self.agent = LiteLLMAgent(
             name=self.character.name,
             model=base_agent.model,
             api_base=base_agent.api_base,
             api_key=base_agent.api_key,
             instructions=instructions,
-            tools=base_agent.tools, # Give them the same tools for now
+            tools=tools,
             debug_mode=base_agent.debug_mode
         )
 
@@ -91,7 +123,24 @@ class AgentActor:
         if not self.agent:
             return
 
-        response = await self.agent.arun(event.message)
+        context_text = None
+        if self.graph_client is not None and self.scene_id is not None:
+            try:
+                from sidestage.memory.context import assemble_context
+                result = await assemble_context(
+                    client=self.graph_client,
+                    owner_id=self.character.id,
+                    scene_id=self.scene_id,
+                    present_character_ids=self.present_character_ids or [],
+                    recent_messages=self.scene_logic.messages,
+                    context_limit=self.context_limit,
+                )
+                parts = [p for p in (result.memory_text, result.chat_text) if p]
+                context_text = "\n\n".join(parts) or None
+            except Exception:
+                logger.exception("Failed to assemble context for %s", self.character.name)
+
+        response = await self.agent.arun(event.message, context=context_text)
 
         if response.content:
             reply = self.scene_logic.create_message(
@@ -108,16 +157,25 @@ class CharacterLogic:
     Manages the lifecycle of the character's 'brain' (AgentActor) and 
     provides access to the underlying character data.
     """
-    def __init__(self, character: Character, scene_logic: Any):
-        """
-        Initialize the CharacterLogic.
-
-        Args:
-            character (Character): The character data model.
-            scene_logic (Any): The parent SceneLogic instance.
-        """
+    def __init__(
+        self,
+        character: Character,
+        scene_logic: Any,
+        graph_client: "GraphClient | None" = None,
+        embed_config: "LLMConfig | None" = None,
+        health: "CampaignHealth | None" = None,
+        scene_id: str | None = None,
+        present_character_ids: list[str] | None = None,
+        context_limit: int = 4096,
+    ):
         self.data = character
         self.scene_logic = scene_logic
+        self.graph_client = graph_client
+        self.embed_config = embed_config
+        self.health = health
+        self.scene_id = scene_id
+        self.present_character_ids = present_character_ids
+        self.context_limit = context_limit
         self.actor: Optional[AgentActor] = None
 
     async def activate(self) -> None:
@@ -130,7 +188,15 @@ class CharacterLogic:
         # For now, we assume all characters are agents unless specified
         # In the future, we might have UserActor vs AgentActor
         if self.actor is None:
-            self.actor = AgentActor(self.data, self.scene_logic)
+            self.actor = AgentActor(
+                self.data, self.scene_logic,
+                graph_client=self.graph_client,
+                embed_config=self.embed_config,
+                health=self.health,
+                scene_id=self.scene_id,
+                present_character_ids=self.present_character_ids,
+                context_limit=self.context_limit,
+            )
             self.scene_logic.bus.subscribe(self.actor.on_event)
             logger.info(f"Character {self.data.name} ({self.data.id}) activated with AgentActor.")
 
