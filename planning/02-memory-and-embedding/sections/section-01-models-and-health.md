@@ -317,6 +317,24 @@ This field defaults to `None`. It is populated at campaign startup (by the embed
 
 ---
 
+## Implementation Notes (Post-Implementation)
+
+**Deviations from plan (rationale from code review):**
+
+1. **Memory model defaults added**: `id`, `created_at`, `updated_at`, and `access_count` now have default_factory/default values to reduce construction boilerplate. This was approved during code review to reduce test helper duplication and simplify downstream store/context code.
+
+2. **CampaignHealth.set_status guarded by asyncio.Lock**: Added `self._lock = asyncio.Lock()` to prevent race conditions when multiple coroutines transition health status concurrently (e.g., embedding failure + graph reconnection). Approved during code review.
+
+3. **CampaignHealth on_change callback wrapped in try/except**: The callback invocation is now wrapped with exception handling that logs errors via `logger.exception()`. This prevents WebSocket broadcast failures from crashing health transitions.
+
+4. **LLMConfig fields have ge=1 validation**: `context_limit` and `memory_token_budget` now use `Field(ge=1)` to reject zero or negative values.
+
+5. **Test helper extracted**: `_make_memory` moved to module-level `make_memory()` function, removing duplication between test classes.
+
+**Final test count**: 39 tests (10 memory models + 21 health [incl. anyio parametrize] + 7 config + 1 defaults test added during review)
+
+---
+
 ## Verification
 
 After implementing this section, run:

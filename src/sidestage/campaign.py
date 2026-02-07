@@ -26,6 +26,8 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="http://localhost:8080/v1", description="Base URL for OpenAI-compatible API")
     api_key: str = Field(default="sk-no-key-required", description="API key")
     model: str = Field(default="default", description="Model name to request")
+    context_limit: int | None = Field(default=None, ge=1, description="Max context tokens (validated at startup)")
+    memory_token_budget: int | None = Field(default=None, ge=1, description="Tokens allocated for memory context (optional override)")
 
 class SidestageConfig(BaseModel):
     """Configuration model for Sidestage settings."""

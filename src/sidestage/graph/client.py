@@ -23,6 +23,7 @@ class GraphConfig:
     password: str | None = None
     max_connections: int = 16
     graph_name: str | None = None
+    vector_dimension: int | None = None  # ge=1 enforced by consumers
 
 
 class GraphClient:
