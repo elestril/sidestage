@@ -325,6 +325,18 @@ The `direction` parameter in `get_related` must be one of `"outgoing"`, `"incomi
 
 ---
 
+## Code Review Changes
+
+- Added `_VALID_PROP_KEY_RE` regex validation for property keys in `link()` to prevent Cypher injection (review finding #1)
+- Property parameters are prefixed with `prop_` to avoid namespace collision with `source_id`/`target_id` (review finding #2)
+- Mutation operations (`link`, `unlink`) log at INFO level (matching `entities.py` pattern)
+- Added 4 QueryError tests covering all functions for network failure scenarios
+
+## Tests
+
+- `tests/unit/test_graph_relationships.py`: 23 tests (planned: 19, added 4 QueryError tests from review)
+- All tests run on both asyncio and trio backends (46 total test runs)
+
 ## Summary Checklist
 
 1. Create test file at `/home/harald/src/sidestage/tests/unit/test_graph_relationships.py` with all test stubs listed above
