@@ -20,6 +20,10 @@
     "section-01-models-and-health": {
       "status": "complete",
       "commit_hash": "e8e63d9"
+    },
+    "section-02-schema-migration": {
+      "status": "complete",
+      "commit_hash": "f01e78b"
     }
   },
   "pre_commit": {
