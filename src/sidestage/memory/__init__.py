@@ -23,3 +23,4 @@ from sidestage.memory.embeddings import (
     embed_and_update,
     validate_embed_config,
 )
+from sidestage.memory.tools import MemoryTools, DmMemoryTools

@@ -28,6 +28,10 @@
     "section-03-memory-store": {
       "status": "complete",
       "commit_hash": "447227b"
+    },
+    "section-04-embeddings": {
+      "status": "complete",
+      "commit_hash": "63de5aa"
     }
   },
   "pre_commit": {
