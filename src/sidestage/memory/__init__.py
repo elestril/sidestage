@@ -24,3 +24,4 @@ from sidestage.memory.embeddings import (
     validate_embed_config,
 )
 from sidestage.memory.tools import MemoryTools, DmMemoryTools
+from sidestage.memory.context import assemble_context

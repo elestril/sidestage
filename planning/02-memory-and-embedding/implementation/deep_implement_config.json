@@ -32,6 +32,10 @@
     "section-04-embeddings": {
       "status": "complete",
       "commit_hash": "63de5aa"
+    },
+    "section-05-memory-tools": {
+      "status": "complete",
+      "commit_hash": "91e8830"
     }
   },
   "pre_commit": {
