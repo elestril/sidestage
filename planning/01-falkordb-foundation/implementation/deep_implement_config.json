@@ -34,6 +34,10 @@
     "section-05-queries": {
       "status": "complete",
       "commit_hash": "3d0a7dcd423ec083748d8a28cdb4705e9ef92a49"
+    },
+    "section-06-integration": {
+      "status": "complete",
+      "commit_hash": "dcc4ecdc99ba985343a2ff65724bac91b6da15e5"
     }
   },
   "pre_commit": {
