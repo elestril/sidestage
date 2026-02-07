@@ -493,4 +493,13 @@ class Campaign:
         data = self.storage.get_scene(scene_id)
         if not data:
             return None
-        return SceneLogic(self.storage, self.agent, data, graph_client=self.graph_client)
+        embed_config = self.config.llms.get("embed")
+        default_llm = self.get_llm_config("default")
+        context_limit = getattr(default_llm, "context_limit", None) or 4096
+        return SceneLogic(
+            self.storage, self.agent, data,
+            graph_client=self.graph_client,
+            embed_config=embed_config,
+            health=self.health,
+            context_limit=context_limit,
+        )

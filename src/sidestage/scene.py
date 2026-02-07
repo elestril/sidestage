@@ -13,6 +13,8 @@ from sidestage.agent import LiteLLMAgent
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
+    from sidestage.campaign import LLMConfig
+    from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
 
@@ -26,21 +28,23 @@ class SceneLogic:
     - Persistence of scene data via Storage.
     - Creation and routing of chat messages.
     """
-    def __init__(self, storage: Storage, agent: LiteLLMAgent, data: Scene,
-                 graph_client: "GraphClient | None" = None):
-        """
-        Initialize the SceneLogic.
-
-        Args:
-            storage (Storage): The persistence layer.
-            agent (LiteLLMAgent): The default agent configuration used for spawning characters.
-            data (Scene): The underlying data model for the scene.
-            graph_client: Optional GraphClient for graph-based persistence.
-        """
+    def __init__(
+        self,
+        storage: Storage,
+        agent: LiteLLMAgent,
+        data: Scene,
+        graph_client: "GraphClient | None" = None,
+        embed_config: "LLMConfig | None" = None,
+        health: "CampaignHealth | None" = None,
+        context_limit: int = 4096,
+    ):
         self.storage = storage
         self.agent = agent
         self.data = data
         self.graph_client = graph_client
+        self.embed_config = embed_config
+        self.health = health
+        self.context_limit = context_limit
         self.bus = SceneMessageBus()
         self.characters: Dict[str, CharacterLogic] = {}
         self._active = False
@@ -98,8 +102,20 @@ class SceneLogic:
             all_chars = await list_entities(self.graph_client, entity_type="Character")
         else:
             all_chars = self.storage.list_characters()
+
+        # Compute present character IDs for context assembly
+        present_character_ids = [c.id for c in all_chars]
+
         for char_data in all_chars:
-            char_logic = CharacterLogic(char_data, self)
+            char_logic = CharacterLogic(
+                char_data, self,
+                graph_client=self.graph_client,
+                embed_config=self.embed_config,
+                health=self.health,
+                scene_id=self.data.id,
+                present_character_ids=present_character_ids,
+                context_limit=self.context_limit,
+            )
             self.characters[char_data.id] = char_logic
             await char_logic.activate()
             
@@ -178,11 +194,14 @@ class SceneLogic:
     async def chat(self, user_message: ChatMessage) -> None:
         """
         Entry point for user chat interaction.
-        
-        Publishes the user message to the bus, which will trigger any listening 
+
+        Publishes the user message to the bus, which will trigger any listening
         AgentActors to generate responses asynchronously.
 
         Args:
             user_message (ChatMessage): The message from the user.
         """
+        if self.health is not None and not self.health.is_accepting_chat:
+            logger.warning("Chat rejected: campaign health is UNHEALTHY")
+            return
         await self.bus.publish(user_message)
