@@ -36,6 +36,18 @@
     "section-05-memory-tools": {
       "status": "complete",
       "commit_hash": "91e8830"
+    },
+    "section-06-context-assembly": {
+      "status": "complete",
+      "commit_hash": "32f8d10"
+    },
+    "section-07-agent-integration": {
+      "status": "complete",
+      "commit_hash": "9af3b31"
+    },
+    "section-08-scene-integration": {
+      "status": "complete",
+      "commit_hash": "8d96962"
     }
   },
   "pre_commit": {
