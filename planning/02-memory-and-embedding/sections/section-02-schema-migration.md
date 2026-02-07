@@ -475,3 +475,20 @@ This section modifies `connect()` in `client.py` to pass `vector_dimension` thro
 4. Schema v2 migration creates the vector index with the correct dimension
 
 If no `embed` config exists, `vector_dimension` remains `None`, and the vector index is skipped. Memories still work via graph-based retrieval -- only vector similarity search is unavailable.
+
+---
+
+## Implementation Notes (Post-Implementation)
+
+**Deviations from plan (from code review):**
+
+1. **Key name validation in `_set_schema_version`**: Added regex validation (`^[a-z_][a-z0-9_]*$`) on extra_props keys to prevent Cypher injection through crafted property names.
+
+2. **Additional tests added during review**:
+   - `test_invalid_vector_dimension_zero` and `test_invalid_vector_dimension_negative` - validate SchemaError on bad dimensions
+   - `test_vector_index_failure_is_non_fatal` - verifies graceful degradation when vector index creation fails
+   - `test_dimension_not_stored_when_none` - negative test for dimension=None
+
+3. **Idempotent test uses computed query count**: Uses `len(INDEXES) + len(CONSTRAINTS) + len(V2_INDEXES)` instead of magic number to be resilient to future index additions.
+
+**Final test count**: 45 tests (22 existing schema tests [incl. anyio] + 23 v2 tests [incl. anyio + 1 non-async])

@@ -80,7 +80,7 @@ async def connect(config: GraphConfig, campaign_name: str = "default") -> GraphC
     client = GraphClient(pool=pool, db=db, graph=graph, graph_name=graph_name)
 
     from sidestage.graph.schema import initialize_schema
-    await initialize_schema(client)
+    await initialize_schema(client, vector_dimension=config.vector_dimension)
 
     return client
 

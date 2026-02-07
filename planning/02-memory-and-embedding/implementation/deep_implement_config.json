@@ -16,7 +16,12 @@
     "section-07-agent-integration",
     "section-08-scene-integration"
   ],
-  "sections_state": {},
+  "sections_state": {
+    "section-01-models-and-health": {
+      "status": "complete",
+      "commit_hash": "e8e63d9"
+    }
+  },
   "pre_commit": {
     "present": false,
     "type": "none",

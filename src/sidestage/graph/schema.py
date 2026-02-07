@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
 
 INDEXES: list[tuple[str, str]] = [
     ("Entity", "id"),
@@ -29,6 +29,13 @@ CONSTRAINTS: list[tuple[str, str, str]] = [
     ("Entity", "name", "mandatory"),
 ]
 
+V2_INDEXES: list[tuple[str, str]] = [
+    ("Memory", "owner_id"),
+    ("Memory", "target_id"),
+    ("Memory", "memory_type"),
+    ("Memory", "visibility"),
+]
+
 
 async def get_schema_version(client: GraphClient) -> int | None:
     """Query the graph for a :SchemaVersion node and return its version.
@@ -41,7 +48,7 @@ async def get_schema_version(client: GraphClient) -> int | None:
     return result.result_set[0][0]
 
 
-async def initialize_schema(client: GraphClient) -> None:
+async def initialize_schema(client: GraphClient, vector_dimension: int | None = None) -> None:
     """Initialize or migrate the graph schema.
 
     1. Calls get_schema_version to check current state
@@ -72,13 +79,19 @@ async def initialize_schema(client: GraphClient) -> None:
         if migrate_fn is None:
             raise SchemaError(f"Schema migration failed: no migration for version {version}")
         try:
-            await migrate_fn(client)
+            if version == 2:
+                await migrate_fn(client, vector_dimension=vector_dimension)
+            else:
+                await migrate_fn(client)
         except SchemaError:
             raise
         except Exception as exc:
             raise SchemaError(f"Schema migration failed at version {version}: {exc}") from exc
 
-    await _set_schema_version(client, CURRENT_VERSION)
+    extra = {}
+    if vector_dimension is not None:
+        extra["vector_dimension"] = vector_dimension
+    await _set_schema_version(client, CURRENT_VERSION, **extra)
 
 
 async def _migrate_v1(client: GraphClient) -> None:
@@ -113,15 +126,54 @@ async def _migrate_v1(client: GraphClient) -> None:
             ) from exc
 
 
-async def _set_schema_version(client: GraphClient, version: int) -> None:
+async def _migrate_v2(client: GraphClient, vector_dimension: int | None = None) -> None:
+    """Memory schema migration: range indexes + optional vector index."""
+    for label, prop in V2_INDEXES:
+        query = f"CREATE INDEX FOR (n:{label}) ON (n.{prop})"
+        logger.info("Creating index on %s.%s", label, prop)
+        try:
+            await client.graph.query(query)
+        except Exception as exc:
+            raise SchemaError(
+                f"Failed to create index on {label}.{prop}: {exc}"
+            ) from exc
+
+    if vector_dimension is not None:
+        if not isinstance(vector_dimension, int) or vector_dimension <= 0:
+            raise SchemaError(f"Invalid vector_dimension: {vector_dimension}")
+        query = (
+            f"CREATE VECTOR INDEX FOR (n:Memory) ON (n.embedding) "
+            f"OPTIONS {{dimension: {vector_dimension}, similarityFunction: 'cosine'}}"
+        )
+        logger.info("Creating vector index with dimension %d", vector_dimension)
+        try:
+            await client.graph.query(query)
+        except Exception as exc:
+            logger.warning("Vector index creation failed (non-fatal): %s", exc)
+
+
+async def _set_schema_version(client: GraphClient, version: int, **extra_props) -> None:
     """Create or update the :SchemaVersion node."""
+    import re
+    for key in extra_props:
+        if not re.match(r"^[a-z_][a-z0-9_]*$", key):
+            raise SchemaError(f"Invalid property name in extra_props: {key!r}")
+
     updated_at = datetime.now(timezone.utc).isoformat()
+    params = {"version": version, "updated_at": updated_at, **extra_props}
+
+    set_parts = ["v.version = $version", "v.updated_at = $updated_at"]
+    for key in extra_props:
+        set_parts.append(f"v.{key} = ${key}")
+
+    set_clause = ", ".join(set_parts)
     await client.graph.query(
-        "MERGE (v:SchemaVersion) SET v.version = $version, v.updated_at = $updated_at",
-        params={"version": version, "updated_at": updated_at},
+        f"MERGE (v:SchemaVersion) SET {set_clause}",
+        params=params,
     )
 
 
 MIGRATIONS: dict[int, Callable] = {
     1: _migrate_v1,
+    2: _migrate_v2,
 }
