@@ -3,6 +3,7 @@ import pytest
 import httpx
 from pathlib import Path
 from sidestage import config as sidestage_config
+from opentelemetry import trace
 
 DEFAULT_LLM_BASE_URL = "http://localhost:8080/v1"
 
@@ -36,6 +37,15 @@ def _init_config(tmp_path: Path):
     sidestage_config.init(tmp_path)
     yield
     sidestage_config._instance = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_otel_provider():
+    """Reset the global OTel TracerProvider between tests."""
+    yield
+    # Reset OTel global state so tests can set their own provider
+    trace._TRACER_PROVIDER_SET_ONCE._done = False
+    trace._TRACER_PROVIDER = None
 
 
 @pytest.fixture
