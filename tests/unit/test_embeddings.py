@@ -4,7 +4,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sidestage.campaign import LLMConfig
+from sidestage.config import LLMConfig
 from sidestage.health import CampaignHealth, HealthStatus
 from sidestage.memory.embeddings import (
     EmbeddingError,

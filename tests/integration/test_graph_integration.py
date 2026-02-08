@@ -13,7 +13,7 @@ from sidestage.schemas import Character, Location, Item, Scene
 
 def test_sidestage_config_has_graph_field():
     """SidestageConfig has a graph field with GraphConfig default."""
-    from sidestage.campaign import SidestageConfig
+    from sidestage.config import SidestageConfig
     config = SidestageConfig()
     assert isinstance(config.graph, GraphConfig)
     assert config.graph.host == "localhost"
@@ -22,7 +22,7 @@ def test_sidestage_config_has_graph_field():
 
 def test_sidestage_config_graph_custom_values():
     """SidestageConfig accepts custom graph configuration."""
-    from sidestage.campaign import SidestageConfig
+    from sidestage.config import SidestageConfig
     config = SidestageConfig(graph={"host": "graphdb", "port": 7379, "max_connections": 8})
     assert config.graph.host == "graphdb"
     assert config.graph.port == 7379
@@ -31,7 +31,7 @@ def test_sidestage_config_graph_custom_values():
 
 def test_sidestage_config_has_llms_dict():
     """SidestageConfig has an llms dict with a default entry."""
-    from sidestage.campaign import SidestageConfig, LLMConfig
+    from sidestage.config import SidestageConfig, LLMConfig
     config = SidestageConfig()
     assert "default" in config.llms
     assert isinstance(config.llms["default"], LLMConfig)
@@ -41,7 +41,7 @@ def test_sidestage_config_has_llms_dict():
 
 def test_sidestage_config_multi_llm():
     """SidestageConfig accepts multiple LLM entries."""
-    from sidestage.campaign import SidestageConfig
+    from sidestage.config import SidestageConfig
     config = SidestageConfig(llms={
         "default": {"provider": "llama_cpp", "model": "default"},
         "embed": {"provider": "llama_cpp", "model": "embed", "base_url": "http://localhost:8080/v1"},

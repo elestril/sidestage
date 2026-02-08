@@ -16,7 +16,7 @@ from sidestage.memory.store import (
 from sidestage.memory.embeddings import embed_and_update
 
 if TYPE_CHECKING:
-    from sidestage.campaign import LLMConfig
+    from sidestage.config import LLMConfig
     from sidestage.graph.client import GraphClient
     from sidestage.health import CampaignHealth
 

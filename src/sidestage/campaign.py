@@ -1,10 +1,8 @@
 import logging
-import yaml
 import asyncio
 import httpx
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator
-from pydantic import BaseModel, Field
 
 from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
@@ -18,27 +16,10 @@ from sidestage.graph import create_entity as graph_create_entity
 from sidestage.graph import get_entity as graph_get_entity
 from sidestage.graph import update_entity as graph_update_entity
 from sidestage.graph import list_entities as graph_list_entities
+from sidestage.config import LLMConfig, SidestageConfig
+from sidestage import config
 
 logger = logging.getLogger(__name__)
-
-class LLMConfig(BaseModel):
-    """Configuration for a single LLM endpoint."""
-    provider: str = Field(default="llama_cpp", description="LLM provider: 'llama_cpp' or 'gemini'")
-    base_url: str = Field(default="http://localhost:8080/v1", description="Base URL for OpenAI-compatible API")
-    api_key: str = Field(default="sk-no-key-required", description="API key")
-    model: str = Field(default="default", description="Model name to request")
-    context_limit: int | None = Field(default=None, ge=1, description="Max context tokens (validated at startup)")
-    memory_token_budget: int | None = Field(default=None, ge=1, description="Tokens allocated for memory context (optional override)")
-
-class SidestageConfig(BaseModel):
-    """Configuration model for Sidestage settings."""
-    llms: Dict[str, LLMConfig] = Field(
-        default_factory=lambda: {"default": LLMConfig()},
-        description="Named LLM configurations"
-    )
-
-    # Graph Database Configuration
-    graph: GraphConfig = Field(default_factory=GraphConfig, description="FalkorDB graph database configuration")
 
 class Campaign:
     """
@@ -67,8 +48,7 @@ class Campaign:
         # Setup logging to campaign directory
         self._setup_logging()
 
-        self.config_path = self.campaign_dir / "config.yml"
-        self.config = self._load_or_create_config()
+        self.config = config.get()
         
         # Storage handles SQLite connection
         self.storage = Storage(db_path=self.campaign_dir / "sidestage.db")
@@ -106,28 +86,6 @@ class Campaign:
             root_logger.addHandler(file_handler)
             
             logger.info(f"Logging initialized. Output redirected to: {log_file}")
-
-    def _load_or_create_config(self) -> SidestageConfig:
-        """Load configuration from config.yml or create default."""
-        if self.config_path.exists():
-            with open(self.config_path, "r") as f:
-                try:
-                    data = yaml.safe_load(f) or {}
-                    config = SidestageConfig(**data)
-                except Exception as e:
-                    logger.warning(f"Error loading config.yml ({e}). Using defaults.")
-                    config = SidestageConfig()
-        else:
-            logger.info(f"Creating default configuration at: {self.config_path}")
-            config = SidestageConfig()
-        
-        self._save_config(config)
-        return config
-
-    def _save_config(self, config: SidestageConfig) -> None:
-        """Save the current configuration to config.yml."""
-        with open(self.config_path, "w") as f:
-            yaml.dump(config.model_dump(), f, default_flow_style=False)
 
     def get_llm_config(self, name: str = "default") -> LLMConfig:
         """Get a named LLM configuration.

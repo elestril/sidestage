@@ -1,7 +1,8 @@
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from sidestage.campaign import Campaign, SidestageConfig
+from sidestage.campaign import Campaign
+from sidestage.config import SidestageConfig
 from sidestage.agent import LiteLLMAgent
 
 def test_campaign_create_agent_llama_cpp(tmp_path: Path):
@@ -16,7 +17,7 @@ def test_campaign_create_agent_llama_cpp(tmp_path: Path):
         }
     )
 
-    with patch('sidestage.campaign.Campaign._load_or_create_config', return_value=test_config):
+    with patch('sidestage.config.get', return_value=test_config):
         with patch('sidestage.campaign.Campaign._ensure_llm_availability'):
             campaign = Campaign(name="test", base_dir=tmp_path)
             agent = campaign.agent
@@ -27,7 +28,8 @@ def test_campaign_create_agent_llama_cpp(tmp_path: Path):
 
 def test_agent_tools_configuration(tmp_path: Path):
     """Test that the agent is initialized with the correct tools."""
-    with patch('sidestage.campaign.Campaign._ensure_llm_availability'):
+    with patch('sidestage.config.get', return_value=SidestageConfig()):
+      with patch('sidestage.campaign.Campaign._ensure_llm_availability'):
         campaign = Campaign(name="test", base_dir=tmp_path)
         agent = campaign.agent
     

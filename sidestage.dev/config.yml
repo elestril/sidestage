@@ -1,0 +1,23 @@
+graph:
+  graph_name: null
+  host: localhost
+  max_connections: 16
+  password: null
+  port: 6379
+  vector_dimension: null
+llms:
+  default:
+    api_key: sk-no-key-required
+    base_url: http://localhost:8080/v1
+    context_limit: null
+    memory_token_budget: null
+    model: default
+    provider: llama_cpp
+  embed:
+    api_key: sk-no-key-required
+    base_url: http://localhost:8080/v1
+    context_limit: null
+    memory_token_budget: null
+    model: embed
+    provider: llama_cpp
+loglevel: DEBUG

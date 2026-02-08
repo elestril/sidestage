@@ -9,7 +9,7 @@ from sidestage.agent import LiteLLMAgent
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
-    from sidestage.campaign import LLMConfig
+    from sidestage.config import LLMConfig
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)

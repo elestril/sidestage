@@ -24,6 +24,10 @@ from unittest.mock import patch
 # Ensure src is in path
 sys.path.insert(0, "{src_dir}")
 from sidestage.orchestrator import SidestageOrchestrator
+from sidestage import config as sidestage_config
+
+base_dir = Path("{tmp_path}") / ".sidestage"
+sidestage_config.init(base_dir)
 
 with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
     # Initialize orchestrator with a custom base_dir

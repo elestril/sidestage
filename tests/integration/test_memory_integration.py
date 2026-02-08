@@ -310,7 +310,8 @@ class TestCampaignGetSceneObject:
 
     def test_get_scene_object_passes_health_and_embed_config(self):
         """get_scene_object creates SceneLogic with health and embed config."""
-        from sidestage.campaign import Campaign, LLMConfig, SidestageConfig
+        from sidestage.campaign import Campaign
+        from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig
         from sidestage.health import CampaignHealth
 
@@ -340,7 +341,8 @@ class TestCampaignGetSceneObject:
 
     def test_get_scene_object_no_embed_config(self):
         """get_scene_object works when no embed config exists."""
-        from sidestage.campaign import Campaign, LLMConfig, SidestageConfig
+        from sidestage.campaign import Campaign
+        from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig
         from sidestage.health import CampaignHealth
 

@@ -1,4 +1,7 @@
+import atexit
 import logging
+import os
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
@@ -56,28 +59,53 @@ class SidestageOrchestrator:
             base_dir (Optional[Path]): The base directory for data storage. Defaults to ~/.sidestage.
         """
         self.base_dir = base_dir or (Path.home() / ".sidestage")
-        
+        self.pid_file = self.base_dir / "sidestage.pid"
+
         # API Dispatching: SyncManager owned by Orchestrator
         self.sync_manager = SyncManager()
 
         # Manage multiple campaigns
         self.campaigns: Dict[str, Campaign] = {}
         self.active_campaign_name = campaign_name
-        
+
         # Active scenes across all campaigns (scene_id -> SceneLogic)
         self.active_scenes: Dict[str, Any] = {}
-        
+
         # Initialize the requested campaign
         self._load_campaign(campaign_name)
-        
+
         # Initialize FastAPI app
         self.fastapi_app = FastAPI(
             title="Sidestage Core",
             version="0.1.0",
+            lifespan=self._lifespan,
         )
         
         self._setup_routes()
         self._mount_frontend()
+
+    @asynccontextmanager
+    async def _lifespan(self, app: FastAPI):
+        """Write PID file on startup, remove on shutdown."""
+        self._write_pid_file()
+        try:
+            yield
+        finally:
+            self._remove_pid_file()
+
+    def _write_pid_file(self) -> None:
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.pid_file.write_text(str(os.getpid()))
+        atexit.register(self._remove_pid_file)
+        logger.info(f"PID {os.getpid()} written to {self.pid_file}")
+
+    def _remove_pid_file(self) -> None:
+        try:
+            if self.pid_file.exists() and self.pid_file.read_text().strip() == str(os.getpid()):
+                self.pid_file.unlink()
+                logger.info(f"PID file {self.pid_file} removed")
+        except OSError:
+            pass
 
     def _load_campaign(self, name: str) -> Campaign:
         """

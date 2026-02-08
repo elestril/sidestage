@@ -2,7 +2,7 @@
 
 import pytest
 
-from sidestage.campaign import LLMConfig, SidestageConfig
+from sidestage.config import LLMConfig, SidestageConfig
 from sidestage.graph.client import GraphConfig
 
 

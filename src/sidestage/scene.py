@@ -13,7 +13,7 @@ from sidestage.agent import LiteLLMAgent
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
-    from sidestage.campaign import LLMConfig
+    from sidestage.config import LLMConfig
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)

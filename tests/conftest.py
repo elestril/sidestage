@@ -1,6 +1,8 @@
 """Shared test configuration and fixtures."""
 import pytest
 import httpx
+from pathlib import Path
+from sidestage import config as sidestage_config
 
 DEFAULT_LLM_BASE_URL = "http://localhost:8080/v1"
 
@@ -26,6 +28,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "llm" in item.keywords:
             item.add_marker(skip_llm)
+
+
+@pytest.fixture(autouse=True)
+def _init_config(tmp_path: Path):
+    """Ensure the global SidestageConfig singleton is initialized for every test."""
+    sidestage_config.init(tmp_path)
+    yield
+    sidestage_config._instance = None
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import litellm
 
-from sidestage.campaign import LLMConfig
+from sidestage.config import LLMConfig
 from sidestage.health import CampaignHealth, HealthStatus
 
 if TYPE_CHECKING:

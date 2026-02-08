@@ -5,14 +5,15 @@ import logging
 import uvicorn
 from pathlib import Path
 from sidestage.orchestrator import SidestageOrchestrator
+from sidestage import config
 
 # Global app instance for Uvicorn reload support
 def get_app():
     """
     Factory function for Uvicorn to create the FastAPI app instance.
-    
+
     This function relies on environment variables (SIDESTAGE_CAMPAIGN, SIDESTAGE_DIR)
-    to configure the Orchestrator, as Uvicorn reload spawns new processes that 
+    to configure the Orchestrator, as Uvicorn reload spawns new processes that
     cannot receive direct function arguments.
 
     Returns:
@@ -22,11 +23,14 @@ def get_app():
     sidestage_dir = os.getenv("SIDESTAGE_DIR")
     if not campaign:
         return None
-    
-    base_dir = None
-    if sidestage_dir:
-        base_dir = Path(sidestage_dir)
-        
+
+    base_dir = Path(sidestage_dir) if sidestage_dir else Path.home() / ".sidestage"
+
+    cfg = config.init(base_dir)
+    logging.basicConfig(
+        level=getattr(logging, cfg.loglevel.upper(), logging.INFO),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     orchestrator = SidestageOrchestrator(campaign_name=campaign, base_dir=base_dir)
     return orchestrator.fastapi_app
 
@@ -50,19 +54,22 @@ def main():
     # Set environment variable so the reloaded process knows which campaign to use
     os.environ["SIDESTAGE_CAMPAIGN"] = args.campaign
     os.environ["SIDESTAGE_DIR"] = args.sidestage_dir
-    
-    # We don't configure logging here anymore, Orchestrator will do it.
-    # However, we can log the startup to stdout at least.
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    # Load config early so we can read the log level for the main process
+    cfg = config.init(Path(args.sidestage_dir))
+    logging.basicConfig(
+        level=getattr(logging, cfg.loglevel.upper(), logging.INFO),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     logger = logging.getLogger(__name__)
 
     # Start the AgentOS server using the import string and factory mode to enable reload
     logger.info(f"Starting Sidestage Server on {args.host}:{args.port} with reload enabled...")
     logger.info(f"Campaign data: {os.path.abspath(os.path.join(args.sidestage_dir, args.campaign))}")
     
-    uvicorn.run("sidestage.main:get_app", 
+    uvicorn.run("sidestage.server:get_app",
                 host=args.host, port=args.port, 
-                reload=True, reload_dirs=["./src"],
+                reload=True, reload_dirs=[str(Path(__file__).parent)],
                 factory=True)
 
 if __name__ == "__main__":

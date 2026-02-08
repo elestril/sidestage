@@ -410,7 +410,8 @@ class TestCampaignHealthWiring:
     @patch("sidestage.memory.embeddings.validate_embed_config", new_callable=AsyncMock)
     async def test_start_graph_validates_embeddings(self, mock_validate, mock_connect):
         """start_graph validates embeddings when embed config is present."""
-        from sidestage.campaign import Campaign, LLMConfig, SidestageConfig
+        from sidestage.campaign import Campaign
+        from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig
 
         mock_validate.return_value = 384
@@ -442,7 +443,8 @@ class TestCampaignHealthWiring:
     @patch("sidestage.memory.embeddings.validate_embed_config", new_callable=AsyncMock)
     async def test_start_graph_degrades_on_embed_failure(self, mock_validate, mock_connect):
         """start_graph sets health to DEGRADED when embed validation fails."""
-        from sidestage.campaign import Campaign, LLMConfig, SidestageConfig
+        from sidestage.campaign import Campaign
+        from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig
         from sidestage.health import CampaignHealth, HealthStatus
 
@@ -470,7 +472,8 @@ class TestCampaignHealthWiring:
     @patch("sidestage.campaign.connect", new_callable=AsyncMock)
     async def test_start_graph_no_embed_config_skips_validation(self, mock_connect):
         """start_graph skips embed validation when no embed config."""
-        from sidestage.campaign import Campaign, LLMConfig, SidestageConfig
+        from sidestage.campaign import Campaign
+        from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig
         from sidestage.health import CampaignHealth
 

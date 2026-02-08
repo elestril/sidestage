@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [project.scripts]
-sidestage = "sidestage.main:main"
-server = "sidestage.main:main"
+sidestage = "sidestage.server:main"
+server = "sidestage.server:main"
 
 
 [build-system]
