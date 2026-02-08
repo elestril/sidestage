@@ -11,11 +11,10 @@ import yaml
 from sidestage.memory.models import Memory
 from sidestage.migration.models import MigrationValidationIssue, ParseResult
 from sidestage.migration.serialization import (
-    SUBDIR_TO_DEFAULT_TYPE,
     frontmatter_dict_to_entity,
     frontmatter_dict_to_memory,
 )
-from sidestage.schemas import Entity, Scene
+from sidestage.schemas import Entity
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +168,8 @@ def parse_directory(markdown_dir: Path) -> ParseResult:
     # entity ID -> index in entities list, for duplicate detection
     seen_ids: dict[str, str] = {}
     id_to_index: dict[str, int] = {}
-    # file stem -> entity ID, for .d/ association
-    stem_to_entity: dict[str, tuple[str, str]] = {}  # stem -> (entity_id, entity_type_name)
+    # (subdir, file_stem) -> (entity_id, entity_type_name), for .d/ association
+    stem_to_entity: dict[tuple[str, str], tuple[str, str]] = {}
 
     # Step 1 & 2: Parse entity files from each type subdirectory
     for subdir_name in SUBDIR_TO_TYPE:
@@ -202,7 +201,7 @@ def parse_directory(markdown_dir: Path) -> ParseResult:
                 entities.append(entity)
 
             seen_ids[entity_id] = file_str
-            stem_to_entity[md_file.stem] = (entity_id, type(entity).__name__)
+            stem_to_entity[(subdir_name, md_file.stem)] = (entity_id, type(entity).__name__)
 
     # Step 3: Parse companion .d/ directories
     for subdir_name in SUBDIR_TO_TYPE:
@@ -215,7 +214,7 @@ def parse_directory(markdown_dir: Path) -> ParseResult:
                 continue
 
             stem = entry.name[:-2]  # strip .d
-            entity_info = stem_to_entity.get(stem)
+            entity_info = stem_to_entity.get((subdir_name, stem))
 
             if entity_info is None:
                 warnings.append(MigrationValidationIssue(
