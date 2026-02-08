@@ -46,7 +46,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           >
             <Database size={16} /> Entities
           </NavLink>
-          <a href="/traces" className="text-sm hover:text-[#bb86fc] flex items-center gap-1"><Activity size={16} /> Traces</a>
+          <NavLink
+            to="/traces"
+            className={({ isActive }) => cn("text-sm transition-colors flex items-center gap-1", isActive ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
+          >
+            <Activity size={16} /> Traces
+          </NavLink>
         </nav>
       </header>
 

@@ -51,3 +51,49 @@ export interface EntityContentSyncBroadcast {
 }
 
 export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast;
+
+// --- Tracing types ---
+
+export interface SpanEvent {
+  name: string;
+  timestamp_ms: number;
+  attributes: Record<string, string | number | boolean>;
+}
+
+export interface TraceSpan {
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  name: string;
+  kind: string;
+  start_time_ms: number;
+  end_time_ms: number;
+  duration_ms: number;
+  status: { code: string; description?: string | null };
+  attributes: Record<string, string | number | boolean>;
+  events: SpanEvent[];
+  scene_id?: string | null;
+  event_id?: string | null;
+}
+
+export interface TraceSummary {
+  trace_id: string;
+  scene_id: string | null;
+  event_id: string | null;
+  event_type: string | null;
+  start_time_ms: number;
+  end_time_ms: number;
+  duration_ms: number;
+  span_count: number;
+  root_span_name: string | null;
+}
+
+export interface TracingStatus {
+  enabled: boolean;
+  config: {
+    capture_prompts: boolean;
+    capture_tool_args: boolean;
+    capture_memory_content: boolean;
+  };
+  trace_count: number;
+}
