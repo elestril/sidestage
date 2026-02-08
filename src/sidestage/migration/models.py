@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -10,9 +10,9 @@ from pydantic import BaseModel
 class MigrationValidationIssue(BaseModel):
     """A single validation problem found during pre-import checks."""
 
-    entity_id: str | None
+    entity_id: str | None = None
     file_path: str
-    severity: str  # "error" or "warning"
+    severity: Literal["error", "warning"]
     message: str
 
 
@@ -30,7 +30,7 @@ class MigrationValidationReport(BaseModel):
 class MigrationImportResult(BaseModel):
     """Outcome of an import operation."""
 
-    phase: str  # "complete" or "failed"
+    phase: Literal["complete", "failed"]
     total_entities: int
     total_memories: int
     processed_entities: int
@@ -41,7 +41,7 @@ class MigrationImportResult(BaseModel):
 class MigrationBackupResult(BaseModel):
     """Outcome of a backup operation."""
 
-    phase: str  # "complete" or "failed"
+    phase: Literal["complete", "failed"]
     total_entities: int
     total_memories: int
     written_entities: int
@@ -65,7 +65,7 @@ class BackupStatus(BaseModel):
 class MigrationImportRequest(BaseModel):
     """Request body for POST /v1/campaign/import."""
 
-    action: str = "validate"
+    action: Literal["validate", "execute"] = "validate"
     force: bool = False
 
 
