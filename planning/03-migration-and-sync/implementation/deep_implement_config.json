@@ -45,6 +45,10 @@
     "section-07-importer": {
       "status": "complete",
       "commit_hash": "c1e3383"
+    },
+    "section-08-routes-and-frontend": {
+      "status": "complete",
+      "commit_hash": "5d90462"
     }
   },
   "pre_commit": {
