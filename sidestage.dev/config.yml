@@ -21,3 +21,12 @@ llms:
     model: embed
     provider: llama_cpp
 loglevel: DEBUG
+tracing:
+  capture_memory_content: true
+  capture_prompts: true
+  capture_tool_args: true
+  enabled: false
+  max_attribute_length: 4096
+  max_trace_age_hours: 72
+  max_traces_in_memory: 500
+  max_traces_stored: 5000

@@ -19,6 +19,18 @@ class LLMConfig(BaseModel):
     memory_token_budget: int | None = Field(default=None, ge=1, description="Tokens allocated for memory context (optional override)")
 
 
+class TraceConfig(BaseModel):
+    """Configuration for the tracing subsystem."""
+    enabled: bool = False
+    capture_prompts: bool = True
+    capture_tool_args: bool = True
+    capture_memory_content: bool = True
+    max_attribute_length: int = Field(default=4096, ge=1)
+    max_traces_in_memory: int = Field(default=500, ge=1)
+    max_traces_stored: int = Field(default=5000, ge=1)
+    max_trace_age_hours: int = Field(default=72, ge=1)
+
+
 class SidestageConfig(BaseModel):
     """Configuration model for Sidestage settings."""
     loglevel: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
@@ -30,6 +42,9 @@ class SidestageConfig(BaseModel):
 
     # Graph Database Configuration
     graph: GraphConfig = Field(default_factory=GraphConfig, description="FalkorDB graph database configuration")
+
+    # Tracing Configuration
+    tracing: TraceConfig = Field(default_factory=TraceConfig, description="Tracing configuration")
 
 
 _instance: Optional[SidestageConfig] = None
