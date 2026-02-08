@@ -1,0 +1,39 @@
+{
+  "plugin_root": "/home/harald/.claude/plugins/cache/deep-code/deep-code/0.2.0",
+  "sections_dir": "/home/harald/src/sidestage/planning/04-tracing/sections",
+  "target_dir": "/home/harald/src/sidestage",
+  "state_dir": "/home/harald/src/sidestage/planning/04-tracing/implementation",
+  "git_root": "/home/harald/src/sidestage",
+  "commit_style": "simple",
+  "test_command": "uv run pytest",
+  "sections": [
+    "section-01-tracing-config",
+    "section-02-tracing-core",
+    "section-03-exporters",
+    "section-04-backend-instrumentation",
+    "section-05-api-endpoints",
+    "section-06-frontend-trace-viewer",
+    "section-07-frontend-realtime-debug"
+  ],
+  "sections_state": {
+    "section-01-tracing-config": {
+      "status": "complete",
+      "commit_hash": "0ac3d71a1ded66d3d4213ad995913f6127af9294",
+      "completed_at": "2026-02-08T06:13:33.304858+00:00"
+    },
+    "section-02-tracing-core": {
+      "status": "complete",
+      "commit_hash": "f7f1a89855dab974dcaa8e479e91abf4ea8a073c",
+      "completed_at": "2026-02-08T06:18:52.232243+00:00"
+    }
+  },
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-02-08T06:10:02.397663+00:00"
+}

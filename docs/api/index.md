@@ -39,3 +39,6 @@ Auto-generated from source. Run `python scripts/generate_api_docs.py` to regener
 - [sidestage.sync](sidestage.sync.md)
 - [sidestage.time](sidestage.time.md)
 - [sidestage.tools](sidestage.tools.md)
+- [sidestage.tracing](sidestage.tracing.md)
+- [sidestage.tracing.middleware](sidestage.tracing.middleware.md)
+- [sidestage.tracing.provider](sidestage.tracing.provider.md)
