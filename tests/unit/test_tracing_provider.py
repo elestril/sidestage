@@ -9,25 +9,20 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult, Simpl
 from sidestage.config import TraceConfig
 from sidestage.tracing.provider import (
     FilteringSpanProcessor,
+    check_otlp_endpoint,
     init_tracing,
     toggle_tracing,
     shutdown_tracing,
+    get_tracing_error,
 )
 from sidestage.tracing import provider as provider_module
 
 
-class _StubExporter(SpanExporter):
-    """Stub exporter that records exported spans."""
-
-    def __init__(self):
-        self.spans: list = []
-
-    def export(self, spans):
-        self.spans.extend(spans)
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self):
-        pass
+# Patch check_otlp_endpoint to report reachable for tests that don't care
+_REACHABLE = patch(
+    "sidestage.tracing.provider.check_otlp_endpoint",
+    return_value=(True, None),
+)
 
 
 class TestFilteringSpanProcessor:
@@ -104,6 +99,36 @@ class TestFilteringSpanProcessor:
         inner.force_flush.assert_called_once_with(5000)
 
 
+class TestCheckOtlpEndpoint:
+    """Tests for the OTLP endpoint reachability check."""
+
+    def test_reachable_endpoint(self):
+        """Returns (True, None) when the endpoint is reachable."""
+        with patch("sidestage.tracing.provider.socket.create_connection"):
+            reachable, error = check_otlp_endpoint("http://localhost:4318")
+            assert reachable is True
+            assert error is None
+
+    def test_unreachable_endpoint(self):
+        """Returns (False, message) when connection is refused."""
+        with patch(
+            "sidestage.tracing.provider.socket.create_connection",
+            side_effect=ConnectionRefusedError("[Errno 111] Connection refused"),
+        ):
+            reachable, error = check_otlp_endpoint("http://localhost:4318")
+            assert reachable is False
+            assert "unreachable" in error
+            assert "localhost:4318" in error
+
+    def test_parses_custom_port(self):
+        """Parses port from the endpoint URL."""
+        with patch("sidestage.tracing.provider.socket.create_connection") as mock_conn:
+            check_otlp_endpoint("http://collector.example.com:9999")
+            mock_conn.assert_called_once()
+            addr = mock_conn.call_args[0][0]
+            assert addr == ("collector.example.com", 9999)
+
+
 class TestInitTracing:
     """Tests for init_tracing lifecycle function."""
 
@@ -111,86 +136,117 @@ class TestInitTracing:
         """Reset module state after test."""
         provider_module._provider = None
         provider_module._filtering_processors = []
+        provider_module._init_error = None
+        provider_module._otlp_endpoint = None
 
-    def test_init_enabled_creates_provider(self, tmp_path):
-        """init_tracing sets up a TracerProvider with FilteringSpanProcessors enabled."""
+    @_REACHABLE
+    def test_init_enabled_creates_provider(self, _mock):
+        """init_tracing sets up a TracerProvider with FilteringSpanProcessor enabled."""
         try:
             config = TraceConfig(enabled=True)
-            exporter = _StubExporter()
-            provider = init_tracing(
-                config, "test_campaign", tmp_path / "traces.db",
-                in_memory_exporter=exporter,
-            )
+            provider = init_tracing(config, "test_campaign")
             assert isinstance(provider, TracerProvider)
             assert len(provider_module._filtering_processors) == 1
             assert provider_module._filtering_processors[0].enabled is True
+            assert get_tracing_error() is None
         finally:
             self._cleanup()
 
-    def test_init_disabled_creates_provider_disabled(self, tmp_path):
-        """init_tracing with enabled=False creates provider but processors are disabled."""
+    def test_init_disabled_creates_provider_disabled(self):
+        """init_tracing with enabled=False creates provider but processor is disabled."""
         try:
             config = TraceConfig(enabled=False)
-            exporter = _StubExporter()
-            provider = init_tracing(
-                config, "test_campaign", tmp_path / "traces.db",
-                in_memory_exporter=exporter,
-            )
+            provider = init_tracing(config, "test_campaign")
             assert isinstance(provider, TracerProvider)
             assert len(provider_module._filtering_processors) == 1
             assert provider_module._filtering_processors[0].enabled is False
+            assert get_tracing_error() is None
         finally:
             self._cleanup()
 
-    def test_shutdown_tracing(self, tmp_path):
+    def test_init_enabled_unreachable_disables_tracing(self):
+        """When enabled=True but endpoint unreachable, processor is disabled and error stored."""
+        with patch(
+            "sidestage.tracing.provider.check_otlp_endpoint",
+            return_value=(False, "OTLP endpoint unreachable at http://localhost:4318: conn refused"),
+        ):
+            try:
+                config = TraceConfig(enabled=True)
+                provider = init_tracing(config, "test_campaign")
+                assert isinstance(provider, TracerProvider)
+                assert provider_module._filtering_processors[0].enabled is False
+                assert get_tracing_error() is not None
+                assert "unreachable" in get_tracing_error()
+            finally:
+                self._cleanup()
+
+    @_REACHABLE
+    def test_shutdown_tracing(self, _mock):
         """shutdown_tracing calls provider.shutdown() cleanly."""
         try:
             config = TraceConfig(enabled=True)
-            exporter = _StubExporter()
-            init_tracing(
-                config, "test_campaign", tmp_path / "traces.db",
-                in_memory_exporter=exporter,
-            )
+            init_tracing(config, "test_campaign")
             assert provider_module._provider is not None
             shutdown_tracing()
             assert provider_module._provider is None
             assert provider_module._filtering_processors == []
+            assert get_tracing_error() is None
         finally:
             self._cleanup()
 
-    def test_toggle_tracing_via_function(self, tmp_path):
+    @_REACHABLE
+    def test_toggle_tracing_via_function(self, _mock):
         """toggle_tracing flips enabled state on all filtering processors."""
         try:
             config = TraceConfig(enabled=True)
-            exporter = _StubExporter()
-            init_tracing(
-                config, "test_campaign", tmp_path / "traces.db",
-                in_memory_exporter=exporter,
-            )
+            init_tracing(config, "test_campaign")
             assert provider_module._filtering_processors[0].enabled is True
-            result = toggle_tracing(False)
-            assert result is False
+            enabled, error = toggle_tracing(False)
+            assert enabled is False
+            assert error is None
             assert provider_module._filtering_processors[0].enabled is False
-            result = toggle_tracing(True)
-            assert result is True
+            enabled, error = toggle_tracing(True)
+            assert enabled is True
+            assert error is None
             assert provider_module._filtering_processors[0].enabled is True
         finally:
             self._cleanup()
 
-    def test_init_idempotent(self, tmp_path):
+    def test_toggle_enable_unreachable_returns_error(self):
+        """toggle_tracing(True) returns error when endpoint is unreachable."""
+        with patch(
+            "sidestage.tracing.provider.check_otlp_endpoint",
+            return_value=(False, "OTLP endpoint unreachable at http://localhost:4318: conn refused"),
+        ):
+            try:
+                config = TraceConfig(enabled=False)
+                init_tracing(config, "test_campaign")
+                enabled, error = toggle_tracing(True)
+                assert enabled is False
+                assert error is not None
+                assert "unreachable" in error
+                assert provider_module._filtering_processors[0].enabled is False
+            finally:
+                self._cleanup()
+
+    def test_toggle_disable_always_succeeds(self):
+        """toggle_tracing(False) always succeeds regardless of endpoint."""
+        try:
+            config = TraceConfig(enabled=False)
+            init_tracing(config, "test_campaign")
+            enabled, error = toggle_tracing(False)
+            assert enabled is False
+            assert error is None
+        finally:
+            self._cleanup()
+
+    @_REACHABLE
+    def test_init_idempotent(self, _mock):
         """Calling init_tracing again shuts down the previous provider first."""
         try:
             config = TraceConfig(enabled=True)
-            exporter1 = _StubExporter()
-            provider1 = init_tracing(
-                config, "campaign1", tmp_path / "traces.db",
-                in_memory_exporter=exporter1,
-            )
-            exporter2 = _StubExporter()
-            provider2 = init_tracing(
-                config, "campaign2", tmp_path / "traces.db",
-                in_memory_exporter=exporter2,
-            )
+            provider1 = init_tracing(config, "campaign1")
+            provider2 = init_tracing(config, "campaign2")
             assert provider2 is not provider1
             assert provider_module._provider is provider2
         finally:

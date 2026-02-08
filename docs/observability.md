@@ -25,15 +25,22 @@ Runtime health tracking exposes system state and gates operations.
 
 ## OpenTelemetry Tracing
 
-The tracing subsystem provides full OpenTelemetry instrumentation with in-browser visualization.
+The tracing subsystem provides full OpenTelemetry instrumentation with OTLP export to an external viewer (e.g. [otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer)).
 
 ### Configuration
-Tracing is configured in `config.yml` under the `tracing:` key. See `TraceConfig` in `config.py` for all options (enabled, capture_prompts, capture_tool_args, capture_memory_content, max_attribute_length, max_traces_in_memory, max_traces_stored, max_trace_age_hours).
+Tracing is configured in `config.yml` under the `tracing:` key. See `TraceConfig` in `config.py` for all options:
+- `enabled` — master switch (default: false)
+- `otlp_endpoint` — OTLP HTTP endpoint (default: `http://localhost:4318`)
+- `capture_prompts` — include gen_ai.prompt/completion events (default: true)
+- `capture_tool_args` — include tool.* events (default: true)
+- `capture_memory_content` — include memory.* events (default: true)
+- `max_attribute_length` — truncate long string attributes (default: 4096)
 
-### Storage
-- **In-Memory:** Ring-buffer (`InMemoryTraceExporter`) for fast lookups, configurable max traces.
-- **SQLite:** Persistent storage (`SQLiteTraceExporter`) at `<campaign_dir>/traces.db` with retention cleanup.
-- Two-tier lookup: in-memory first, SQLite fallback.
+### Endpoint Validation
+On startup (and when toggling tracing on at runtime), Sidestage validates that the OTLP endpoint is reachable via a TCP connect check. If the endpoint is unreachable, tracing is automatically disabled and the error is surfaced in the `/v1/tracing/status` response and as a warning banner in the frontend UI.
+
+### Export
+Traces are exported via OTLP HTTP to the configured endpoint using `BatchSpanProcessor` and `OTLPSpanExporter`. Run `otel-desktop-viewer` (or any OTLP-compatible collector) to receive and view traces.
 
 ### Instrumentation
 Backend modules are instrumented with span creation and attribute recording:
@@ -45,26 +52,8 @@ Backend modules are instrumented with span creation and attribute recording:
 - `campaign.py` — campaign import/export spans
 
 ### API Endpoints
-- `GET /v1/traces` — List trace summaries (filterable by scene_id, event_id)
-- `GET /v1/traces/{trace_id}` — Get full trace with all spans
 - `POST /v1/tracing/toggle` — Enable/disable tracing at runtime
 - `GET /v1/tracing/status` — Current tracing status and configuration
-
-### Real-time WebSocket Broadcasts
-When tracing is enabled, trace events are broadcast over the existing WebSocket:
-- `trace_started` — New trace begun (includes scene_id, event_type)
-- `span_completed` — Individual span finished (includes full span data)
-- `trace_completed` — Trace finished (includes final duration)
-
-### Frontend Trace Viewer
-The Trace Viewer page (`/traces`) provides a waterfall visualization of traces with:
-- Scene-based filtering
-- Collapsible span tree with color-coded duration bars
-- Span detail panel with attributes, prompt/completion events, and error details
-- Real-time updates via WebSocket (live waterfall building, running trace indicators)
-
-### Chat Debug Mode
-A debug toggle in the Chat Widget header enables trace link icons on chat messages. Clicking an icon resolves the message's trace via the `event_id` lookup API and navigates to the Trace Viewer.
 
 ## Why this matters
 Observability allows Game Masters to:

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { Scene, Entity, ChatMessage, WebSocketMessage, TraceWebSocketMessage } from './types';
+import type { Scene, Entity, ChatMessage, WebSocketMessage } from './types';
 
 interface AppContextType {
   scenes: Scene[];
@@ -17,7 +17,7 @@ interface AppContextType {
   activeScene: Scene | undefined;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
-  onTraceMessage: (callback: (data: TraceWebSocketMessage) => void) => () => void;
+  tracingError: string | null;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -106,19 +106,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [debugMode, setDebugMode] = useState(false);
+  const [tracingError, setTracingError] = useState<string | null>(null);
 
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const syncListeners = useRef<Set<(data: any) => void>>(new Set());
-  const traceListeners = useRef<Set<(data: TraceWebSocketMessage) => void>>(new Set());
 
   const onSync = useCallback((callback: (data: any) => void) => {
     syncListeners.current.add(callback);
     return () => syncListeners.current.delete(callback);
-  }, []);
-
-  const onTraceMessage = useCallback((callback: (data: TraceWebSocketMessage) => void) => {
-    traceListeners.current.add(callback);
-    return () => { traceListeners.current.delete(callback); };
   }, []);
 
   const syncSocketMessage = useCallback((data: any) => {
@@ -130,6 +125,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     loadScenes();
     loadEntities();
+    fetch('/v1/tracing/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.error) setTracingError(data.error); })
+      .catch(() => {});
   }, [loadScenes, loadEntities]);
 
   useEffect(() => {
@@ -158,8 +157,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           loadScenes();
         } else if (data.type === 'entity_content_sync') {
           syncListeners.current.forEach((listener: (data: any) => void) => listener(data));
-        } else if (data.type === 'trace_started' || data.type === 'span_completed' || data.type === 'trace_completed') {
-          traceListeners.current.forEach(listener => listener(data as TraceWebSocketMessage));
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
@@ -169,8 +166,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     s.onclose = () => {
       console.log('WebSocket disconnected. Retrying in 2s...');
       setSocket(null);
-      setTimeout(() => {}, 2000); // Trigger a re-render or effect to reconnect? 
-      // Actually simple effect below
+      setTimeout(() => {}, 2000);
     };
 
     return () => s.close();
@@ -195,7 +191,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activeScene,
       debugMode,
       setDebugMode,
-      onTraceMessage,
+      tracingError,
     }}>
       {children}
     </AppContext.Provider>

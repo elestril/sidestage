@@ -16,11 +16,11 @@ from sidestage.campaign import Campaign
 from sidestage.sync import SyncManager
 from sidestage.health import HealthStatus
 from sidestage.tracing import (
+    init_tracing,
     toggle_tracing,
     shutdown_tracing,
     get_tracing_enabled,
-    get_in_memory_exporter,
-    get_sqlite_exporter,
+    get_tracing_error,
 )
 from sidestage.migration.models import (
     MigrationImportRequest,
@@ -46,6 +46,27 @@ from sidestage.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _LoggingASGIWrapper:
+    """ASGI wrapper that logs exceptions from a mounted sub-app.
+
+    Mounted Starlette sub-apps swallow exceptions at the ASGI level,
+    so errors only appear on uvicorn stderr. This wrapper ensures they
+    also reach the application logger.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        except Exception:
+            if scope.get("type") != "lifespan":
+                logger.exception("MCP endpoint error")
+            raise
+
 
 class SidestageOrchestrator:
     """
@@ -90,14 +111,17 @@ class SidestageOrchestrator:
         )
         
         self._setup_routes()
+        self._setup_mcp()
         self._mount_frontend()
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
-        """Write PID file on startup, remove on shutdown."""
+        """Write PID file on startup, init tracing, run MCP session manager, remove on shutdown."""
         self._write_pid_file()
+        self._init_tracing()
         try:
-            yield
+            async with self._mcp_server.session_manager.run():
+                yield
         finally:
             try:
                 shutdown_tracing()
@@ -118,6 +142,13 @@ class SidestageOrchestrator:
                 logger.info(f"PID file {self.pid_file} removed")
         except OSError:
             pass
+
+    def _init_tracing(self) -> None:
+        """Initialize the tracing subsystem with OTLP exporter."""
+        campaign = self.campaign
+        trace_config = campaign.config.tracing
+        init_tracing(config=trace_config, campaign_name=campaign.name)
+        logger.info("Tracing initialized (enabled=%s)", trace_config.enabled)
 
     def _load_campaign(self, name: str) -> Campaign:
         """
@@ -197,6 +228,20 @@ class SidestageOrchestrator:
                         await scene.chat(user_msg)
                 except Exception as e:
                     logger.error(f"Error publishing to scene bus: {e}")
+
+    def _setup_mcp(self) -> None:
+        """Create and mount the MCP Streamable HTTP endpoint at /v1/mcp.
+
+        The MCP session manager lifespan is run by _lifespan() rather than
+        the mounted sub-app, because Starlette does not propagate lifespans
+        to mounted sub-applications.
+        """
+        from sidestage.mcp_bridge import create_mcp_server
+
+        self._mcp_server = create_mcp_server(self)
+        mcp_app = self._mcp_server.streamable_http_app()
+        self.fastapi_app.mount("/v1/mcp", _LoggingASGIWrapper(mcp_app))
+        logger.info("MCP endpoint mounted at /v1/mcp")
 
     def _setup_routes(self) -> None:
         """Define and register all FastAPI routes."""
@@ -402,45 +447,13 @@ class SidestageOrchestrator:
         class _TracingToggleRequest(_BaseModel):
             enabled: bool
 
-        @self.fastapi_app.get("/v1/traces")
-        async def list_traces(
-            scene_id: str | None = None,
-            event_id: str | None = None,
-            limit: int = Query(default=50, ge=1, le=1000),
-            offset: int = Query(default=0, ge=0),
-        ):
-            """List trace summaries, optionally filtered."""
-            sqlite_exp = get_sqlite_exporter()
-            if sqlite_exp is None:
-                return []
-            return sqlite_exp.query_traces(
-                scene_id=scene_id, event_id=event_id, limit=limit, offset=offset,
-            )
-
-        @self.fastapi_app.get("/v1/traces/{trace_id}")
-        async def get_trace_detail(trace_id: str):
-            """Return full trace with all spans."""
-            # Try in-memory first
-            mem_exp = get_in_memory_exporter()
-            if mem_exp is not None:
-                spans = mem_exp.get_trace(trace_id)
-                if spans is not None:
-                    return {"trace_id": trace_id, "spans": spans}
-
-            # Fall back to SQLite
-            sqlite_exp = get_sqlite_exporter()
-            if sqlite_exp is not None:
-                spans = sqlite_exp.query_spans(trace_id)
-                if spans:
-                    return {"trace_id": trace_id, "spans": spans}
-
-            raise HTTPException(status_code=404, detail="Trace not found")
-
         @self.fastapi_app.post("/v1/tracing/toggle")
         async def toggle_tracing_endpoint(body: _TracingToggleRequest):
             """Toggle tracing on or off."""
-            result = toggle_tracing(body.enabled)
-            return {"tracing_enabled": result}
+            enabled, error = toggle_tracing(body.enabled)
+            if error is not None:
+                raise HTTPException(status_code=502, detail=error)
+            return {"tracing_enabled": enabled}
 
         @self.fastapi_app.get("/v1/tracing/status")
         async def tracing_status():
@@ -448,13 +461,10 @@ class SidestageOrchestrator:
             from sidestage import config as sidestage_config
             trace_config = sidestage_config.get().tracing
 
-            mem_exp = get_in_memory_exporter()
-            trace_count = len(mem_exp.get_traces()) if mem_exp is not None else 0
-
             return {
                 "enabled": get_tracing_enabled(),
                 "config": trace_config.model_dump(),
-                "trace_count": trace_count,
+                "error": get_tracing_error(),
             }
 
         # Redirect root to /sidestage

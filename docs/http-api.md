@@ -5,6 +5,41 @@ This document provides a reference for the Sidestage JSON API and WebSocket prot
 ## Base URL
 Defaults to `http://localhost:8000`.
 
+## MCP (Model Context Protocol)
+
+**Endpoint:** `/v1/mcp`
+
+Streamable HTTP transport endpoint for MCP-compatible AI clients (e.g. Claude Code, Claude Desktop). Exposes the same operations as the REST API below as MCP tools.
+
+### Available Tools
+
+| Tool | Description |
+|---|---|
+| `list_entities` | List all entities in the campaign |
+| `get_entity_markdown` | Get markdown representation of an entity |
+| `update_entity_markdown` | Update entity from markdown with YAML frontmatter |
+| `update_entity` | Update specific entity fields (JSON string) |
+| `reload_defaults` | Reload default entities from data directory |
+| `import_campaign` | Two-phase campaign import (validate/execute) |
+| `backup_campaign` | Backup campaign to markdown directory |
+| `list_scenes` | List all scenes |
+| `create_scene` | Create a new scene |
+| `get_scene_messages` | Get message history for a scene |
+| `send_chat_message` | Send a chat message to the AI co-author |
+
+### Client Configuration
+
+For Claude Code (`~/.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "sidestage": {
+      "url": "http://localhost:8000/v1/mcp"
+    }
+  }
+}
+```
+
 ## WebSocket
 
 **Endpoint:** `/v1/ws`
@@ -313,6 +348,49 @@ Sends a message to the AI agent within a specific scene context. The agent's pro
   "user_message": { ...ChatMessage... },
   "agent_message": { ...ChatMessage... }
 }
+```
+
+### Tracing
+
+#### `GET /v1/tracing/status`
+
+Returns current tracing status, configuration, and any error.
+
+**Response:**
+```json
+{
+  "enabled": false,
+  "config": {
+    "enabled": true,
+    "otlp_endpoint": "http://localhost:4318",
+    "capture_prompts": true,
+    "capture_tool_args": true,
+    "capture_memory_content": true,
+    "max_attribute_length": 4096
+  },
+  "error": "OTLP endpoint unreachable at http://localhost:4318: [Errno 111] Connection refused"
+}
+```
+
+The `error` field is `null` when tracing is healthy. A non-null value means tracing was requested but could not be enabled.
+
+#### `POST /v1/tracing/toggle`
+
+Enable or disable tracing at runtime. Validates the OTLP endpoint is reachable before enabling.
+
+**Request:**
+```json
+{ "enabled": true }
+```
+
+**Response (success):**
+```json
+{ "tracing_enabled": true }
+```
+
+**Response (502 Bad Gateway):** Returned when enabling tracing but the OTLP endpoint is unreachable.
+```json
+{ "detail": "OTLP endpoint unreachable at http://localhost:4318: [Errno 111] Connection refused" }
 ```
 
 ## Data Models

@@ -1,11 +1,11 @@
 import React from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
-import { Plus, MessageSquare, Database, Activity } from 'lucide-react';
+import { Plus, MessageSquare, Database, AlertTriangle } from 'lucide-react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { scenes, loadScenes } = useAppContext();
+  const { scenes, loadScenes, tracingError } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
   const isScenesPage = location.pathname === '/' || location.pathname.startsWith('/scenes');
@@ -33,24 +33,24 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     <div className="flex flex-col h-screen bg-[#121212] text-[#e0e0e0] font-sans">
       <header className="flex justify-between items-center p-4 bg-black border-b border-[#333]">
         <h1 className="text-xl font-bold text-[#bb86fc]">Sidestage</h1>
+        {tracingError && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400" title={tracingError}>
+            <AlertTriangle size={14} />
+            <span>Tracing unavailable</span>
+          </div>
+        )}
         <nav className="flex gap-4">
-          <NavLink 
+          <NavLink
             to="/"
             className={({ isActive }) => cn("text-sm transition-colors flex items-center gap-1", isActive ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
           >
             <MessageSquare size={16} /> Scenes
           </NavLink>
-          <NavLink 
+          <NavLink
             to="/entities"
             className={({ isActive }) => cn("text-sm transition-colors flex items-center gap-1", isActive ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
           >
             <Database size={16} /> Entities
-          </NavLink>
-          <NavLink
-            to="/traces"
-            className={({ isActive }) => cn("text-sm transition-colors flex items-center gap-1", isActive ? "text-[#bb86fc]" : "hover:text-[#bb86fc]")}
-          >
-            <Activity size={16} /> Traces
           </NavLink>
         </nav>
       </header>
@@ -67,8 +67,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                     to={`/scenes/${scene.id}`}
                     className={({ isActive }) => cn(
                       "text-left p-2 text-sm rounded transition-all border-l-2 border-transparent",
-                      isActive 
-                        ? "bg-[#1e1e1e] text-[#bb86fc] border-[#bb86fc]" 
+                      isActive
+                        ? "bg-[#1e1e1e] text-[#bb86fc] border-[#bb86fc]"
                         : "hover:bg-[#222]"
                     )}
                   >
@@ -76,7 +76,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   </NavLink>
                 ))}
               </div>
-              <button 
+              <button
                 onClick={handleCreateScene}
                 className="mt-4 flex items-center gap-2 text-[10px] uppercase font-bold text-[#bb86fc] hover:opacity-80 transition-opacity"
               >
