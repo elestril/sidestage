@@ -159,7 +159,7 @@ Imports entities from markdown files in the campaign's `entities/` directory. De
 #### Reload Defaults
 **POST** `/v1/campaign/reload-defaults`
 
-Reloads default characters and prompts from the project's `data/` directory into the campaign.
+Reloads default entities from `data/campaign_defaults/markdown/` into the campaign.
 
 **Response:**
 ```json

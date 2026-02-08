@@ -10,6 +10,7 @@ from sidestage.tools import WorldTools
 from sidestage.scene import SceneLogic
 from sidestage.schemas import Scene, Character, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
 from sidestage.entities import entity_to_markdown, markdown_to_entity
+from sidestage.migration.parser import parse_directory
 from sidestage.graph import GraphConfig, GraphClient, connect, close
 from sidestage.health import CampaignHealth, HealthStatus
 from sidestage.graph import create_entity as graph_create_entity
@@ -147,50 +148,46 @@ class Campaign:
 
     def _ensure_defaults(self) -> None:
         """Ensure that necessary default entities (scenes, characters) exist in the database."""
-        # Ensure default scene exists
-        planning_scene = self.storage.get_scene("campaign_planning")
-        if not planning_scene:
-            logger.info("Creating default 'Campaign Planning' scene.")
-            self.storage.add_scene(Scene(
-                id="campaign_planning",
-                name="Campaign Planning",
-                body="The default space for discussing the campaign world, characters, and plot.",
-                current_gametime=None
-            ))
-        
-        # Ensure default characters from data directory are loaded
         self.reload_defaults()
 
     def reload_defaults(self) -> None:
         """
-        Load default characters and other entities from the project's data directory.
-        
-        This scans the 'data/characters' folder for markdown files and upserts them
-        into the database.
+        Load default entities from data/campaign_defaults/markdown/.
+
+        Uses the migration parser to read all entity types (characters, scenes,
+        locations, items, events) and upserts them into the database.
         """
         logger.info("Reloading default content from data directory...")
-        
-        # Use project root to find data directory
+
         project_root = Path(__file__).parent.parent.parent
-        data_dir = project_root / "data"
-        
-        if not data_dir.exists():
-            logger.warning(f"Data directory not found at {data_dir}. Skipping default content loading.")
+        defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
+
+        if not defaults_dir.exists():
+            logger.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
             return
 
-        # Load Characters
-        char_dir = data_dir / "characters"
-        if char_dir.exists():
-            for char_file in char_dir.glob("*.md"):
-                try:
-                    content = char_file.read_text()
-                    char = markdown_to_entity(content)
-                    if isinstance(char, Character):
-                        # Use add_character which is INSERT OR REPLACE
-                        self.storage.add_character(char)
-                        logger.info(f"Loaded default character: {char.name} ({char.id})")
-                except Exception as e:
-                    logger.error(f"Error loading default character from {char_file}: {e}")
+        result = parse_directory(defaults_dir)
+
+        for issue in result.errors:
+            logger.error(f"Error loading default: {issue.message} ({issue.file_path})")
+        for issue in result.warnings:
+            logger.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
+
+        for entity in result.entities:
+            try:
+                if isinstance(entity, Character):
+                    self.storage.add_character(entity)
+                elif isinstance(entity, Location):
+                    self.storage.add_location(entity)
+                elif isinstance(entity, Item):
+                    self.storage.add_item(entity)
+                elif isinstance(entity, Scene):
+                    self.storage.add_scene(entity)
+                elif isinstance(entity, Event):
+                    self.storage.add_event(entity)
+                logger.info(f"Loaded default {type(entity).__name__}: {entity.name} ({entity.id})")
+            except Exception as e:
+                logger.error(f"Error loading default entity {entity.id}: {e}")
 
     def _ensure_llm_availability(self) -> None:
         """

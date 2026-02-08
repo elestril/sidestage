@@ -12,7 +12,7 @@ This document outlines the primary workflows for users interacting with Sidestag
     - System initializes SQLite database for chat logs.
     - System connects to FalkorDB and initializes the graph schema (indexes, constraints, vector index).
     - System creates a default `config.yml`.
-    - System ensures a default "Campaign Planning" scene exists.
+    - System loads default entities (scenes, characters) from `data/campaign_defaults/markdown/`.
 3.  **Access UI:** User opens `http://localhost:8000` in their browser.
 4.  **Result:** The user is presented with the "Campaign Planning" scene, ready to start building.
 

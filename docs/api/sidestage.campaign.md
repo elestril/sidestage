@@ -78,10 +78,10 @@ List all scenes in the campaign.
 
 #### `reload_defaults() -> None`
 
-Load default characters and other entities from the project's data directory.
+Load default entities from `data/campaign_defaults/markdown/`.
 
-This scans the 'data/characters' folder for markdown files and upserts them
-into the database.
+Uses the migration parser to read all entity types (characters, scenes,
+locations, items, events) and upserts them into the database.
 
 #### `shutdown() -> None` *async*
 
