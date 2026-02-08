@@ -18,7 +18,7 @@ from sidestage.memory.embeddings import (
 
 
 @pytest.fixture
-def llama_config():
+def llama_config() -> LLMConfig:
     return LLMConfig(
         provider="llama_cpp",
         model="embed",
@@ -28,7 +28,7 @@ def llama_config():
 
 
 @pytest.fixture
-def gemini_config():
+def gemini_config() -> LLMConfig:
     return LLMConfig(
         provider="gemini",
         model="text-embedding-004",
@@ -38,7 +38,7 @@ def gemini_config():
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     client = MagicMock()
     client.graph = MagicMock()
     client.graph.query = AsyncMock()
@@ -46,11 +46,11 @@ def mock_client():
 
 
 @pytest.fixture
-def health():
+def health() -> CampaignHealth:
     return CampaignHealth()
 
 
-def _make_embedding_response(embedding):
+def _make_embedding_response(embedding: list[float]) -> MagicMock:
     """Create a mock LiteLLM embedding response."""
     data_item = MagicMock()
     data_item.embedding = embedding
@@ -64,7 +64,7 @@ def _make_embedding_response(embedding):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.litellm.aembedding", new_callable=AsyncMock)
-async def test_embed_text_llama_cpp_model_string(mock_aembedding, llama_config):
+async def test_embed_text_llama_cpp_model_string(mock_aembedding: AsyncMock, llama_config: LLMConfig) -> None:
     """embed_text calls litellm.aembedding with correct model string for llama_cpp provider."""
     mock_aembedding.return_value = _make_embedding_response([0.1, 0.2, 0.3])
 
@@ -78,7 +78,7 @@ async def test_embed_text_llama_cpp_model_string(mock_aembedding, llama_config):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.litellm.aembedding", new_callable=AsyncMock)
-async def test_embed_text_gemini_model_string(mock_aembedding, gemini_config):
+async def test_embed_text_gemini_model_string(mock_aembedding: AsyncMock, gemini_config: LLMConfig) -> None:
     """embed_text calls litellm.aembedding with correct model string for gemini provider."""
     mock_aembedding.return_value = _make_embedding_response([0.1, 0.2])
 
@@ -90,7 +90,7 @@ async def test_embed_text_gemini_model_string(mock_aembedding, gemini_config):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.litellm.aembedding", new_callable=AsyncMock)
-async def test_embed_text_returns_float_list(mock_aembedding, llama_config):
+async def test_embed_text_returns_float_list(mock_aembedding: AsyncMock, llama_config: LLMConfig) -> None:
     """embed_text returns list of floats from successful response."""
     mock_aembedding.return_value = _make_embedding_response([0.1, 0.2, 0.3])
 
@@ -101,7 +101,7 @@ async def test_embed_text_returns_float_list(mock_aembedding, llama_config):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.litellm.aembedding", new_callable=AsyncMock)
-async def test_embed_text_raises_on_failure(mock_aembedding, llama_config):
+async def test_embed_text_raises_on_failure(mock_aembedding: AsyncMock, llama_config: LLMConfig) -> None:
     """embed_text raises EmbeddingError on litellm failure."""
     mock_aembedding.side_effect = Exception("API error")
 
@@ -111,7 +111,7 @@ async def test_embed_text_raises_on_failure(mock_aembedding, llama_config):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.litellm.aembedding", new_callable=AsyncMock)
-async def test_embed_text_raises_on_timeout(mock_aembedding, llama_config):
+async def test_embed_text_raises_on_timeout(mock_aembedding: AsyncMock, llama_config: LLMConfig) -> None:
     """embed_text raises EmbeddingError on timeout."""
     mock_aembedding.side_effect = asyncio.TimeoutError()
 
@@ -124,7 +124,7 @@ async def test_embed_text_raises_on_timeout(mock_aembedding, llama_config):
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_embed_and_update_updates_memory(mock_embed, mock_client, llama_config, health):
+async def test_embed_and_update_updates_memory(mock_embed: AsyncMock, mock_client: MagicMock, llama_config: LLMConfig, health: CampaignHealth) -> None:
     """embed_and_update updates memory node embedding on success."""
     mock_embed.return_value = [0.1, 0.2, 0.3]
 
@@ -140,7 +140,7 @@ async def test_embed_and_update_updates_memory(mock_embed, mock_client, llama_co
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_embed_and_update_degrades_health_on_failure(mock_embed, mock_client, llama_config, health):
+async def test_embed_and_update_degrades_health_on_failure(mock_embed: AsyncMock, mock_client: MagicMock, llama_config: LLMConfig, health: CampaignHealth) -> None:
     """embed_and_update transitions health to DEGRADED on failure."""
     mock_embed.side_effect = EmbeddingError("failed")
 
@@ -151,7 +151,7 @@ async def test_embed_and_update_degrades_health_on_failure(mock_embed, mock_clie
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_embed_and_update_recovers_health_on_success(mock_embed, mock_client, llama_config, health):
+async def test_embed_and_update_recovers_health_on_success(mock_embed: AsyncMock, mock_client: MagicMock, llama_config: LLMConfig, health: CampaignHealth) -> None:
     """embed_and_update transitions health back to HEALTHY on success after prior failure."""
     await health.set_status(HealthStatus.DEGRADED, "prior failure")
     mock_embed.return_value = [0.1, 0.2]
@@ -163,7 +163,7 @@ async def test_embed_and_update_recovers_health_on_success(mock_embed, mock_clie
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_embed_and_update_no_crash_without_callback(mock_embed, mock_client, llama_config):
+async def test_embed_and_update_no_crash_without_callback(mock_embed: AsyncMock, mock_client: MagicMock, llama_config: LLMConfig) -> None:
     """embed_and_update does not crash when health callback is None."""
     health = CampaignHealth(on_change=None)
     mock_embed.side_effect = EmbeddingError("failed")
@@ -177,7 +177,7 @@ async def test_embed_and_update_no_crash_without_callback(mock_embed, mock_clien
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_validate_embed_config_returns_dimension(mock_embed, llama_config):
+async def test_validate_embed_config_returns_dimension(mock_embed: AsyncMock, llama_config: LLMConfig) -> None:
     """validate_embed_config returns vector dimension on success."""
     mock_embed.return_value = [0.1] * 384
 
@@ -188,7 +188,7 @@ async def test_validate_embed_config_returns_dimension(mock_embed, llama_config)
 
 @pytest.mark.anyio
 @patch("sidestage.memory.embeddings.embed_text", new_callable=AsyncMock)
-async def test_validate_embed_config_returns_none_on_failure(mock_embed, llama_config):
+async def test_validate_embed_config_returns_none_on_failure(mock_embed: AsyncMock, llama_config: LLMConfig) -> None:
     """validate_embed_config returns None on embed failure."""
     mock_embed.side_effect = EmbeddingError("no model")
 

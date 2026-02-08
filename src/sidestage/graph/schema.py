@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from sidestage.graph.errors import SchemaError
 
@@ -152,7 +152,7 @@ async def _migrate_v2(client: GraphClient, vector_dimension: int | None = None) 
             logger.warning("Vector index creation failed (non-fatal): %s", exc)
 
 
-async def _set_schema_version(client: GraphClient, version: int, **extra_props) -> None:
+async def _set_schema_version(client: GraphClient, version: int, **extra_props: Any) -> None:
     """Create or update the :SchemaVersion node."""
     import re
     for key in extra_props:

@@ -2,18 +2,18 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from sidestage.campaign import Campaign
-from sidestage.config import SidestageConfig
+from sidestage.config import SidestageConfig, LLMConfig
 from sidestage.agent import LiteLLMAgent
 
 def test_campaign_create_agent_llama_cpp(tmp_path: Path):
     """Test that campaign creates LiteLLMAgent with correct settings for Llama.cpp."""
     test_config = SidestageConfig(
         llms={
-            "default": {
-                "provider": "llama_cpp",
-                "model": "test-model",
-                "base_url": "http://test:8080/v1",
-            }
+            "default": LLMConfig(
+                provider="llama_cpp",
+                model="test-model",
+                base_url="http://test:8080/v1",
+            )
         }
     )
 

@@ -1,4 +1,6 @@
 """Unit tests for graph relationship operations."""
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,7 +19,7 @@ from sidestage.schemas import Character, Location
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     """Create a mock GraphClient with an async query method."""
     client = MagicMock()
     client.graph = MagicMock()
@@ -25,7 +27,7 @@ def mock_client():
     return client
 
 
-def _make_node_mock(labels, properties):
+def _make_node_mock(labels: list[str], properties: dict[str, Any]) -> MagicMock:
     """Helper to create a mock graph node."""
     node = MagicMock()
     node.labels = labels
@@ -37,7 +39,7 @@ def _make_node_mock(labels, properties):
 
 
 @pytest.mark.anyio
-async def test_link_creates_typed_edge(mock_client):
+async def test_link_creates_typed_edge(mock_client: MagicMock) -> None:
     """link creates typed edge between two entities."""
     # First call: OPTIONAL MATCH to check existence - both nodes found
     mock_client.graph.query.side_effect = [
@@ -54,7 +56,7 @@ async def test_link_creates_typed_edge(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_with_properties(mock_client):
+async def test_link_with_properties(mock_client: MagicMock) -> None:
     """link with properties stores properties on edge."""
     mock_client.graph.query.side_effect = [
         MagicMock(result_set=[["char_1", "loc_1"]]),  # existence check
@@ -69,7 +71,7 @@ async def test_link_with_properties(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_raises_entity_not_found_for_source(mock_client):
+async def test_link_raises_entity_not_found_for_source(mock_client: MagicMock) -> None:
     """link raises EntityNotFoundError if source doesn't exist."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[None, "loc_1"]])
 
@@ -78,7 +80,7 @@ async def test_link_raises_entity_not_found_for_source(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_raises_entity_not_found_for_target(mock_client):
+async def test_link_raises_entity_not_found_for_target(mock_client: MagicMock) -> None:
     """link raises EntityNotFoundError if target doesn't exist."""
     mock_client.graph.query.return_value = MagicMock(result_set=[["char_1", None]])
 
@@ -87,7 +89,7 @@ async def test_link_raises_entity_not_found_for_target(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_raises_entity_not_found_no_results(mock_client):
+async def test_link_raises_entity_not_found_no_results(mock_client: MagicMock) -> None:
     """link raises EntityNotFoundError if OPTIONAL MATCH returns empty result_set."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -96,7 +98,7 @@ async def test_link_raises_entity_not_found_no_results(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_invalid_rel_type_raises_value_error(mock_client):
+async def test_link_invalid_rel_type_raises_value_error(mock_client: MagicMock) -> None:
     """link raises ValueError for invalid relationship type."""
     with pytest.raises(ValueError, match="Invalid relationship type"):
         await link(mock_client, "char_1", "INVALID_TYPE", "loc_1")
@@ -106,7 +108,7 @@ async def test_link_invalid_rel_type_raises_value_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_unlink_removes_edge(mock_client):
+async def test_unlink_removes_edge(mock_client: MagicMock) -> None:
     """unlink removes edge between two entities."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -119,7 +121,7 @@ async def test_unlink_removes_edge(mock_client):
 
 
 @pytest.mark.anyio
-async def test_unlink_idempotent(mock_client):
+async def test_unlink_idempotent(mock_client: MagicMock) -> None:
     """unlink is idempotent (no error if edge doesn't exist)."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -128,7 +130,7 @@ async def test_unlink_idempotent(mock_client):
 
 
 @pytest.mark.anyio
-async def test_unlink_invalid_rel_type_raises_value_error(mock_client):
+async def test_unlink_invalid_rel_type_raises_value_error(mock_client: MagicMock) -> None:
     """unlink raises ValueError for invalid relationship type."""
     with pytest.raises(ValueError, match="Invalid relationship type"):
         await unlink(mock_client, "char_1", "BOGUS", "loc_1")
@@ -138,7 +140,7 @@ async def test_unlink_invalid_rel_type_raises_value_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_outgoing(mock_client):
+async def test_get_related_outgoing(mock_client: MagicMock) -> None:
     """get_related returns outgoing related entities."""
     node = _make_node_mock(
         ["Entity", "Location"],
@@ -157,7 +159,7 @@ async def test_get_related_outgoing(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_incoming(mock_client):
+async def test_get_related_incoming(mock_client: MagicMock) -> None:
     """get_related returns incoming related entities."""
     node = _make_node_mock(
         ["Entity", "Character"],
@@ -175,7 +177,7 @@ async def test_get_related_incoming(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_both_directions(mock_client):
+async def test_get_related_both_directions(mock_client: MagicMock) -> None:
     """get_related with direction='both' returns all related."""
     node1 = _make_node_mock(
         ["Entity", "Location"],
@@ -198,7 +200,7 @@ async def test_get_related_both_directions(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_empty(mock_client):
+async def test_get_related_empty(mock_client: MagicMock) -> None:
     """get_related returns empty list when no relationships."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -208,7 +210,7 @@ async def test_get_related_empty(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_connects_to_bidirectional(mock_client):
+async def test_get_related_connects_to_bidirectional(mock_client: MagicMock) -> None:
     """get_related with CONNECTS_TO and direction='both' finds bidirectional connections."""
     node1 = _make_node_mock(
         ["Entity", "Location"],
@@ -223,14 +225,14 @@ async def test_get_related_connects_to_bidirectional(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_invalid_direction_raises(mock_client):
+async def test_get_related_invalid_direction_raises(mock_client: MagicMock) -> None:
     """get_related raises ValueError for invalid direction."""
     with pytest.raises(ValueError, match="Invalid direction"):
         await get_related(mock_client, "char_1", "LOCATED_IN", direction="sideways")
 
 
 @pytest.mark.anyio
-async def test_get_related_invalid_rel_type_raises(mock_client):
+async def test_get_related_invalid_rel_type_raises(mock_client: MagicMock) -> None:
     """get_related raises ValueError for invalid relationship type."""
     with pytest.raises(ValueError, match="Invalid relationship type"):
         await get_related(mock_client, "char_1", "BOGUS")
@@ -240,7 +242,7 @@ async def test_get_related_invalid_rel_type_raises(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_relationships_returns_all(mock_client):
+async def test_get_relationships_returns_all(mock_client: MagicMock) -> None:
     """get_relationships returns all relationships for an entity."""
     # Outgoing query result
     outgoing_result = MagicMock(result_set=[
@@ -258,7 +260,7 @@ async def test_get_relationships_returns_all(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_relationships_includes_expected_keys(mock_client):
+async def test_get_relationships_includes_expected_keys(mock_client: MagicMock) -> None:
     """get_relationships includes rel_type, direction, target info."""
     outgoing_result = MagicMock(result_set=[
         ["LOCATED_IN", "loc_1", "Tavern", {"since": "2024-01-01"}],
@@ -278,7 +280,7 @@ async def test_get_relationships_includes_expected_keys(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_relationships_empty(mock_client):
+async def test_get_relationships_empty(mock_client: MagicMock) -> None:
     """get_relationships returns empty list for entity with no relationships."""
     mock_client.graph.query.side_effect = [
         MagicMock(result_set=[]),
@@ -294,7 +296,7 @@ async def test_get_relationships_empty(mock_client):
 
 
 @pytest.mark.anyio
-async def test_link_query_error_on_create(mock_client):
+async def test_link_query_error_on_create(mock_client: MagicMock) -> None:
     """link raises QueryError when the CREATE query fails."""
     mock_client.graph.query.side_effect = [
         MagicMock(result_set=[["char_1", "loc_1"]]),  # existence check ok
@@ -306,7 +308,7 @@ async def test_link_query_error_on_create(mock_client):
 
 
 @pytest.mark.anyio
-async def test_unlink_query_error(mock_client):
+async def test_unlink_query_error(mock_client: MagicMock) -> None:
     """unlink raises QueryError when the DELETE query fails."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -315,7 +317,7 @@ async def test_unlink_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_related_query_error(mock_client):
+async def test_get_related_query_error(mock_client: MagicMock) -> None:
     """get_related raises QueryError when the query fails."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -324,7 +326,7 @@ async def test_get_related_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_relationships_query_error(mock_client):
+async def test_get_relationships_query_error(mock_client: MagicMock) -> None:
     """get_relationships raises QueryError when a query fails."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 

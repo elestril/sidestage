@@ -1,5 +1,7 @@
 """Unit tests for context assembly."""
 
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,33 +18,33 @@ from sidestage.schemas import ChatMessage
 
 # --- Helpers ---
 
-def _make_memory(**overrides) -> Memory:
+def _make_memory(**overrides: Any) -> Memory:
     defaults = dict(
         id="mem-1", content="test", memory_type=MemoryType.SCENE,
         visibility="private", owner_id="char-1", target_id="scene-1",
         created_at=1000.0, updated_at=1000.0, access_count=0,
     )
     defaults.update(overrides)
-    return Memory(**defaults)
+    return Memory(**defaults)  # type: ignore[arg-type]
 
 
-def _make_chat_message(character_id: str, message: str, **overrides) -> ChatMessage:
+def _make_chat_message(character_id: str, message: str, **overrides: Any) -> ChatMessage:
     defaults = dict(
         id="msg-1", name="msg", body="", scene_id="scene-1",
         gametime=100, walltime="2024-01-01T00:00:00",
         character_id=character_id, message=message,
     )
     defaults.update(overrides)
-    return ChatMessage(**defaults)
+    return ChatMessage(**defaults)  # type: ignore[arg-type]
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     return MagicMock()
 
 
 @pytest.fixture
-def empty_memories():
+def empty_memories() -> ContextMemories:
     return ContextMemories(
         common_scene_memory=None,
         private_scene_memory=None,
@@ -52,7 +54,7 @@ def empty_memories():
 
 
 @pytest.fixture
-def full_memories():
+def full_memories() -> ContextMemories:
     return ContextMemories(
         common_scene_memory=_make_memory(
             id="common", content="The tavern is busy", visibility="common", owner_id=None,
@@ -82,7 +84,7 @@ def full_memories():
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_returns_context_result(mock_touch, mock_get, mock_client, full_memories):
+async def test_assemble_context_returns_context_result(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, full_memories: ContextMemories) -> None:
     """assemble_context returns ContextResult with all sections populated."""
     mock_get.return_value = full_memories
     messages = [_make_chat_message("char-2", "Hello there")]
@@ -100,7 +102,7 @@ async def test_assemble_context_returns_context_result(mock_touch, mock_get, moc
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_includes_common_scene_memory(mock_touch, mock_get, mock_client, full_memories):
+async def test_assemble_context_includes_common_scene_memory(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, full_memories: ContextMemories) -> None:
     """assemble_context includes common scene memory in output."""
     mock_get.return_value = full_memories
 
@@ -115,7 +117,7 @@ async def test_assemble_context_includes_common_scene_memory(mock_touch, mock_ge
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_includes_private_scene_memory(mock_touch, mock_get, mock_client, full_memories):
+async def test_assemble_context_includes_private_scene_memory(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, full_memories: ContextMemories) -> None:
     """assemble_context includes private scene memory for the owner."""
     mock_get.return_value = full_memories
 
@@ -130,7 +132,7 @@ async def test_assemble_context_includes_private_scene_memory(mock_touch, mock_g
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_includes_character_memories(mock_touch, mock_get, mock_client, full_memories):
+async def test_assemble_context_includes_character_memories(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, full_memories: ContextMemories) -> None:
     """assemble_context includes character memories about present characters."""
     mock_get.return_value = full_memories
 
@@ -145,7 +147,7 @@ async def test_assemble_context_includes_character_memories(mock_touch, mock_get
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_includes_world_facts(mock_touch, mock_get, mock_client, full_memories):
+async def test_assemble_context_includes_world_facts(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, full_memories: ContextMemories) -> None:
     """assemble_context includes common world facts."""
     mock_get.return_value = full_memories
 
@@ -160,7 +162,7 @@ async def test_assemble_context_includes_world_facts(mock_touch, mock_get, mock_
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_empty_memories(mock_touch, mock_get, mock_client, empty_memories):
+async def test_assemble_context_empty_memories(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock, empty_memories: ContextMemories) -> None:
     """assemble_context returns empty memory_text when no memories exist."""
     mock_get.return_value = empty_memories
 
@@ -174,7 +176,7 @@ async def test_assemble_context_empty_memories(mock_touch, mock_get, mock_client
 @pytest.mark.anyio
 @patch("sidestage.memory.context.get_memories_for_context", new_callable=AsyncMock)
 @patch("sidestage.memory.context.touch_memory", new_callable=AsyncMock)
-async def test_assemble_context_omits_empty_sections(mock_touch, mock_get, mock_client):
+async def test_assemble_context_omits_empty_sections(mock_touch: AsyncMock, mock_get: AsyncMock, mock_client: MagicMock) -> None:
     """assemble_context omits sections with no content."""
     memories = ContextMemories(
         common_scene_memory=_make_memory(content="Common", visibility="common", owner_id=None),
@@ -197,7 +199,7 @@ async def test_assemble_context_omits_empty_sections(mock_touch, mock_get, mock_
 # --- Chat history trimming ---
 
 
-def test_trim_chat_history_respects_word_budget():
+def test_trim_chat_history_respects_word_budget() -> None:
     """chat history trimmed to word budget."""
     messages = [
         _make_chat_message("char-1", "word " * 100, id="m1"),
@@ -209,7 +211,7 @@ def test_trim_chat_history_respects_word_budget():
     assert "recent message" in result
 
 
-def test_trim_chat_history_preserves_most_recent():
+def test_trim_chat_history_preserves_most_recent() -> None:
     """chat history preserves most recent messages (trims oldest)."""
     messages = [
         _make_chat_message("char-1", "old message", id="m1"),
@@ -219,14 +221,14 @@ def test_trim_chat_history_preserves_most_recent():
     assert "recent message" in result
 
 
-def test_trim_chat_history_formats_messages():
+def test_trim_chat_history_formats_messages() -> None:
     """chat history formats messages as '[character_id]: message text'."""
     messages = [_make_chat_message("char-1", "Hello world", id="m1")]
     result = _trim_chat_history(messages, word_budget=100)
     assert "[char-1]: Hello world" in result
 
 
-def test_trim_chat_history_empty():
+def test_trim_chat_history_empty() -> None:
     """empty message list produces empty chat_text."""
     result = _trim_chat_history([], word_budget=100)
     assert result == ""
@@ -235,14 +237,14 @@ def test_trim_chat_history_empty():
 # --- Token estimation ---
 
 
-def test_estimate_tokens_roughly_chars_div_4():
+def test_estimate_tokens_roughly_chars_div_4() -> None:
     """token_estimate is roughly chars / 4."""
     text = "a" * 400
     estimate = _estimate_tokens(text)
     assert estimate == 100
 
 
-def test_token_estimate_both_texts():
+def test_token_estimate_both_texts() -> None:
     """token_estimate accounts for both memory_text and chat_text."""
     text = "a" * 800
     estimate = _estimate_tokens(text)
@@ -252,7 +254,7 @@ def test_token_estimate_both_texts():
 # --- _format_memories ---
 
 
-def test_format_memories_with_character_names():
+def test_format_memories_with_character_names() -> None:
     """_format_memories uses character names when provided."""
     memories = ContextMemories(
         common_scene_memory=None,
@@ -269,7 +271,7 @@ def test_format_memories_with_character_names():
     assert "Bob the Bold" in result
 
 
-def test_format_memories_falls_back_to_id():
+def test_format_memories_falls_back_to_id() -> None:
     """_format_memories falls back to character_id when no name provided."""
     memories = ContextMemories(
         common_scene_memory=None,

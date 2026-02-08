@@ -1,5 +1,7 @@
 """Unit tests for memory store CRUD and search operations."""
 
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +29,7 @@ from sidestage.graph.errors import QueryError
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     """Creates a MagicMock GraphClient with graph.query as AsyncMock."""
     client = MagicMock()
     client.graph = MagicMock()
@@ -35,7 +37,7 @@ def mock_client():
     return client
 
 
-def _make_node_mock(properties):
+def _make_node_mock(properties: dict[str, Any]) -> MagicMock:
     """Helper to create a mock graph node with properties."""
     node = MagicMock()
     node.properties = properties
@@ -54,7 +56,7 @@ def test_memory_rel_types_contains_has_memory_and_about():
 
 
 @pytest.mark.anyio
-async def test_upsert_memory_creates_new_memory_with_correct_labels(mock_client):
+async def test_upsert_memory_creates_new_memory_with_correct_labels(mock_client: MagicMock) -> None:
     """upsert_memory creates new Memory node with correct labels (Memory:SceneMemory)."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -85,7 +87,7 @@ async def test_upsert_memory_creates_new_memory_with_correct_labels(mock_client)
 
 
 @pytest.mark.anyio
-async def test_upsert_memory_creates_has_memory_and_about_for_private(mock_client):
+async def test_upsert_memory_creates_has_memory_and_about_for_private(mock_client: MagicMock) -> None:
     """upsert_memory creates HAS_MEMORY and ABOUT relationships for private memory."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -110,7 +112,7 @@ async def test_upsert_memory_creates_has_memory_and_about_for_private(mock_clien
 
 
 @pytest.mark.anyio
-async def test_upsert_memory_common_skips_has_memory(mock_client):
+async def test_upsert_memory_common_skips_has_memory(mock_client: MagicMock) -> None:
     """upsert_memory for common memory creates ABOUT relationship without HAS_MEMORY."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -134,7 +136,7 @@ async def test_upsert_memory_common_skips_has_memory(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_memory_uses_on_create_set_for_initial_fields(mock_client):
+async def test_upsert_memory_uses_on_create_set_for_initial_fields(mock_client: MagicMock) -> None:
     """upsert_memory uses ON CREATE SET for id and created_at."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -158,7 +160,7 @@ async def test_upsert_memory_uses_on_create_set_for_initial_fields(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_memory_preserves_id_and_created_at_on_update(mock_client):
+async def test_upsert_memory_preserves_id_and_created_at_on_update(mock_client: MagicMock) -> None:
     """upsert_memory preserves id and created_at on update via ON CREATE SET."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -186,7 +188,7 @@ async def test_upsert_memory_preserves_id_and_created_at_on_update(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_scene_memory_delegates_correctly(mock_client):
+async def test_upsert_scene_memory_delegates_correctly(mock_client: MagicMock) -> None:
     """upsert_scene_memory creates private scene memory with correct owner_id and target_id."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -212,7 +214,7 @@ async def test_upsert_scene_memory_delegates_correctly(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_common_scene_memory_no_owner(mock_client):
+async def test_upsert_common_scene_memory_no_owner(mock_client: MagicMock) -> None:
     """upsert_common_scene_memory creates common scene memory with owner_id=None."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -234,7 +236,7 @@ async def test_upsert_common_scene_memory_no_owner(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_character_memory(mock_client):
+async def test_upsert_character_memory(mock_client: MagicMock) -> None:
     """upsert_character_memory creates private character memory."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -259,7 +261,7 @@ async def test_upsert_character_memory(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_world_fact_common(mock_client):
+async def test_upsert_world_fact_common(mock_client: MagicMock) -> None:
     """upsert_world_fact with visibility='common' creates common world fact."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -283,7 +285,7 @@ async def test_upsert_world_fact_common(mock_client):
 
 
 @pytest.mark.anyio
-async def test_upsert_world_fact_private(mock_client):
+async def test_upsert_world_fact_private(mock_client: MagicMock) -> None:
     """upsert_world_fact with visibility='private' creates private world fact with owner."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -311,7 +313,7 @@ async def test_upsert_world_fact_private(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_scene_memory_returns_memory(mock_client):
+async def test_get_scene_memory_returns_memory(mock_client: MagicMock) -> None:
     """get_scene_memory returns memory for matching owner_id + scene_id."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -333,7 +335,7 @@ async def test_get_scene_memory_returns_memory(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_scene_memory_returns_none(mock_client):
+async def test_get_scene_memory_returns_none(mock_client: MagicMock) -> None:
     """get_scene_memory returns None when no memory exists."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -343,7 +345,7 @@ async def test_get_scene_memory_returns_none(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_common_scene_memory(mock_client):
+async def test_get_common_scene_memory(mock_client: MagicMock) -> None:
     """get_common_scene_memory returns common scene memory."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -364,7 +366,7 @@ async def test_get_common_scene_memory(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_character_memory_returns_memory(mock_client):
+async def test_get_character_memory_returns_memory(mock_client: MagicMock) -> None:
     """get_character_memory returns memory for matching owner + about_character."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -386,7 +388,7 @@ async def test_get_character_memory_returns_memory(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_character_memory_returns_none(mock_client):
+async def test_get_character_memory_returns_none(mock_client: MagicMock) -> None:
     """get_character_memory returns None for non-existent pair."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -396,7 +398,7 @@ async def test_get_character_memory_returns_none(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_memories_for_context_returns_context_memories(mock_client):
+async def test_get_memories_for_context_returns_context_memories(mock_client: MagicMock) -> None:
     """get_memories_for_context returns all applicable memories."""
     # Common scene memory query
     common_node = _make_node_mock({
@@ -453,7 +455,7 @@ async def test_get_memories_for_context_returns_context_memories(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_memories_for_context_common_only(mock_client):
+async def test_get_memories_for_context_common_only(mock_client: MagicMock) -> None:
     """get_memories_for_context returns common memories even with no private memories."""
     common_node = _make_node_mock({
         "id": "mem-common",
@@ -483,7 +485,7 @@ async def test_get_memories_for_context_common_only(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_memories_for_context_world_facts(mock_client):
+async def test_get_memories_for_context_world_facts(mock_client: MagicMock) -> None:
     """get_memories_for_context returns world facts."""
     wf_node = _make_node_mock({
         "id": "wf-1",
@@ -512,7 +514,7 @@ async def test_get_memories_for_context_world_facts(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_all_memories_returns_all(mock_client):
+async def test_get_all_memories_returns_all(mock_client: MagicMock) -> None:
     """get_all_memories returns all memories for an owner."""
     node1 = _make_node_mock({
         "id": "mem-1",
@@ -544,7 +546,7 @@ async def test_get_all_memories_returns_all(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_all_memories_filters_by_type(mock_client):
+async def test_get_all_memories_filters_by_type(mock_client: MagicMock) -> None:
     """get_all_memories filters by memory_type when specified."""
     node = _make_node_mock({
         "id": "mem-1",
@@ -570,7 +572,7 @@ async def test_get_all_memories_filters_by_type(mock_client):
 
 
 @pytest.mark.anyio
-async def test_delete_memory_uses_detach_delete(mock_client):
+async def test_delete_memory_uses_detach_delete(mock_client: MagicMock) -> None:
     """delete_memory removes node and all relationships."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -581,7 +583,7 @@ async def test_delete_memory_uses_detach_delete(mock_client):
 
 
 @pytest.mark.anyio
-async def test_delete_memory_noop_for_nonexistent(mock_client):
+async def test_delete_memory_noop_for_nonexistent(mock_client: MagicMock) -> None:
     """delete_memory is no-op for non-existent id."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -590,7 +592,7 @@ async def test_delete_memory_noop_for_nonexistent(mock_client):
 
 
 @pytest.mark.anyio
-async def test_touch_memory_increments_access_count(mock_client):
+async def test_touch_memory_increments_access_count(mock_client: MagicMock) -> None:
     """touch_memory increments access_count."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -602,7 +604,7 @@ async def test_touch_memory_increments_access_count(mock_client):
 
 
 @pytest.mark.anyio
-async def test_touch_memory_updates_last_accessed_at(mock_client):
+async def test_touch_memory_updates_last_accessed_at(mock_client: MagicMock) -> None:
     """touch_memory updates last_accessed_at."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -616,7 +618,7 @@ async def test_touch_memory_updates_last_accessed_at(mock_client):
 
 
 @pytest.mark.anyio
-async def test_search_similar_returns_memories_ordered_by_score(mock_client):
+async def test_search_similar_returns_memories_ordered_by_score(mock_client: MagicMock) -> None:
     """search_similar returns memories ordered by score."""
     node1 = _make_node_mock({
         "id": "mem-1",
@@ -651,7 +653,7 @@ async def test_search_similar_returns_memories_ordered_by_score(mock_client):
 
 
 @pytest.mark.anyio
-async def test_search_similar_filters_by_owner_id(mock_client):
+async def test_search_similar_filters_by_owner_id(mock_client: MagicMock) -> None:
     """search_similar post-filters by owner_id when specified."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -662,7 +664,7 @@ async def test_search_similar_filters_by_owner_id(mock_client):
 
 
 @pytest.mark.anyio
-async def test_search_similar_filters_by_visibility(mock_client):
+async def test_search_similar_filters_by_visibility(mock_client: MagicMock) -> None:
     """search_similar post-filters by visibility when specified."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -673,7 +675,7 @@ async def test_search_similar_filters_by_visibility(mock_client):
 
 
 @pytest.mark.anyio
-async def test_search_similar_returns_empty_on_no_index(mock_client):
+async def test_search_similar_returns_empty_on_no_index(mock_client: MagicMock) -> None:
     """search_similar returns empty list when no vector index exists."""
     mock_client.graph.query.side_effect = Exception("index does not exist")
 
@@ -686,7 +688,7 @@ async def test_search_similar_returns_empty_on_no_index(mock_client):
 
 
 @pytest.mark.anyio
-async def test_store_uses_parameterized_queries(mock_client):
+async def test_store_uses_parameterized_queries(mock_client: MagicMock) -> None:
     """store uses parameterized queries (no string interpolation of user values)."""
     node = _make_node_mock({
         "id": "mem-1",

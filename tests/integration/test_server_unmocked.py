@@ -57,6 +57,7 @@ class TestServerUnmocked:
         assert len(scene.messages) >= 2  # User msg + Agent msg
 
         last_msg = scene.messages[-1]
+        assert last_msg.actor_id is not None
         assert last_msg.actor_id.startswith("agent")
         content = last_msg.message
 

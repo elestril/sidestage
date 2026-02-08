@@ -23,7 +23,7 @@ def test_sidestage_config_has_graph_field():
 def test_sidestage_config_graph_custom_values():
     """SidestageConfig accepts custom graph configuration."""
     from sidestage.config import SidestageConfig
-    config = SidestageConfig(graph={"host": "graphdb", "port": 7379, "max_connections": 8})
+    config = SidestageConfig(graph=GraphConfig(host="graphdb", port=7379, max_connections=8))
     assert config.graph.host == "graphdb"
     assert config.graph.port == 7379
     assert config.graph.max_connections == 8
@@ -41,10 +41,10 @@ def test_sidestage_config_has_llms_dict():
 
 def test_sidestage_config_multi_llm():
     """SidestageConfig accepts multiple LLM entries."""
-    from sidestage.config import SidestageConfig
+    from sidestage.config import SidestageConfig, LLMConfig
     config = SidestageConfig(llms={
-        "default": {"provider": "llama_cpp", "model": "default"},
-        "embed": {"provider": "llama_cpp", "model": "embed", "base_url": "http://localhost:8080/v1"},
+        "default": LLMConfig(provider="llama_cpp", model="default"),
+        "embed": LLMConfig(provider="llama_cpp", model="embed", base_url="http://localhost:8080/v1"),
     })
     assert "default" in config.llms
     assert "embed" in config.llms

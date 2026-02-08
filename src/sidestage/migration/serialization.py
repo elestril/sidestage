@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
+from typing import Any
 
 from sidestage.memory.models import Memory
 from sidestage.schemas import (
@@ -58,7 +59,7 @@ SUBDIR_TO_DEFAULT_TYPE: dict[str, str] = {
 _PRIORITY_KEYS = ["name", "id", "type"]
 
 
-def entity_to_frontmatter_dict(entity: Entity) -> tuple[dict, str]:
+def entity_to_frontmatter_dict(entity: Entity) -> tuple[dict[str, Any], str]:
     """Convert entity to (frontmatter_dict, body_markdown)."""
     data = entity.model_dump()
     body = data.pop("body", "")
@@ -80,7 +81,7 @@ def entity_to_frontmatter_dict(entity: Entity) -> tuple[dict, str]:
 
 
 def frontmatter_dict_to_entity(
-    data: dict, body: str, type_hint: str | None = None
+    data: dict[str, Any], body: str, type_hint: str | None = None
 ) -> Entity:
     """Reconstruct entity from frontmatter dict + body."""
     data = dict(data)  # copy to avoid mutating caller's dict
@@ -102,7 +103,7 @@ def frontmatter_dict_to_entity(
     return model_cls(**data)
 
 
-def memory_to_frontmatter_dict(memory: Memory) -> tuple[dict, str]:
+def memory_to_frontmatter_dict(memory: Memory) -> tuple[dict[str, Any], str]:
     """Convert memory to (frontmatter_dict, content_body)."""
     data = memory.model_dump()
     content = data.pop("content")
@@ -110,7 +111,7 @@ def memory_to_frontmatter_dict(memory: Memory) -> tuple[dict, str]:
     return data, content
 
 
-def frontmatter_dict_to_memory(data: dict, body: str) -> Memory:
+def frontmatter_dict_to_memory(data: dict[str, Any], body: str) -> Memory:
     """Reconstruct memory from frontmatter dict + body."""
     data = dict(data)
     data["content"] = body

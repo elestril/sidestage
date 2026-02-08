@@ -7,7 +7,7 @@ entity and relationship operations into single graph traversals.
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from sidestage.graph.entities import node_to_entity
 from sidestage.graph.errors import QueryError
@@ -37,7 +37,7 @@ async def characters_at_location(client: GraphClient, location_id: str) -> list[
     except Exception as exc:
         raise QueryError(f"Failed to query characters at location '{location_id}': {exc}") from exc
 
-    characters = [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set]
+    characters = cast(list[Character], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("characters_at_location returned %d characters", len(characters))
     return characters
 
@@ -60,7 +60,7 @@ async def connected_locations(client: GraphClient, location_id: str) -> list[Loc
     except Exception as exc:
         raise QueryError(f"Failed to query connected locations for '{location_id}': {exc}") from exc
 
-    locations = [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set]
+    locations = cast(list[Location], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("connected_locations returned %d locations", len(locations))
     return locations
 
@@ -89,12 +89,12 @@ async def scene_events(
     except Exception as exc:
         raise QueryError(f"Failed to query events for scene '{scene_id}': {exc}") from exc
 
-    events = [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set]
+    events = cast(list[Event], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("scene_events returned %d events", len(events))
     return events
 
 
-async def entity_graph(client: GraphClient, entity_id: str, depth: int = 1) -> dict:
+async def entity_graph(client: GraphClient, entity_id: str, depth: int = 1) -> dict[str, Any]:
     """Get an entity and its neighborhood to a given depth.
 
     Returns a dict with:

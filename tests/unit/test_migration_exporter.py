@@ -2,19 +2,20 @@
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from sidestage.memory.models import Memory, MemoryType
-from sidestage.schemas import Character, Event, Item, Location, Scene
+from sidestage.schemas import Character, Entity, Event, Item, Location, Scene
 
 
 # --- Fixtures ---
 
 
 @pytest.fixture
-def mock_graph_client():
+def mock_graph_client() -> MagicMock:
     """Mock GraphClient with query capabilities."""
     client = MagicMock()
     client.graph = MagicMock()
@@ -23,7 +24,7 @@ def mock_graph_client():
 
 
 @pytest.fixture
-def mock_campaign(mock_graph_client, tmp_path):
+def mock_campaign(mock_graph_client: MagicMock, tmp_path: Path) -> MagicMock:
     """Mock Campaign object with graph_client, storage, health, and campaign_dir."""
     campaign = MagicMock()
     campaign.graph_client = mock_graph_client
@@ -35,7 +36,7 @@ def mock_campaign(mock_graph_client, tmp_path):
 
 
 @pytest.fixture
-def sample_entities():
+def sample_entities() -> list[Entity]:
     """Return a list of sample Entity objects (Character, Location, Item, Scene, Event)."""
     return [
         Character(
@@ -84,7 +85,7 @@ def sample_entities():
 
 
 @pytest.fixture
-def sample_memories():
+def sample_memories() -> list[Memory]:
     """Return a list of sample Memory objects with various owner_id/target_id combos."""
     return [
         Memory(
@@ -120,7 +121,7 @@ def sample_memories():
     ]
 
 
-def _setup_list_entities(mock_campaign, entities):
+def _setup_list_entities(mock_campaign: MagicMock, entities: list[Entity]) -> Any:
     """Helper to set up list_entities mock to return given entities."""
     # Patch at the module level where it's imported
     return patch(
@@ -130,7 +131,7 @@ def _setup_list_entities(mock_campaign, entities):
     )
 
 
-def _setup_memories_query(mock_campaign, memories):
+def _setup_memories_query(mock_campaign: MagicMock, memories: list[Memory]) -> None:
     """Helper to set up memory query mock."""
     # The exporter queries MATCH (m:Memory) RETURN m
     nodes = []
@@ -144,12 +145,12 @@ def _setup_memories_query(mock_campaign, memories):
     )
 
 
-def _setup_get_related(return_map=None):
+def _setup_get_related(return_map: dict[tuple[str, str], list[Entity]] | None = None) -> Any:
     """Patch get_related to return entities from a mapping."""
     if return_map is None:
         return_map = {}
 
-    async def _mock_get_related(client, entity_id, rel_type, direction="outgoing"):
+    async def _mock_get_related(client: Any, entity_id: str, rel_type: str, direction: str = "outgoing") -> list[Entity]:
         return return_map.get((entity_id, rel_type), [])
 
     return patch(
@@ -162,7 +163,7 @@ def _setup_get_related(return_map=None):
 
 
 @pytest.mark.anyio
-async def test_queries_all_entities(mock_campaign, sample_entities):
+async def test_queries_all_entities(mock_campaign: MagicMock, sample_entities: list[Entity]) -> None:
     """export_campaign calls list_entities(client) to retrieve all entities."""
     from sidestage.migration.exporter import export_campaign
 
@@ -176,7 +177,7 @@ async def test_queries_all_entities(mock_campaign, sample_entities):
 
 
 @pytest.mark.anyio
-async def test_queries_all_memories(mock_campaign, sample_memories):
+async def test_queries_all_memories(mock_campaign: MagicMock, sample_memories: list[Memory]) -> None:
     """export_campaign queries all Memory nodes from the graph."""
     from sidestage.migration.exporter import export_campaign
 
@@ -189,7 +190,7 @@ async def test_queries_all_memories(mock_campaign, sample_memories):
 
 
 @pytest.mark.anyio
-async def test_retrieves_chat_logs_for_scenes(mock_campaign, sample_entities):
+async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_entities: list[Entity]) -> None:
     """For each Scene entity, export_campaign reads messages from storage."""
     from sidestage.migration.exporter import export_campaign
     from sidestage.schemas import ChatMessage as CM
@@ -225,7 +226,7 @@ async def test_retrieves_chat_logs_for_scenes(mock_campaign, sample_entities):
 
 
 @pytest.mark.anyio
-async def test_writes_entities_to_correct_subdirs(mock_campaign, sample_entities, tmp_path):
+async def test_writes_entities_to_correct_subdirs(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
     """Character -> characters/, Location -> locations/, etc."""
     from sidestage.migration.exporter import export_campaign
 
@@ -256,8 +257,8 @@ async def test_writes_entities_to_correct_subdirs(mock_campaign, sample_entities
 
 @pytest.mark.anyio
 async def test_writes_memories_to_dot_d_dirs(
-    mock_campaign, sample_entities, sample_memories, tmp_path
-):
+    mock_campaign: MagicMock, sample_entities: list[Entity], sample_memories: list[Memory], tmp_path: Path
+) -> None:
     """Memories placed inside parent entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
 
@@ -279,7 +280,7 @@ async def test_writes_memories_to_dot_d_dirs(
 
 
 @pytest.mark.anyio
-async def test_writes_chatlog_to_scene_dot_d(mock_campaign, tmp_path):
+async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """Scene chat logs written as chatlog.log inside scene_name.d/."""
     from sidestage.migration.exporter import export_campaign
     from sidestage.schemas import ChatMessage as CM
@@ -328,7 +329,7 @@ async def test_writes_chatlog_to_scene_dot_d(mock_campaign, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_dot_d_created_only_when_needed(mock_campaign, sample_entities, tmp_path):
+async def test_dot_d_created_only_when_needed(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
     """Entities without memories or chat logs should not have .d/ directories."""
     from sidestage.migration.exporter import export_campaign
 
@@ -347,8 +348,8 @@ async def test_dot_d_created_only_when_needed(mock_campaign, sample_entities, tm
 
 @pytest.mark.anyio
 async def test_writes_status_json(
-    mock_campaign, sample_entities, sample_memories, tmp_path
-):
+    mock_campaign: MagicMock, sample_entities: list[Entity], sample_memories: list[Memory], tmp_path: Path
+) -> None:
     """status.json contains entity counts, memory count, chatlog count, timestamp."""
     from sidestage.migration.exporter import export_campaign
 
@@ -370,7 +371,7 @@ async def test_writes_status_json(
 
 
 @pytest.mark.anyio
-async def test_atomic_swap_preserves_old_on_failure(mock_campaign, tmp_path):
+async def test_atomic_swap_preserves_old_on_failure(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """If export fails mid-write, the original markdown/ dir is preserved."""
     from sidestage.migration.exporter import export_campaign
 
@@ -391,11 +392,11 @@ async def test_atomic_swap_preserves_old_on_failure(mock_campaign, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_filename_collision_handling(mock_campaign, tmp_path):
+async def test_filename_collision_handling(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """Two entities with the same sanitized name get _2 suffix."""
     from sidestage.migration.exporter import export_campaign
 
-    entities = [
+    entities: list[Entity] = [
         Character(id="char_1", name="Test Entity!", body="First."),
         Character(id="char_2", name="Test Entity?", body="Second."),
     ]
@@ -413,7 +414,7 @@ async def test_filename_collision_handling(mock_campaign, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_memory_placed_in_owner_dot_d(mock_campaign, sample_entities, tmp_path):
+async def test_memory_placed_in_owner_dot_d(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
     """Memory with owner_id goes into the owner entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
 
@@ -446,8 +447,8 @@ async def test_memory_placed_in_owner_dot_d(mock_campaign, sample_entities, tmp_
 
 @pytest.mark.anyio
 async def test_memory_placed_in_target_dot_d_when_no_owner(
-    mock_campaign, sample_entities, tmp_path
-):
+    mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path
+) -> None:
     """Memory with owner_id=None goes into target entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
 
@@ -479,8 +480,8 @@ async def test_memory_placed_in_target_dot_d_when_no_owner(
 
 @pytest.mark.anyio
 async def test_memory_falls_back_to_target_when_owner_unknown(
-    mock_campaign, sample_entities, tmp_path
-):
+    mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path
+) -> None:
     """Memory with owner_id set to unknown entity falls back to target's .d/ dir."""
     from sidestage.migration.exporter import export_campaign
 
@@ -512,7 +513,7 @@ async def test_memory_falls_back_to_target_when_owner_unknown(
 
 
 @pytest.mark.anyio
-async def test_memory_with_both_unknown_ids_skipped(mock_campaign, sample_entities, tmp_path):
+async def test_memory_with_both_unknown_ids_skipped(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
     """Memory where both owner_id and target_id are unknown is skipped with error."""
     from sidestage.migration.exporter import export_campaign
 
@@ -539,14 +540,14 @@ async def test_memory_with_both_unknown_ids_skipped(mock_campaign, sample_entiti
 
 
 @pytest.mark.anyio
-async def test_queries_located_in_for_characters(mock_campaign, tmp_path):
+async def test_queries_located_in_for_characters(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """Character frontmatter includes location_id from LOCATED_IN relationship."""
     from sidestage.migration.exporter import export_campaign
 
     char = Character(id="char_test", name="Test Char", body="")
     loc = Location(id="loc_home", name="Home", body="")
 
-    related_map = {
+    related_map: dict[tuple[str, str], list[Entity]] = {
         ("char_test", "LOCATED_IN"): [loc],
     }
 
@@ -562,14 +563,14 @@ async def test_queries_located_in_for_characters(mock_campaign, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_queries_connects_to_for_locations(mock_campaign, tmp_path):
+async def test_queries_connects_to_for_locations(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """Location frontmatter includes connected_locations from CONNECTS_TO edges."""
     from sidestage.migration.exporter import export_campaign
 
     loc1 = Location(id="loc_a", name="Place A", body="")
     loc2 = Location(id="loc_b", name="Place B", body="")
 
-    related_map = {
+    related_map: dict[tuple[str, str], list[Entity]] = {
         ("loc_a", "CONNECTS_TO"): [loc2],
         ("loc_b", "CONNECTS_TO"): [loc1],
     }
@@ -589,7 +590,7 @@ async def test_queries_connects_to_for_locations(mock_campaign, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_no_graph_client_returns_failed(tmp_path):
+async def test_no_graph_client_returns_failed(tmp_path: Path) -> None:
     """If campaign.graph_client is None, return a failed result."""
     from sidestage.migration.exporter import export_campaign
 
@@ -603,7 +604,7 @@ async def test_no_graph_client_returns_failed(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_empty_campaign(mock_campaign, tmp_path):
+async def test_empty_campaign(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """Empty campaign produces directory structure with status.json showing zero counts."""
     from sidestage.migration.exporter import export_campaign
 

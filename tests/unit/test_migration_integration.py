@@ -4,7 +4,7 @@ These tests exercise the full roundtrip: parse the canonical test campaign fixtu
 import it into FalkorDB, verify graph state, back up to a second directory, and
 compare the results. They require a running FalkorDB instance.
 
-Test fixture data lives at data/test_campaign/markdown/ (created in section-03).
+Test fixture data lives at data/dev_campaign/markdown/ (created in section-03).
 All tests copy fixture data to tmp_path to avoid modifying checked-in files.
 """
 
@@ -26,12 +26,12 @@ from sidestage.migration.serialization import (
     entity_to_frontmatter_dict,
     frontmatter_dict_to_entity,
 )
-from sidestage.schemas import Character, Event, JoinEvent, Location, Scene
+from sidestage.schemas import Character, Entity, Event, JoinEvent, Location, Scene
 
 
 # --- Constants ---
 
-CAMPAIGN_ROOT = Path(__file__).parent.parent.parent / "data" / "test_campaign" / "markdown"
+CAMPAIGN_ROOT = Path(__file__).parent.parent.parent / "data" / "dev_campaign" / "markdown"
 
 EXPECTED_ENTITY_COUNTS = {
     "Character": 2,
@@ -61,7 +61,7 @@ EXPECTED_MEMORY_IDS = {
 # --- Helpers ---
 
 
-def _find_entity_by_id(entities: list, entity_id: str):
+def _find_entity_by_id(entities: list[Entity], entity_id: str) -> Entity | None:
     """Find an entity in a list by its id field."""
     for e in entities:
         if e.id == entity_id:
@@ -69,7 +69,7 @@ def _find_entity_by_id(entities: list, entity_id: str):
     return None
 
 
-def _find_memory_by_id(memories: list, memory_id: str):
+def _find_memory_by_id(memories: list[Memory], memory_id: str) -> Memory | None:
     """Find a memory in a list by its id field."""
     for m in memories:
         if m.id == memory_id:
@@ -77,7 +77,7 @@ def _find_memory_by_id(memories: list, memory_id: str):
     return None
 
 
-def _modify_frontmatter(file_path: Path, updates: dict) -> None:
+def _modify_frontmatter(file_path: Path, updates: dict[str, object]) -> None:
     """Read a markdown file, update its frontmatter fields, and write it back."""
     text = file_path.read_text()
     parts = text.split("---", 2)
@@ -215,7 +215,7 @@ class TestFullRoundtrip:
 
     @pytest.mark.anyio
     async def test_import_completes_successfully(
-        self, mock_campaign, parsed_campaign, mock_sync_manager
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
     ):
         """import_campaign returns a result with phase='complete' and correct counts."""
         result = await import_campaign(
@@ -232,7 +232,7 @@ class TestFullRoundtrip:
 
     @pytest.mark.anyio
     async def test_health_transitions_during_import(
-        self, mock_campaign, parsed_campaign, mock_sync_manager
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
     ):
         """After import_campaign returns, campaign.health.status should be HEALTHY."""
         await import_campaign(
@@ -244,7 +244,7 @@ class TestFullRoundtrip:
 
     @pytest.mark.anyio
     async def test_broadcast_sent_after_import(
-        self, mock_campaign, parsed_campaign, mock_sync_manager
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
     ):
         """After a successful import, sync_manager.broadcast is called with entities_updated."""
         await import_campaign(
@@ -280,16 +280,20 @@ class TestEntityFidelity:
             assert type(restored).__name__ == type(entity).__name__
             # Type-specific fields
             if isinstance(entity, Character):
+                assert isinstance(restored, Character)
                 assert restored.location_id == entity.location_id
                 assert restored.inventory == entity.inventory
                 assert restored.unseen == entity.unseen
             elif isinstance(entity, Location):
+                assert isinstance(restored, Location)
                 assert set(restored.connected_locations) == set(entity.connected_locations)
             elif isinstance(entity, Scene):
+                assert isinstance(restored, Scene)
                 assert restored.location_id == entity.location_id
                 assert restored.current_gametime == entity.current_gametime
                 assert restored.events == entity.events
             elif isinstance(entity, Event):
+                assert isinstance(restored, Event)
                 assert restored.scene_id == entity.scene_id
 
     def test_character_fields_preserved(self, parsed_campaign: ParseResult):
@@ -442,15 +446,18 @@ class TestRelationshipIntegrity:
         """Location references from characters point to valid locations."""
         location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Location)}
         eldric = _find_entity_by_id(parsed_campaign.entities, "char_eldric")
+        assert isinstance(eldric, Character)
         assert eldric.location_id in location_ids
 
         alice = _find_entity_by_id(parsed_campaign.entities, "char_alice")
+        assert isinstance(alice, Character)
         assert alice.location_id is None
 
     def test_character_inventory_references_valid(self, parsed_campaign: ParseResult):
         """Eldric's inventory references a valid item entity."""
         item_ids = {e.id for e in parsed_campaign.entities if hasattr(e, "id") and e.id.startswith("item_")}
         eldric = _find_entity_by_id(parsed_campaign.entities, "char_eldric")
+        assert isinstance(eldric, Character)
         for inv_id in eldric.inventory:
             assert inv_id in item_ids, f"Inventory item {inv_id} not found in items"
 
@@ -476,6 +483,8 @@ class TestRelationshipIntegrity:
         location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Location)}
         tavern = _find_entity_by_id(parsed_campaign.entities, "scene_tavern_brawl")
         castle = _find_entity_by_id(parsed_campaign.entities, "scene_castle_audience")
+        assert isinstance(tavern, Scene)
+        assert isinstance(castle, Scene)
         assert tavern.location_id in location_ids
         assert castle.location_id in location_ids
 
@@ -483,6 +492,7 @@ class TestRelationshipIntegrity:
         """The JoinEvent references scene_tavern_brawl which exists in parsed scenes."""
         scene_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Scene)}
         event = _find_entity_by_id(parsed_campaign.entities, "event_eldric_joins")
+        assert isinstance(event, Event)
         assert event.scene_id in scene_ids
 
 
@@ -571,15 +581,15 @@ class TestConcurrencyGuard:
     """Verify health status transitions and concurrency protection during import."""
 
     @pytest.mark.anyio
-    async def test_health_degraded_during_import(self, mock_campaign, parsed_campaign, mock_sync_manager):
+    async def test_health_degraded_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
         """During import execution, campaign.health.status is set to DEGRADED."""
         observed_statuses = []
 
         original_delete = mock_campaign.graph_client.graph.delete
 
-        async def capture_status():
+        async def capture_status() -> None:
             observed_statuses.append(mock_campaign.health.status)
-            return await original_delete()
+            await original_delete()
 
         mock_campaign.graph_client.graph.delete = capture_status
 
@@ -593,7 +603,7 @@ class TestConcurrencyGuard:
         assert mock_campaign.health.status == HealthStatus.HEALTHY
 
     @pytest.mark.anyio
-    async def test_health_restored_on_import_failure(self, mock_campaign, parsed_campaign, mock_sync_manager):
+    async def test_health_restored_on_import_failure(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
         """Even if import fails, health is restored to HEALTHY."""
         mock_campaign.graph_client.graph.delete = AsyncMock(side_effect=Exception("Graph drop failed"))
 
@@ -607,15 +617,15 @@ class TestConcurrencyGuard:
         assert mock_campaign.health.status == HealthStatus.HEALTHY
 
     @pytest.mark.anyio
-    async def test_is_embedding_available_false_during_import(self, mock_campaign, parsed_campaign, mock_sync_manager):
+    async def test_is_embedding_available_false_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
         """While health is DEGRADED, is_embedding_available returns False."""
         observed_embedding = []
 
         original_delete = mock_campaign.graph_client.graph.delete
 
-        async def capture_embedding():
+        async def capture_embedding() -> None:
             observed_embedding.append(mock_campaign.health.is_embedding_available)
-            return await original_delete()
+            await original_delete()
 
         mock_campaign.graph_client.graph.delete = capture_embedding
 
@@ -628,7 +638,7 @@ class TestConcurrencyGuard:
         assert False in observed_embedding
 
     @pytest.mark.anyio
-    async def test_active_scenes_cleared_after_import(self, mock_campaign, parsed_campaign, mock_sync_manager):
+    async def test_active_scenes_cleared_after_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
         """The active_scenes dict is cleared after import completes."""
         active_scenes = {"scene_1": MagicMock()}
         await import_campaign(

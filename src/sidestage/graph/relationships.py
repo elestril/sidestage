@@ -57,7 +57,7 @@ async def link(
     source_id: str,
     rel_type: str,
     target_id: str,
-    properties: dict | None = None,
+    properties: dict[str, Any] | None = None,
 ) -> None:
     """Create a relationship between two entities.
 
@@ -204,7 +204,7 @@ async def get_related(
 async def get_relationships(
     client: GraphClient,
     entity_id: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Get all relationships for an entity.
 
     Returns list of dicts, each containing:
@@ -233,7 +233,7 @@ async def get_relationships(
             f"Failed to get relationships for '{entity_id}': {exc}"
         ) from exc
 
-    relationships: list[dict] = []
+    relationships: list[dict[str, Any]] = []
 
     for row in outgoing_result.result_set:
         relationships.append({

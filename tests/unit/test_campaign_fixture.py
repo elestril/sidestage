@@ -1,6 +1,6 @@
 """Tests that validate the test campaign fixture data is well-formed.
 
-These tests ensure the canonical test campaign at data/test_campaign/markdown/
+These tests ensure the canonical test campaign at data/dev_campaign/markdown/
 can be parsed correctly by the migration serialization layer. They serve as a
 smoke test for the fixture data itself.
 """
@@ -8,6 +8,7 @@ smoke test for the fixture data itself.
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -17,12 +18,12 @@ from sidestage.migration.serialization import (
     frontmatter_dict_to_memory,
 )
 
-CAMPAIGN_ROOT = Path(__file__).parent.parent.parent / "data" / "test_campaign" / "markdown"
+CAMPAIGN_ROOT = Path(__file__).parent.parent.parent / "data" / "dev_campaign" / "markdown"
 
 ENTITY_SUBDIRS = ["characters", "locations", "items", "scenes", "events"]
 
 
-def _parse_frontmatter(path: Path) -> tuple[dict, str]:
+def _parse_frontmatter(path: Path) -> tuple[dict[str, Any], str]:
     """Extract YAML frontmatter and body from a markdown file."""
     text = path.read_text(encoding="utf-8")
     assert text.startswith("---"), f"{path} does not start with ---"
@@ -80,7 +81,7 @@ def test_fixture_directory_structure():
         assert subdir.is_dir(), f"Missing expected subdirectory: {subdir_name}"
 
 
-def test_all_entity_files_have_valid_frontmatter(test_campaign_markdown):
+def test_all_entity_files_have_valid_frontmatter(test_campaign_markdown: Path):
     """Every .md file directly inside a type subdirectory has parseable YAML frontmatter."""
     entity_files = _collect_entity_files(test_campaign_markdown)
     assert len(entity_files) > 0, "No entity files found"
@@ -91,7 +92,7 @@ def test_all_entity_files_have_valid_frontmatter(test_campaign_markdown):
         assert "name" in fm, f"{path.name}: missing 'name' field"
 
 
-def test_all_entity_files_deserialize(test_campaign_markdown):
+def test_all_entity_files_deserialize(test_campaign_markdown: Path):
     """Every entity .md file produces a valid Entity via frontmatter_dict_to_entity."""
     entity_files = _collect_entity_files(test_campaign_markdown)
     for path in entity_files:
@@ -103,7 +104,7 @@ def test_all_entity_files_deserialize(test_campaign_markdown):
         assert entity.name == fm["name"]
 
 
-def test_all_memory_files_have_valid_frontmatter(test_campaign_markdown):
+def test_all_memory_files_have_valid_frontmatter(test_campaign_markdown: Path):
     """Every .md file inside a .d/ companion directory has parseable YAML frontmatter."""
     memory_files = _collect_memory_files(test_campaign_markdown)
     assert len(memory_files) > 0, "No memory files found"
@@ -115,7 +116,7 @@ def test_all_memory_files_have_valid_frontmatter(test_campaign_markdown):
         assert "target_id" in fm, f"{path.name}: missing 'target_id' field"
 
 
-def test_all_memory_files_deserialize(test_campaign_markdown):
+def test_all_memory_files_deserialize(test_campaign_markdown: Path):
     """Every memory .md file produces a valid Memory via frontmatter_dict_to_memory."""
     memory_files = _collect_memory_files(test_campaign_markdown)
     for path in memory_files:
@@ -125,7 +126,7 @@ def test_all_memory_files_deserialize(test_campaign_markdown):
         assert memory.content == body
 
 
-def test_expected_entity_counts(test_campaign_markdown):
+def test_expected_entity_counts(test_campaign_markdown: Path):
     """The fixture contains exactly: 2 characters, 3 locations, 2 items, 2 scenes, 1 event."""
     expected = {
         "characters": 2,
@@ -142,13 +143,13 @@ def test_expected_entity_counts(test_campaign_markdown):
         )
 
 
-def test_expected_memory_counts(test_campaign_markdown):
+def test_expected_memory_counts(test_campaign_markdown: Path):
     """The fixture contains exactly 6 memory files across all .d/ directories."""
     memory_files = _collect_memory_files(test_campaign_markdown)
     assert len(memory_files) == 6, f"Expected 6 memory files, found {len(memory_files)}"
 
 
-def test_chatlog_exists_for_tavern_brawl(test_campaign_markdown):
+def test_chatlog_exists_for_tavern_brawl(test_campaign_markdown: Path):
     """The Tavern_Brawl.d/ directory contains a chatlog.log file with multiple lines."""
     chatlog = test_campaign_markdown / "scenes" / "Tavern_Brawl.d" / "chatlog.log"
     assert chatlog.is_file(), "chatlog.log not found in Tavern_Brawl.d/"
@@ -156,7 +157,7 @@ def test_chatlog_exists_for_tavern_brawl(test_campaign_markdown):
     assert len(lines) >= 2, f"chatlog.log should have at least 2 lines, found {len(lines)}"
 
 
-def test_chatlog_format(test_campaign_markdown):
+def test_chatlog_format(test_campaign_markdown: Path):
     """Each line in chatlog.log matches [timestamp] (character_id) Name: 'message' pattern."""
     chatlog = test_campaign_markdown / "scenes" / "Tavern_Brawl.d" / "chatlog.log"
     pattern = re.compile(r'^\[.+?\] \(\w+\) .+?: ".+"$')
@@ -165,7 +166,7 @@ def test_chatlog_format(test_campaign_markdown):
         assert pattern.match(line), f"Line {i + 1} does not match expected pattern: {line}"
 
 
-def test_character_location_references(test_campaign_markdown):
+def test_character_location_references(test_campaign_markdown: Path):
     """Characters with location_id reference IDs that appear in location entity files."""
     location_ids = set()
     for path in (test_campaign_markdown / "locations").iterdir():
@@ -183,7 +184,7 @@ def test_character_location_references(test_campaign_markdown):
                 )
 
 
-def test_character_inventory_references(test_campaign_markdown):
+def test_character_inventory_references(test_campaign_markdown: Path):
     """Characters with inventory items reference IDs that appear in item entity files."""
     item_ids = set()
     for path in (test_campaign_markdown / "items").iterdir():
@@ -200,7 +201,7 @@ def test_character_inventory_references(test_campaign_markdown):
                 )
 
 
-def test_location_connectivity(test_campaign_markdown):
+def test_location_connectivity(test_campaign_markdown: Path):
     """The three locations have connected_locations forming a triangle (each references two others)."""
     location_data = {}
     for path in (test_campaign_markdown / "locations").iterdir():
@@ -216,7 +217,7 @@ def test_location_connectivity(test_campaign_markdown):
         )
 
 
-def test_scene_location_references(test_campaign_markdown):
+def test_scene_location_references(test_campaign_markdown: Path):
     """Scenes with location_id reference IDs that appear in location entity files."""
     location_ids = set()
     for path in (test_campaign_markdown / "locations").iterdir():
@@ -234,7 +235,7 @@ def test_scene_location_references(test_campaign_markdown):
                 )
 
 
-def test_event_scene_references(test_campaign_markdown):
+def test_event_scene_references(test_campaign_markdown: Path):
     """Events reference scene_id values that appear in scene entity files."""
     scene_ids = set()
     for path in (test_campaign_markdown / "scenes").iterdir():
@@ -252,7 +253,7 @@ def test_event_scene_references(test_campaign_markdown):
                 )
 
 
-def test_memory_entity_references(test_campaign_markdown):
+def test_memory_entity_references(test_campaign_markdown: Path):
     """Memory owner_id and target_id values reference entity IDs found in the fixture."""
     all_entity_ids = _collect_all_entity_ids(test_campaign_markdown)
     memory_files = _collect_memory_files(test_campaign_markdown)
@@ -271,7 +272,7 @@ def test_memory_entity_references(test_campaign_markdown):
         )
 
 
-def test_dot_d_naming_matches_parent(test_campaign_markdown):
+def test_dot_d_naming_matches_parent(test_campaign_markdown: Path):
     """Every .d/ directory has a corresponding .md file with the same stem in the same type subdir."""
     for subdir_name in ENTITY_SUBDIRS:
         subdir = test_campaign_markdown / subdir_name

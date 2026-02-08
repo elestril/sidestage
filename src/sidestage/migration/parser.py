@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -29,7 +30,7 @@ SUBDIR_TO_TYPE: dict[str, str] = {
 }
 
 
-def _parse_frontmatter(content: str, file_path: str) -> tuple[dict, str] | None:
+def _parse_frontmatter(content: str, file_path: str) -> tuple[dict[str, Any], str] | None:
     """Split markdown content into (frontmatter_dict, body).
 
     Returns None if the content has no valid frontmatter.

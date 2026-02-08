@@ -1,5 +1,7 @@
 """Tests for graph schema initialization and versioning."""
 
+from typing import Any
+
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -15,7 +17,7 @@ from sidestage.graph.schema import (
 from sidestage.graph.errors import SchemaError
 
 
-def _make_client(query_results=None):
+def _make_client(query_results: list[list[Any]] | None = None) -> MagicMock:
     """Create a mock GraphClient with a mock graph.query().
 
     query_results: if provided, a list of result sets to return
@@ -41,7 +43,7 @@ def _make_client(query_results=None):
     return client
 
 
-def _ok():
+def _ok() -> MagicMock:
     result = MagicMock()
     result.result_set = []
     return result

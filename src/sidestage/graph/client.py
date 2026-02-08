@@ -6,6 +6,7 @@ handles connection pooling, graph selection, and lifecycle management.
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from falkordb.asyncio import FalkorDB
 from redis.asyncio import BlockingConnectionPool
@@ -33,10 +34,10 @@ class GraphClient:
     cleaned up by close().
     """
 
-    def __init__(self, pool, db, graph, graph_name: str):
+    def __init__(self, pool: BlockingConnectionPool, db: FalkorDB, graph: Any, graph_name: str):
         self.pool = pool
         self.db = db
-        self.graph = graph
+        self.graph: Any = graph
         self.graph_name = graph_name
         self._closed = False
 

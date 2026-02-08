@@ -16,13 +16,14 @@ from sidestage.migration.models import (
     MigrationValidationReport,
     ParseResult,
 )
+from sidestage.orchestrator import SidestageOrchestrator
 
 
 # --- Fixtures ---
 
 
 @pytest.fixture
-def mock_orchestrator(tmp_path):
+def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
     """Create a SidestageOrchestrator with mocked Campaign dependencies."""
     with patch("sidestage.orchestrator.Campaign") as MockCampaign:
         mock_campaign = MagicMock()
@@ -32,20 +33,18 @@ def mock_orchestrator(tmp_path):
         mock_campaign.list_scenes = AsyncMock(return_value=[])
         MockCampaign.return_value = mock_campaign
 
-        from sidestage.orchestrator import SidestageOrchestrator
-
         orch = SidestageOrchestrator("test_campaign", base_dir=tmp_path)
         return orch
 
 
 @pytest.fixture
-def client(mock_orchestrator):
+def client(mock_orchestrator: SidestageOrchestrator) -> TestClient:
     """FastAPI TestClient wrapping mock_orchestrator.fastapi_app."""
     return TestClient(mock_orchestrator.fastapi_app)
 
 
 @pytest.fixture
-def valid_validation_report():
+def valid_validation_report() -> MigrationValidationReport:
     """Return a MigrationValidationReport with valid=True and sample counts."""
     return MigrationValidationReport(
         valid=True,
@@ -58,7 +57,7 @@ def valid_validation_report():
 
 
 @pytest.fixture
-def invalid_validation_report():
+def invalid_validation_report() -> MigrationValidationReport:
     """Return a MigrationValidationReport with valid=False."""
     return MigrationValidationReport(
         valid=False,
@@ -78,7 +77,7 @@ def invalid_validation_report():
 
 
 @pytest.fixture
-def sample_parse_result():
+def sample_parse_result() -> ParseResult:
     """Return a minimal ParseResult."""
     return ParseResult(
         entities=[{"id": "char_1", "name": "Test", "type": "Character"}],
@@ -90,7 +89,7 @@ def sample_parse_result():
 
 
 @pytest.fixture
-def sample_import_result():
+def sample_import_result() -> MigrationImportResult:
     """Return a MigrationImportResult with phase='complete'."""
     return MigrationImportResult(
         phase="complete",
@@ -103,7 +102,7 @@ def sample_import_result():
 
 
 @pytest.fixture
-def sample_backup_result():
+def sample_backup_result() -> MigrationBackupResult:
     """Return a MigrationBackupResult with phase='complete'."""
     return MigrationBackupResult(
         phase="complete",
@@ -120,8 +119,8 @@ def sample_backup_result():
 
 
 def test_import_validate_returns_validation_report(
-    client, mock_orchestrator, valid_validation_report, sample_parse_result, tmp_path
-):
+    client: TestClient, mock_orchestrator: SidestageOrchestrator, valid_validation_report: MigrationValidationReport, sample_parse_result: ParseResult, tmp_path: Path
+) -> None:
     """POST /v1/campaign/import with action=validate calls parse_directory
     and validate, returning a MigrationImportResponse with the validation report."""
     # Create the markdown directory so the route doesn't fail
@@ -153,8 +152,8 @@ def test_import_validate_returns_validation_report(
 
 
 def test_import_validate_with_errors_returns_report(
-    client, mock_orchestrator, invalid_validation_report, sample_parse_result, tmp_path
-):
+    client: TestClient, mock_orchestrator: SidestageOrchestrator, invalid_validation_report: MigrationValidationReport, sample_parse_result: ParseResult, tmp_path: Path
+) -> None:
     """POST /v1/campaign/import with action=validate when validation finds errors
     still returns 200 with the validation report showing valid=False."""
     (tmp_path / "markdown").mkdir()
@@ -184,13 +183,13 @@ def test_import_validate_with_errors_returns_report(
 
 
 def test_import_execute_performs_import(
-    client,
-    mock_orchestrator,
-    valid_validation_report,
-    sample_import_result,
-    sample_parse_result,
-    tmp_path,
-):
+    client: TestClient,
+    mock_orchestrator: SidestageOrchestrator,
+    valid_validation_report: MigrationValidationReport,
+    sample_import_result: MigrationImportResult,
+    sample_parse_result: ParseResult,
+    tmp_path: Path,
+) -> None:
     """POST /v1/campaign/import with action=execute calls parse_directory,
     validate, and import_campaign, returning the import result."""
     (tmp_path / "markdown").mkdir()
@@ -225,8 +224,8 @@ def test_import_execute_performs_import(
 
 
 def test_import_execute_with_validation_errors_aborts(
-    client, mock_orchestrator, invalid_validation_report, sample_parse_result, tmp_path
-):
+    client: TestClient, mock_orchestrator: SidestageOrchestrator, invalid_validation_report: MigrationValidationReport, sample_parse_result: ParseResult, tmp_path: Path
+) -> None:
     """POST /v1/campaign/import with action=execute aborts if validation
     finds errors (valid=False), returning the validation report without importing."""
     (tmp_path / "markdown").mkdir()
@@ -258,12 +257,12 @@ def test_import_execute_with_validation_errors_aborts(
 
 
 def test_import_execute_force_bypasses_warnings(
-    client,
-    mock_orchestrator,
-    sample_import_result,
-    sample_parse_result,
-    tmp_path,
-):
+    client: TestClient,
+    mock_orchestrator: SidestageOrchestrator,
+    sample_import_result: MigrationImportResult,
+    sample_parse_result: ParseResult,
+    tmp_path: Path,
+) -> None:
     """POST /v1/campaign/import with action=execute and force=True proceeds
     even when validation has warnings (but no errors)."""
     (tmp_path / "markdown").mkdir()
@@ -312,7 +311,7 @@ def test_import_execute_force_bypasses_warnings(
 # --- Import endpoint: concurrency guard ---
 
 
-def test_import_returns_409_when_degraded(client, mock_orchestrator):
+def test_import_returns_409_when_degraded(client: TestClient, mock_orchestrator: SidestageOrchestrator) -> None:
     """POST /v1/campaign/import returns 409 Conflict when campaign.health.status
     is DEGRADED (another import is in progress)."""
     mock_orchestrator.campaign.health.status = HealthStatus.DEGRADED
@@ -330,8 +329,8 @@ def test_import_returns_409_when_degraded(client, mock_orchestrator):
 
 
 def test_backup_returns_result(
-    client, mock_orchestrator, sample_backup_result
-):
+    client: TestClient, mock_orchestrator: SidestageOrchestrator, sample_backup_result: MigrationBackupResult
+) -> None:
     """POST /v1/campaign/backup calls export_campaign and returns the backup result."""
     with patch(
         "sidestage.orchestrator.export_campaign",
@@ -349,7 +348,7 @@ def test_backup_returns_result(
     mock_export.assert_called_once()
 
 
-def test_backup_returns_409_when_degraded(client, mock_orchestrator):
+def test_backup_returns_409_when_degraded(client: TestClient, mock_orchestrator: SidestageOrchestrator) -> None:
     """POST /v1/campaign/backup returns 409 Conflict when campaign.health.status
     is DEGRADED."""
     mock_orchestrator.campaign.health.status = HealthStatus.DEGRADED

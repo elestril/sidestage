@@ -1,6 +1,8 @@
 """Unit tests for memory tools (NPC and DM agent-callable tools)."""
 
 import json
+from typing import Any
+
 import anyio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,7 +15,7 @@ from sidestage.memory.tools import MemoryTools, DmMemoryTools
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_memory(**overrides) -> Memory:
+def _make_memory(**overrides: Any) -> Memory:
     """Helper to build a Memory with sensible defaults."""
     defaults = dict(
         id="mem_test123",
@@ -30,16 +32,16 @@ def _make_memory(**overrides) -> Memory:
         last_accessed_at=None,
     )
     defaults.update(overrides)
-    return Memory(**defaults)
+    return Memory(**defaults)  # type: ignore[arg-type]
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     return MagicMock()
 
 
 @pytest.fixture
-def mock_embed_config():
+def mock_embed_config() -> MagicMock:
     """A minimal LLMConfig-like object for embedding."""
     cfg = MagicMock()
     cfg.provider = "llama_cpp"
@@ -50,14 +52,14 @@ def mock_embed_config():
 
 
 @pytest.fixture
-def mock_health():
+def mock_health() -> MagicMock:
     health = MagicMock()
     health.is_embedding_available = True
     return health
 
 
 @pytest.fixture
-def npc_tools(mock_client, mock_embed_config, mock_health):
+def npc_tools(mock_client: MagicMock, mock_embed_config: MagicMock, mock_health: MagicMock) -> MemoryTools:
     return MemoryTools(
         client=mock_client,
         embed_config=mock_embed_config,
@@ -68,7 +70,7 @@ def npc_tools(mock_client, mock_embed_config, mock_health):
 
 
 @pytest.fixture
-def dm_tools(mock_client, mock_embed_config, mock_health):
+def dm_tools(mock_client: MagicMock, mock_embed_config: MagicMock, mock_health: MagicMock) -> DmMemoryTools:
     return DmMemoryTools(
         client=mock_client,
         embed_config=mock_embed_config,
@@ -84,10 +86,10 @@ def dm_tools(mock_client, mock_embed_config, mock_health):
 class TestMemoryToolsBinding:
     """Test that MemoryTools binds to specific owner_id and scene_id at construction."""
 
-    def test_binds_owner_id(self, npc_tools):
+    def test_binds_owner_id(self, npc_tools: MemoryTools) -> None:
         assert npc_tools.owner_id == "char_alice"
 
-    def test_binds_scene_id(self, npc_tools):
+    def test_binds_scene_id(self, npc_tools: MemoryTools) -> None:
         assert npc_tools.scene_id == "scene_01"
 
 
@@ -97,7 +99,7 @@ class TestUpdateSceneMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_calls_upsert_with_correct_params(self, mock_embed, mock_upsert, npc_tools):
+    async def test_calls_upsert_with_correct_params(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_scene_memory calls upsert_scene_memory with correct owner_id and scene_id."""
         mock_upsert.return_value = _make_memory()
         result = await npc_tools.update_scene_memory(content="The tavern exploded")
@@ -108,7 +110,7 @@ class TestUpdateSceneMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_fires_embed_as_background_task(self, mock_embed, mock_upsert, npc_tools):
+    async def test_fires_embed_as_background_task(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_scene_memory fires embed_and_update as a background asyncio.Task."""
         import sniffio
         mem = _make_memory()
@@ -122,7 +124,7 @@ class TestUpdateSceneMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_returns_json_with_memory_id(self, mock_embed, mock_upsert, npc_tools):
+    async def test_returns_json_with_memory_id(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_scene_memory returns JSON confirmation with memory ID."""
         mock_upsert.return_value = _make_memory(id="mem_abc")
         result = await npc_tools.update_scene_memory(content="noted")
@@ -132,7 +134,7 @@ class TestUpdateSceneMemory:
 
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
-    async def test_returns_error_json_on_graph_failure(self, mock_upsert, npc_tools):
+    async def test_returns_error_json_on_graph_failure(self, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_scene_memory returns error JSON when the store raises an exception."""
         mock_upsert.side_effect = Exception("graph down")
         result = await npc_tools.update_scene_memory(content="crash")
@@ -147,7 +149,7 @@ class TestUpdateCharacterMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_character_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_calls_upsert_with_correct_params(self, mock_embed, mock_upsert, npc_tools):
+    async def test_calls_upsert_with_correct_params(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_character_memory calls upsert_character_memory with correct parameters."""
         mock_upsert.return_value = _make_memory(memory_type=MemoryType.CHARACTER, target_id="char_bob")
         await npc_tools.update_character_memory(
@@ -160,7 +162,7 @@ class TestUpdateCharacterMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_character_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_returns_json_with_memory_id(self, mock_embed, mock_upsert, npc_tools):
+    async def test_returns_json_with_memory_id(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, npc_tools: MemoryTools) -> None:
         """update_character_memory returns JSON with memory ID."""
         mock_upsert.return_value = _make_memory(id="mem_xyz")
         result = await npc_tools.update_character_memory(
@@ -177,7 +179,7 @@ class TestNpcToolsEmbedSkippedWhenNoConfig:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_no_embed_when_config_none(self, mock_embed, mock_upsert, mock_client, mock_health):
+    async def test_no_embed_when_config_none(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, mock_client: MagicMock, mock_health: MagicMock) -> None:
         tools = MemoryTools(
             client=mock_client,
             embed_config=None,
@@ -201,7 +203,7 @@ class TestUpdateCommonMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_common_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_calls_upsert_common(self, mock_embed, mock_upsert, dm_tools):
+    async def test_calls_upsert_common(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, dm_tools: DmMemoryTools) -> None:
         """update_common_memory calls upsert_common_scene_memory."""
         mock_upsert.return_value = _make_memory(visibility="common", owner_id=None)
         await dm_tools.update_common_memory(scene_id="scene_01", content="A brawl broke out")
@@ -216,7 +218,7 @@ class TestUpdateCanonicalMemory:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_calls_upsert_with_dm_owner(self, mock_embed, mock_upsert, dm_tools):
+    async def test_calls_upsert_with_dm_owner(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, dm_tools: DmMemoryTools) -> None:
         """update_canonical_memory calls upsert_scene_memory with DM owner_id."""
         mock_upsert.return_value = _make_memory(owner_id="dm_001")
         await dm_tools.update_canonical_memory(scene_id="scene_01", content="The assassin was there")
@@ -231,7 +233,7 @@ class TestAddWorldFact:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_world_fact", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_common_world_fact(self, mock_embed, mock_upsert, dm_tools):
+    async def test_common_world_fact(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, dm_tools: DmMemoryTools) -> None:
         """add_world_fact with visibility='common' creates common world fact."""
         mock_upsert.return_value = _make_memory(memory_type=MemoryType.WORLD_FACT, visibility="common")
         await dm_tools.add_world_fact(
@@ -245,7 +247,7 @@ class TestAddWorldFact:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_world_fact", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_private_world_fact(self, mock_embed, mock_upsert, dm_tools):
+    async def test_private_world_fact(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, dm_tools: DmMemoryTools) -> None:
         """add_world_fact with visibility='private' creates private world fact."""
         mock_upsert.return_value = _make_memory(memory_type=MemoryType.WORLD_FACT, visibility="private")
         await dm_tools.add_world_fact(
@@ -264,7 +266,7 @@ class TestDmToolsFireEmbed:
     @pytest.mark.anyio
     @patch("sidestage.memory.tools.upsert_common_scene_memory", new_callable=AsyncMock)
     @patch("sidestage.memory.tools.embed_and_update", new_callable=AsyncMock)
-    async def test_embed_fired_for_common_memory(self, mock_embed, mock_upsert, dm_tools):
+    async def test_embed_fired_for_common_memory(self, mock_embed: AsyncMock, mock_upsert: AsyncMock, dm_tools: DmMemoryTools) -> None:
         import sniffio
         mem = _make_memory(visibility="common", owner_id=None)
         mock_upsert.return_value = mem

@@ -6,11 +6,12 @@ import pytest
 import yaml
 
 from sidestage.migration.parser import parse_directory
+from typing import Any
 
 
 # --- Helper to write a markdown file with YAML frontmatter ---
 
-def _write_md(path: Path, frontmatter: dict, body: str = "") -> None:
+def _write_md(path: Path, frontmatter: dict[str, Any], body: str = "") -> None:
     """Write a markdown file with YAML frontmatter and body."""
     fm = yaml.dump(frontmatter, sort_keys=False).strip()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,7 +94,7 @@ def populated_dir(markdown_dir: Path) -> Path:
 
 # --- Core parsing tests ---
 
-def test_parse_directory_reads_all_entity_types(populated_dir):
+def test_parse_directory_reads_all_entity_types(populated_dir: Path) -> None:
     """parse_directory finds entities from all type subdirectories."""
     result = parse_directory(populated_dir)
     entity_types = {type(e).__name__ for e in result.entities}
@@ -104,7 +105,7 @@ def test_parse_directory_reads_all_entity_types(populated_dir):
     assert "JoinEvent" in entity_types
 
 
-def test_parse_directory_reads_memories_from_dot_d(populated_dir):
+def test_parse_directory_reads_memories_from_dot_d(populated_dir: Path) -> None:
     """parse_directory reads memory files from .d/ companion directories."""
     result = parse_directory(populated_dir)
     assert len(result.memories) >= 1
@@ -112,14 +113,14 @@ def test_parse_directory_reads_memories_from_dot_d(populated_dir):
     assert "mem_tavern_brawl" in mem_ids
 
 
-def test_parse_directory_reads_chatlog_from_scene_dot_d(populated_dir):
+def test_parse_directory_reads_chatlog_from_scene_dot_d(populated_dir: Path) -> None:
     """parse_directory reads chatlog.log from scene .d/ directories."""
     result = parse_directory(populated_dir)
     assert "scene_brawl" in result.chatlogs
     assert len(result.chatlogs["scene_brawl"]) == 2
 
 
-def test_parse_directory_associates_memories_with_parent_entity(populated_dir):
+def test_parse_directory_associates_memories_with_parent_entity(populated_dir: Path) -> None:
     """Memories parsed from entity_name.d/ are associated with that entity."""
     result = parse_directory(populated_dir)
     # The memory in Eldric_the_Bold.d/ should have owner_id = char_eldric
@@ -127,7 +128,7 @@ def test_parse_directory_associates_memories_with_parent_entity(populated_dir):
     assert mem.owner_id == "char_eldric"
 
 
-def test_parse_directory_infers_type_from_subdirectory(markdown_dir):
+def test_parse_directory_infers_type_from_subdirectory(markdown_dir: Path) -> None:
     """When type field is missing from frontmatter, infer from subdirectory name."""
     _write_md(
         markdown_dir / "characters" / "No_Type.md",
@@ -141,7 +142,7 @@ def test_parse_directory_infers_type_from_subdirectory(markdown_dir):
     assert any("type" in w.message.lower() for w in result.warnings)
 
 
-def test_parse_directory_warns_orphaned_dot_d(markdown_dir):
+def test_parse_directory_warns_orphaned_dot_d(markdown_dir: Path) -> None:
     """Warn on .d/ without parent .md (orphaned memories)."""
     orphan_dir = markdown_dir / "characters" / "Ghost.d"
     _write_md(
@@ -155,7 +156,7 @@ def test_parse_directory_warns_orphaned_dot_d(markdown_dir):
     assert any("orphan" in w.message.lower() for w in result.warnings)
 
 
-def test_parse_directory_warns_chatlog_in_non_scene_dot_d(markdown_dir):
+def test_parse_directory_warns_chatlog_in_non_scene_dot_d(markdown_dir: Path) -> None:
     """Warn on chatlog.log in a non-scene .d/ directory (ignored)."""
     _write_md(
         markdown_dir / "characters" / "Char_With_Log.md",
@@ -171,7 +172,7 @@ def test_parse_directory_warns_chatlog_in_non_scene_dot_d(markdown_dir):
     assert "char_log" not in result.chatlogs
 
 
-def test_parse_directory_handles_malformed_yaml(markdown_dir):
+def test_parse_directory_handles_malformed_yaml(markdown_dir: Path) -> None:
     """Malformed YAML produces an error in ParseResult, not an exception."""
     bad_file = markdown_dir / "characters" / "Bad_Yaml.md"
     bad_file.write_text("---\n: invalid: yaml: {{{\n---\n\nBody text.")
@@ -180,7 +181,7 @@ def test_parse_directory_handles_malformed_yaml(markdown_dir):
     assert any("Bad_Yaml" in e.file_path for e in result.errors)
 
 
-def test_parse_directory_handles_missing_frontmatter(markdown_dir):
+def test_parse_directory_handles_missing_frontmatter(markdown_dir: Path) -> None:
     """File without frontmatter delimiters produces an error."""
     bad_file = markdown_dir / "characters" / "No_Frontmatter.md"
     bad_file.write_text("Just a plain markdown file with no frontmatter.")
@@ -189,7 +190,7 @@ def test_parse_directory_handles_missing_frontmatter(markdown_dir):
     assert any("No_Frontmatter" in e.file_path for e in result.errors)
 
 
-def test_parse_directory_warns_duplicate_entity_ids(markdown_dir):
+def test_parse_directory_warns_duplicate_entity_ids(markdown_dir: Path) -> None:
     """Duplicate entity IDs produce a warning; last-wins."""
     _write_md(
         markdown_dir / "characters" / "First.md",
@@ -207,7 +208,7 @@ def test_parse_directory_warns_duplicate_entity_ids(markdown_dir):
     assert any("duplicate" in w.message.lower() for w in result.warnings)
 
 
-def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir):
+def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir: Path) -> None:
     """Scene.messages in frontmatter is ignored; messages come from chatlog.log."""
     _write_md(
         markdown_dir / "scenes" / "Scene_With_Messages.md",
@@ -223,7 +224,7 @@ def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir):
     assert len(scene.messages) == 0
 
 
-def test_parse_directory_handles_empty_directory(markdown_dir):
+def test_parse_directory_handles_empty_directory(markdown_dir: Path) -> None:
     """Empty directory tree (no entities) returns empty ParseResult with no errors."""
     result = parse_directory(markdown_dir)
     assert len(result.entities) == 0
@@ -232,7 +233,7 @@ def test_parse_directory_handles_empty_directory(markdown_dir):
     assert len(result.errors) == 0
 
 
-def test_parse_directory_handles_missing_type_subdirectories(tmp_path):
+def test_parse_directory_handles_missing_type_subdirectories(tmp_path: Path) -> None:
     """Missing type subdirectories are handled gracefully (no crash)."""
     md = tmp_path / "markdown"
     md.mkdir()

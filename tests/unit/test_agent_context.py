@@ -2,6 +2,8 @@
 
 import copy
 import json
+from typing import Any
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
@@ -14,7 +16,7 @@ from sidestage.schemas import Character, ChatMessage
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_scene_logic(**overrides):
+def _make_scene_logic(**overrides: Any) -> MagicMock:
     """Build a MagicMock scene_logic with sensible defaults."""
     sl = MagicMock()
     sl.agent.model = "openai/test-model"
@@ -34,7 +36,7 @@ def _make_scene_logic(**overrides):
     return sl
 
 
-def _mock_completion_response(content="Hello", tool_calls=None):
+def _mock_completion_response(content: str | None = "Hello", tool_calls: list[Any] | None = None) -> MagicMock:
     """Build a mock litellm.acompletion response."""
     msg = MagicMock()
     msg.content = content
@@ -56,11 +58,11 @@ class TestArunContextParameter:
 
     @pytest.mark.anyio
     @patch("sidestage.agent.litellm.acompletion", new_callable=AsyncMock)
-    async def test_arun_without_context_backwards_compatible(self, mock_completion):
+    async def test_arun_without_context_backwards_compatible(self, mock_completion: AsyncMock) -> None:
         """arun without context parameter works as before (backwards compatible)."""
         # Capture messages at call time (before the list is mutated)
-        captured = {}
-        async def _capture(**kwargs):
+        captured: dict[str, Any] = {}
+        async def _capture(**kwargs: Any) -> MagicMock:
             captured["messages"] = copy.deepcopy(kwargs["messages"])
             return _mock_completion_response("Hi there")
         mock_completion.side_effect = _capture
@@ -81,10 +83,10 @@ class TestArunContextParameter:
 
     @pytest.mark.anyio
     @patch("sidestage.agent.litellm.acompletion", new_callable=AsyncMock)
-    async def test_arun_with_context_inserts_system_message(self, mock_completion):
+    async def test_arun_with_context_inserts_system_message(self, mock_completion: AsyncMock) -> None:
         """arun with context inserts a system message between system prompt and user message."""
-        captured = {}
-        async def _capture(**kwargs):
+        captured: dict[str, Any] = {}
+        async def _capture(**kwargs: Any) -> MagicMock:
             captured["messages"] = copy.deepcopy(kwargs["messages"])
             return _mock_completion_response("Got it")
         mock_completion.side_effect = _capture
@@ -107,10 +109,10 @@ class TestArunContextParameter:
 
     @pytest.mark.anyio
     @patch("sidestage.agent.litellm.acompletion", new_callable=AsyncMock)
-    async def test_arun_with_empty_string_context_skipped(self, mock_completion):
+    async def test_arun_with_empty_string_context_skipped(self, mock_completion: AsyncMock) -> None:
         """arun with empty string context is equivalent to no context."""
-        captured = {}
-        async def _capture(**kwargs):
+        captured: dict[str, Any] = {}
+        async def _capture(**kwargs: Any) -> MagicMock:
             captured["messages"] = copy.deepcopy(kwargs["messages"])
             return _mock_completion_response("Ok")
         mock_completion.side_effect = _capture
@@ -127,10 +129,10 @@ class TestArunContextParameter:
 
     @pytest.mark.anyio
     @patch("sidestage.agent.litellm.acompletion", new_callable=AsyncMock)
-    async def test_arun_with_context_preserves_tool_calling(self, mock_completion):
+    async def test_arun_with_context_preserves_tool_calling(self, mock_completion: AsyncMock) -> None:
         """arun with context preserves tool calling behavior."""
         # Capture messages from first call
-        captured_calls = []
+        captured_calls: list[Any] = []
 
         tool_call = MagicMock()
         tool_call.id = "call_1"
@@ -143,7 +145,7 @@ class TestArunContextParameter:
         ]
         call_idx = 0
 
-        async def _capture(**kwargs):
+        async def _capture(**kwargs: Any) -> MagicMock:
             nonlocal call_idx
             captured_calls.append(copy.deepcopy(kwargs["messages"]))
             resp = responses[call_idx]
@@ -179,7 +181,7 @@ class TestArunContextParameter:
 class TestAgentActorMemoryIntegration:
     """Tests for AgentActor memory dependencies and context assembly."""
 
-    def test_backwards_compatible_without_memory_args(self):
+    def test_backwards_compatible_without_memory_args(self) -> None:
         """AgentActor still works without memory-related arguments."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -189,7 +191,7 @@ class TestAgentActorMemoryIntegration:
         assert actor.health is None
         assert actor.scene_id is None
 
-    def test_accepts_memory_kwargs(self):
+    def test_accepts_memory_kwargs(self) -> None:
         """AgentActor stores memory-related keyword arguments."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -215,7 +217,7 @@ class TestAgentActorMemoryIntegration:
 
     @pytest.mark.anyio
     @patch("sidestage.memory.context.assemble_context", new_callable=AsyncMock)
-    async def test_on_event_assembles_context_when_graph_available(self, mock_assemble):
+    async def test_on_event_assembles_context_when_graph_available(self, mock_assemble: AsyncMock) -> None:
         """on_event calls assemble_context when graph_client is available."""
         from sidestage.memory.models import ContextResult
         mock_assemble.return_value = ContextResult(
@@ -248,7 +250,7 @@ class TestAgentActorMemoryIntegration:
         assert context_val == "## World\n- War rages\n\n[c2]: Hello"
 
     @pytest.mark.anyio
-    async def test_on_event_no_context_without_graph(self):
+    async def test_on_event_no_context_without_graph(self) -> None:
         """on_event passes context=None when graph_client is not available."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -271,7 +273,7 @@ class TestAgentActorMemoryIntegration:
 
     @pytest.mark.anyio
     @patch("sidestage.memory.context.assemble_context", new_callable=AsyncMock)
-    async def test_on_event_graceful_degradation_on_context_failure(self, mock_assemble):
+    async def test_on_event_graceful_degradation_on_context_failure(self, mock_assemble: AsyncMock) -> None:
         """on_event proceeds without context if assemble_context raises."""
         mock_assemble.side_effect = Exception("graph down")
 
@@ -295,7 +297,7 @@ class TestAgentActorMemoryIntegration:
         # Agent should still be called (graceful degradation)
         actor.agent.arun.assert_awaited_once()
 
-    def test_memory_tools_added_when_graph_available(self):
+    def test_memory_tools_added_when_graph_available(self) -> None:
         """MemoryTools methods are added to agent tools when graph_client is set."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -307,20 +309,22 @@ class TestAgentActorMemoryIntegration:
             scene_id="scene_01",
         )
         # Agent should have memory tools
+        assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" in tool_names
         assert "update_character_memory" in tool_names
 
-    def test_no_memory_tools_without_graph(self):
+    def test_no_memory_tools_without_graph(self) -> None:
         """No memory tools added when graph_client is None."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(char, sl)  # No graph_client
+        assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" not in tool_names
         assert "update_character_memory" not in tool_names
 
-    def test_no_memory_tools_without_health(self):
+    def test_no_memory_tools_without_health(self) -> None:
         """No memory tools added when health is None (even if graph_client is set)."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -330,6 +334,7 @@ class TestAgentActorMemoryIntegration:
             scene_id="scene_01",
             health=None,  # health is None
         )
+        assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" not in tool_names
         assert "update_character_memory" not in tool_names
@@ -343,14 +348,14 @@ class TestAgentActorMemoryIntegration:
 class TestCharacterLogicMemoryDeps:
     """Tests for CharacterLogic forwarding memory dependencies to AgentActor."""
 
-    def test_backwards_compatible_without_memory_args(self):
+    def test_backwards_compatible_without_memory_args(self) -> None:
         """CharacterLogic still works without memory-related arguments."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
         logic = CharacterLogic(char, sl)
         assert logic.graph_client is None
 
-    def test_stores_memory_kwargs(self):
+    def test_stores_memory_kwargs(self) -> None:
         """CharacterLogic stores memory-related keyword arguments."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -369,7 +374,7 @@ class TestCharacterLogicMemoryDeps:
         assert logic.scene_id == "scene_01"
 
     @pytest.mark.anyio
-    async def test_activate_forwards_memory_deps_to_actor(self):
+    async def test_activate_forwards_memory_deps_to_actor(self) -> None:
         """activate() forwards memory dependencies to AgentActor."""
         sl = _make_scene_logic()
         char = Character(id="c1", name="Alice", body="I am Alice")
@@ -408,7 +413,7 @@ class TestCampaignHealthWiring:
     @pytest.mark.anyio
     @patch("sidestage.campaign.connect", new_callable=AsyncMock)
     @patch("sidestage.memory.embeddings.validate_embed_config", new_callable=AsyncMock)
-    async def test_start_graph_validates_embeddings(self, mock_validate, mock_connect):
+    async def test_start_graph_validates_embeddings(self, mock_validate: AsyncMock, mock_connect: AsyncMock) -> None:
         """start_graph validates embeddings when embed config is present."""
         from sidestage.campaign import Campaign
         from sidestage.config import LLMConfig, SidestageConfig
@@ -441,7 +446,7 @@ class TestCampaignHealthWiring:
     @pytest.mark.anyio
     @patch("sidestage.campaign.connect", new_callable=AsyncMock)
     @patch("sidestage.memory.embeddings.validate_embed_config", new_callable=AsyncMock)
-    async def test_start_graph_degrades_on_embed_failure(self, mock_validate, mock_connect):
+    async def test_start_graph_degrades_on_embed_failure(self, mock_validate: AsyncMock, mock_connect: AsyncMock) -> None:
         """start_graph sets health to DEGRADED when embed validation fails."""
         from sidestage.campaign import Campaign
         from sidestage.config import LLMConfig, SidestageConfig
@@ -470,7 +475,7 @@ class TestCampaignHealthWiring:
 
     @pytest.mark.anyio
     @patch("sidestage.campaign.connect", new_callable=AsyncMock)
-    async def test_start_graph_no_embed_config_skips_validation(self, mock_connect):
+    async def test_start_graph_no_embed_config_skips_validation(self, mock_connect: AsyncMock) -> None:
         """start_graph skips embed validation when no embed config."""
         from sidestage.campaign import Campaign
         from sidestage.config import LLMConfig, SidestageConfig

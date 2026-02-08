@@ -1,5 +1,7 @@
 """Tests for migration/importer.py -- import campaign from parsed data into FalkorDB."""
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
@@ -8,14 +10,14 @@ from sidestage.health import CampaignHealth, HealthStatus
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.migration.importer import import_campaign
 from sidestage.migration.models import MigrationValidationIssue, ParseResult
-from sidestage.schemas import Character, Event, Item, JoinEvent, Location, Scene
+from sidestage.schemas import Character, Entity, Event, Item, JoinEvent, Location, Scene
 
 
 # --- Fixtures ---
 
 
 @pytest.fixture
-def mock_graph_client():
+def mock_graph_client() -> MagicMock:
     """Mock GraphClient with graph.query and graph.delete capabilities."""
     client = MagicMock()
     client.graph = AsyncMock()
@@ -28,7 +30,7 @@ def mock_graph_client():
 
 
 @pytest.fixture
-def mock_campaign(mock_graph_client, tmp_path):
+def mock_campaign(mock_graph_client: MagicMock, tmp_path: Path) -> MagicMock:
     """Mock Campaign object with graph_client, storage, health, and campaign_dir."""
     campaign = MagicMock()
     campaign.graph_client = mock_graph_client
@@ -46,7 +48,7 @@ def mock_campaign(mock_graph_client, tmp_path):
 
 
 @pytest.fixture
-def mock_sync_manager():
+def mock_sync_manager() -> MagicMock:
     """Mock SyncManager for broadcast assertions."""
     sm = MagicMock()
     sm.broadcast = AsyncMock()
@@ -54,7 +56,7 @@ def mock_sync_manager():
 
 
 @pytest.fixture
-def sample_entities():
+def sample_entities() -> list[Entity]:
     """Return a list of representative Entity objects."""
     return [
         Character(
@@ -86,7 +88,7 @@ def sample_entities():
 
 
 @pytest.fixture
-def sample_memories():
+def sample_memories() -> list[Memory]:
     """Return a list of sample Memory objects."""
     return [
         Memory(
@@ -110,7 +112,7 @@ def sample_memories():
 
 
 @pytest.fixture
-def sample_parse_result(sample_entities, sample_memories):
+def sample_parse_result(sample_entities: list[Entity], sample_memories: list[Memory]) -> ParseResult:
     """Return a ParseResult with representative entities, memories, and chatlogs."""
     return ParseResult(
         entities=sample_entities,
@@ -127,7 +129,7 @@ def sample_parse_result(sample_entities, sample_memories):
 
 
 @pytest.fixture
-def empty_parse_result():
+def empty_parse_result() -> ParseResult:
     """Return an empty ParseResult."""
     return ParseResult(entities=[], memories=[], chatlogs={}, errors=[])
 
@@ -136,13 +138,13 @@ def empty_parse_result():
 
 
 @pytest.mark.anyio
-async def test_sets_health_degraded_before_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_sets_health_degraded_before_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """import_campaign sets campaign.health to DEGRADED before starting graph operations."""
-    health_states = []
+    health_states: list[HealthStatus] = []
 
     original_delete = mock_campaign.graph_client.graph.delete
 
-    async def capture_health_on_delete():
+    async def capture_health_on_delete() -> None:
         health_states.append(mock_campaign.health.status)
         return await original_delete()
 
@@ -158,7 +160,7 @@ async def test_sets_health_degraded_before_import(mock_campaign, sample_parse_re
 
 
 @pytest.mark.anyio
-async def test_restores_health_healthy_after_successful_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_restores_health_healthy_after_successful_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """After a successful import, campaign.health is restored to HEALTHY."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -171,7 +173,7 @@ async def test_restores_health_healthy_after_successful_import(mock_campaign, sa
 
 
 @pytest.mark.anyio
-async def test_restores_health_healthy_after_failed_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_restores_health_healthy_after_failed_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """If import fails (e.g., graph drop raises), health is still restored to HEALTHY."""
     mock_campaign.graph_client.graph.delete = AsyncMock(side_effect=RuntimeError("DB down"))
 
@@ -186,7 +188,7 @@ async def test_restores_health_healthy_after_failed_import(mock_campaign, sample
 
 
 @pytest.mark.anyio
-async def test_drops_and_recreates_graph(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_drops_and_recreates_graph(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """import_campaign calls graph.delete() then db.select_graph() and initialize_schema()."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -202,7 +204,7 @@ async def test_drops_and_recreates_graph(mock_campaign, sample_parse_result, moc
 
 
 @pytest.mark.anyio
-async def test_graph_drop_failure_aborts_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_graph_drop_failure_aborts_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """If graph.delete() raises, the import aborts and returns a failed result."""
     mock_campaign.graph_client.graph.delete = AsyncMock(side_effect=RuntimeError("Connection lost"))
 
@@ -217,7 +219,7 @@ async def test_graph_drop_failure_aborts_import(mock_campaign, sample_parse_resu
 
 
 @pytest.mark.anyio
-async def test_inserts_all_entities_via_create_entity(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_inserts_all_entities_via_create_entity(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """Every entity in the ParseResult is inserted via graph create_entity()."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock) as mock_create:
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -233,7 +235,7 @@ async def test_inserts_all_entities_via_create_entity(mock_campaign, sample_pars
 
 
 @pytest.mark.anyio
-async def test_creates_located_in_edges_for_characters(mock_campaign, mock_sync_manager):
+async def test_creates_located_in_edges_for_characters(mock_campaign: MagicMock, mock_sync_manager: MagicMock) -> None:
     """Characters with a location_id get a LOCATED_IN edge to that location."""
     parse_result = ParseResult(
         entities=[
@@ -243,7 +245,7 @@ async def test_creates_located_in_edges_for_characters(mock_campaign, mock_sync_
         memories=[], chatlogs={}, errors=[],
     )
 
-    link_calls = []
+    link_calls: list[Any] = []
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock) as mock_link:
             with patch("sidestage.migration.importer.initialize_schema", new_callable=AsyncMock):
@@ -257,7 +259,7 @@ async def test_creates_located_in_edges_for_characters(mock_campaign, mock_sync_
 
 
 @pytest.mark.anyio
-async def test_creates_connects_to_edges_deduplicated(mock_campaign, mock_sync_manager):
+async def test_creates_connects_to_edges_deduplicated(mock_campaign: MagicMock, mock_sync_manager: MagicMock) -> None:
     """CONNECTS_TO edges are created once per pair, not twice for A->B and B->A."""
     parse_result = ParseResult(
         entities=[
@@ -278,7 +280,7 @@ async def test_creates_connects_to_edges_deduplicated(mock_campaign, mock_sync_m
 
 
 @pytest.mark.anyio
-async def test_creates_at_location_edges_for_scenes(mock_campaign, mock_sync_manager):
+async def test_creates_at_location_edges_for_scenes(mock_campaign: MagicMock, mock_sync_manager: MagicMock) -> None:
     """Scenes with a location_id get an AT_LOCATION edge to that location."""
     parse_result = ParseResult(
         entities=[
@@ -300,7 +302,7 @@ async def test_creates_at_location_edges_for_scenes(mock_campaign, mock_sync_man
 
 
 @pytest.mark.anyio
-async def test_creates_has_event_edges_for_events(mock_campaign, mock_sync_manager):
+async def test_creates_has_event_edges_for_events(mock_campaign: MagicMock, mock_sync_manager: MagicMock) -> None:
     """Events with a scene_id get a HAS_EVENT edge from the scene."""
     parse_result = ParseResult(
         entities=[
@@ -328,7 +330,7 @@ async def test_creates_has_event_edges_for_events(mock_campaign, mock_sync_manag
 
 
 @pytest.mark.anyio
-async def test_inserts_memories_via_graph_query(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_inserts_memories_via_graph_query(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """All memories from ParseResult are inserted via graph Cypher queries."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -346,13 +348,13 @@ async def test_inserts_memories_via_graph_query(mock_campaign, sample_parse_resu
 
 
 @pytest.mark.anyio
-async def test_skips_embedding_generation_during_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_skips_embedding_generation_during_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """During import, health is DEGRADED so is_embedding_available returns False."""
-    embedding_available_during_import = []
+    embedding_available_during_import: list[bool] = []
 
     original_delete = mock_campaign.graph_client.graph.delete
 
-    async def capture_embedding_state():
+    async def capture_embedding_state() -> None:
         embedding_available_during_import.append(mock_campaign.health.is_embedding_available)
         return await original_delete()
 
@@ -371,7 +373,7 @@ async def test_skips_embedding_generation_during_import(mock_campaign, sample_pa
 
 
 @pytest.mark.anyio
-async def test_restores_chat_logs_via_storage(mock_campaign, mock_sync_manager):
+async def test_restores_chat_logs_via_storage(mock_campaign: MagicMock, mock_sync_manager: MagicMock) -> None:
     """Chat logs from ParseResult are restored via campaign.storage."""
     parse_result = ParseResult(
         entities=[
@@ -400,7 +402,7 @@ async def test_restores_chat_logs_via_storage(mock_campaign, mock_sync_manager):
 
 
 @pytest.mark.anyio
-async def test_verifies_entity_counts_after_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_verifies_entity_counts_after_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """After import, the importer queries entity counts and includes them in the result."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -414,9 +416,9 @@ async def test_verifies_entity_counts_after_import(mock_campaign, sample_parse_r
 
 
 @pytest.mark.anyio
-async def test_clears_active_scenes_after_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_clears_active_scenes_after_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """Active scenes dict is cleared after import completes."""
-    active_scenes = {"scene_1": MagicMock(), "scene_2": MagicMock()}
+    active_scenes: dict[str, MagicMock] = {"scene_1": MagicMock(), "scene_2": MagicMock()}
 
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -431,7 +433,7 @@ async def test_clears_active_scenes_after_import(mock_campaign, sample_parse_res
 
 
 @pytest.mark.anyio
-async def test_broadcasts_entities_updated_after_import(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_broadcasts_entities_updated_after_import(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """After import, a WebSocket broadcast of entities_updated is sent."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -446,7 +448,7 @@ async def test_broadcasts_entities_updated_after_import(mock_campaign, sample_pa
 
 
 @pytest.mark.anyio
-async def test_empty_parse_result_still_drops_graph(mock_campaign, empty_parse_result, mock_sync_manager):
+async def test_empty_parse_result_still_drops_graph(mock_campaign: MagicMock, empty_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """An empty parse result still drops and recreates the graph (clean slate)."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):
@@ -461,7 +463,7 @@ async def test_empty_parse_result_still_drops_graph(mock_campaign, empty_parse_r
 
 
 @pytest.mark.anyio
-async def test_no_graph_client_returns_failed(mock_campaign, sample_parse_result, mock_sync_manager):
+async def test_no_graph_client_returns_failed(mock_campaign: MagicMock, sample_parse_result: ParseResult, mock_sync_manager: MagicMock) -> None:
     """If campaign.graph_client is None, return a failed result immediately."""
     mock_campaign.graph_client = None
 
@@ -472,7 +474,7 @@ async def test_no_graph_client_returns_failed(mock_campaign, sample_parse_result
 
 
 @pytest.mark.anyio
-async def test_no_sync_manager_skips_broadcast(mock_campaign, sample_parse_result):
+async def test_no_sync_manager_skips_broadcast(mock_campaign: MagicMock, sample_parse_result: ParseResult) -> None:
     """If sync_manager is None, broadcast is skipped without error."""
     with patch("sidestage.migration.importer.create_entity", new_callable=AsyncMock):
         with patch("sidestage.migration.importer.link", new_callable=AsyncMock):

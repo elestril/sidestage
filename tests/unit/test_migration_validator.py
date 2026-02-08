@@ -13,19 +13,19 @@ from sidestage.schemas import Character, ChatMessage, Event, Item, Location, Sce
 
 
 @pytest.fixture
-def valid_location():
+def valid_location() -> Location:
     """A Location with all required fields."""
     return Location(id="loc_tavern", name="The Rusty Tavern", body="A dusty old tavern.", connected_locations=["loc_castle"])
 
 
 @pytest.fixture
-def valid_location_2():
+def valid_location_2() -> Location:
     """A second Location for connectivity tests."""
     return Location(id="loc_castle", name="Castle Blackmoor", body="A dark foreboding castle.", connected_locations=["loc_tavern"])
 
 
 @pytest.fixture
-def valid_character(valid_location):
+def valid_character(valid_location: Location) -> Character:
     """A Character at a valid location with a valid inventory item."""
     return Character(
         id="char_eldric", name="Eldric", body="A brave warrior.",
@@ -34,33 +34,33 @@ def valid_character(valid_location):
 
 
 @pytest.fixture
-def valid_item():
+def valid_item() -> Item:
     """An Item with all required fields."""
     return Item(id="item_sword", name="Flame Tongue Sword", body="A magical sword.")
 
 
 @pytest.fixture
-def valid_scene(valid_location):
+def valid_scene(valid_location: Location) -> Scene:
     """A Scene at a valid location."""
     return Scene(id="scene_brawl", name="Tavern Brawl", body="A brawl breaks out.", location_id="loc_tavern")
 
 
 @pytest.fixture
-def valid_event(valid_scene):
+def valid_event(valid_scene: Scene) -> Event:
     """An Event in a valid scene."""
     return Event(id="evt_join", name="Eldric Joins", body="Eldric enters the fray.",
                  scene_id="scene_brawl", gametime=3600, walltime="2026-01-15T14:30:00Z")
 
 
 @pytest.fixture
-def valid_memory():
+def valid_memory() -> Memory:
     """A Memory with valid owner and target references."""
     return Memory(id="mem_1", content="A memory.", memory_type=MemoryType.SCENE,
                   visibility="common", owner_id="char_eldric", target_id="scene_brawl")
 
 
 @pytest.fixture
-def valid_parse_result(valid_character, valid_location, valid_location_2, valid_item, valid_scene, valid_event, valid_memory):
+def valid_parse_result(valid_character: Character, valid_location: Location, valid_location_2: Location, valid_item: Item, valid_scene: Scene, valid_event: Event, valid_memory: Memory) -> ParseResult:
     """A fully valid ParseResult with consistent references."""
     return ParseResult(
         entities=[valid_character, valid_location, valid_location_2, valid_item, valid_scene, valid_event],
@@ -72,7 +72,7 @@ def valid_parse_result(valid_character, valid_location, valid_location_2, valid_
 
 # --- Validation success tests ---
 
-def test_validates_successfully_with_correct_references(valid_parse_result):
+def test_validates_successfully_with_correct_references(valid_parse_result: ParseResult) -> None:
     """validate_parse_result returns a report with valid=True and no errors when all references are consistent."""
     report = validate_parse_result(valid_parse_result)
     assert report.valid is True

@@ -1,4 +1,6 @@
 """Unit tests for graph entity CRUD operations."""
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +20,7 @@ from sidestage.graph.entities import (
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     """Creates a MagicMock GraphClient with graph.query as AsyncMock."""
     client = MagicMock()
     client.graph = MagicMock()
@@ -27,7 +29,7 @@ def mock_client():
 
 
 @pytest.fixture
-def sample_character():
+def sample_character() -> Character:
     return Character(
         id="char_1", name="Alice", body="A brave warrior",
         location_id="loc_1", inventory=["item_sword"],
@@ -35,14 +37,14 @@ def sample_character():
 
 
 @pytest.fixture
-def sample_location():
+def sample_location() -> Location:
     return Location(
         id="loc_1", name="Tavern", body="A cozy tavern",
         connected_locations=["loc_2"],
     )
 
 
-def _make_node_mock(labels, properties):
+def _make_node_mock(labels: list[str], properties: dict[str, Any]) -> MagicMock:
     """Helper to create a mock graph node."""
     node = MagicMock()
     node.labels = labels
@@ -54,7 +56,7 @@ def _make_node_mock(labels, properties):
 
 
 @pytest.mark.anyio
-async def test_create_entity_character_cypher(mock_client, sample_character):
+async def test_create_entity_character_cypher(mock_client: MagicMock, sample_character: Character) -> None:
     """create_entity with Character generates correct Cypher with :Entity:Character labels."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
@@ -67,7 +69,7 @@ async def test_create_entity_character_cypher(mock_client, sample_character):
 
 
 @pytest.mark.anyio
-async def test_create_entity_location_excludes_connected_locations(mock_client, sample_location):
+async def test_create_entity_location_excludes_connected_locations(mock_client: MagicMock, sample_location: Location) -> None:
     """create_entity with Location does not include connected_locations in Cypher properties."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
@@ -79,7 +81,7 @@ async def test_create_entity_location_excludes_connected_locations(mock_client, 
 
 
 @pytest.mark.anyio
-async def test_create_entity_chat_message_labels(mock_client):
+async def test_create_entity_chat_message_labels(mock_client: MagicMock) -> None:
     """create_entity with ChatMessage generates Cypher with :Entity:Event:ChatMessage labels."""
     msg = ChatMessage(
         id="m1", name="msg", body="desc", scene_id="s1",
@@ -95,7 +97,7 @@ async def test_create_entity_chat_message_labels(mock_client):
 
 
 @pytest.mark.anyio
-async def test_create_entity_raises_duplicate_on_constraint_violation(mock_client, sample_character):
+async def test_create_entity_raises_duplicate_on_constraint_violation(mock_client: MagicMock, sample_character: Character) -> None:
     """create_entity raises DuplicateEntityError on unique constraint violation."""
     mock_client.graph.query.side_effect = Exception("unique constraint")
 
@@ -104,7 +106,7 @@ async def test_create_entity_raises_duplicate_on_constraint_violation(mock_clien
 
 
 @pytest.mark.anyio
-async def test_create_entity_returns_entity(mock_client, sample_character):
+async def test_create_entity_returns_entity(mock_client: MagicMock, sample_character: Character) -> None:
     """create_entity returns the created entity."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
@@ -117,7 +119,7 @@ async def test_create_entity_returns_entity(mock_client, sample_character):
 
 
 @pytest.mark.anyio
-async def test_get_entity_returns_correct_entity(mock_client):
+async def test_get_entity_returns_correct_entity(mock_client: MagicMock) -> None:
     """get_entity returns correct entity when node is found."""
     node = _make_node_mock(
         ["Entity", "Character"],
@@ -133,7 +135,7 @@ async def test_get_entity_returns_correct_entity(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_entity_returns_none_when_not_found(mock_client):
+async def test_get_entity_returns_none_when_not_found(mock_client: MagicMock) -> None:
     """get_entity returns None when result_set is empty."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -143,7 +145,7 @@ async def test_get_entity_returns_none_when_not_found(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_entity_chat_message_reconstructs_correctly(mock_client):
+async def test_get_entity_chat_message_reconstructs_correctly(mock_client: MagicMock) -> None:
     """get_entity for ChatMessage node reconstructs as ChatMessage, not Event."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
@@ -161,7 +163,7 @@ async def test_get_entity_chat_message_reconstructs_correctly(mock_client):
 
 
 @pytest.mark.anyio
-async def test_get_entity_cypher(mock_client):
+async def test_get_entity_cypher(mock_client: MagicMock) -> None:
     """get_entity generates correct MATCH Cypher."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -177,7 +179,7 @@ async def test_get_entity_cypher(mock_client):
 
 
 @pytest.mark.anyio
-async def test_update_entity_sets_specified_properties(mock_client):
+async def test_update_entity_sets_specified_properties(mock_client: MagicMock) -> None:
     """update_entity generates Cypher SET for specified properties only."""
     node = _make_node_mock(
         ["Entity", "Character"],
@@ -194,21 +196,21 @@ async def test_update_entity_sets_specified_properties(mock_client):
 
 
 @pytest.mark.anyio
-async def test_update_entity_empty_updates_raises(mock_client):
+async def test_update_entity_empty_updates_raises(mock_client: MagicMock) -> None:
     """update_entity raises QueryError when updates dict is empty."""
     with pytest.raises(QueryError, match="No updates"):
         await update_entity(mock_client, "c1", {})
 
 
 @pytest.mark.anyio
-async def test_update_entity_invalid_key_raises(mock_client):
+async def test_update_entity_invalid_key_raises(mock_client: MagicMock) -> None:
     """update_entity raises QueryError for unknown property keys."""
     with pytest.raises(QueryError, match="Unknown property"):
         await update_entity(mock_client, "c1", {"nonexistent_field": "value"})
 
 
 @pytest.mark.anyio
-async def test_update_entity_raises_not_found(mock_client):
+async def test_update_entity_raises_not_found(mock_client: MagicMock) -> None:
     """update_entity raises EntityNotFoundError when node not found."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -217,7 +219,7 @@ async def test_update_entity_raises_not_found(mock_client):
 
 
 @pytest.mark.anyio
-async def test_update_entity_returns_updated_entity(mock_client):
+async def test_update_entity_returns_updated_entity(mock_client: MagicMock) -> None:
     """update_entity returns the updated entity."""
     node = _make_node_mock(
         ["Entity", "Character"],
@@ -235,7 +237,7 @@ async def test_update_entity_returns_updated_entity(mock_client):
 
 
 @pytest.mark.anyio
-async def test_delete_entity_uses_detach_delete(mock_client):
+async def test_delete_entity_uses_detach_delete(mock_client: MagicMock) -> None:
     """delete_entity generates Cypher MATCH + DETACH DELETE."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -246,7 +248,7 @@ async def test_delete_entity_uses_detach_delete(mock_client):
 
 
 @pytest.mark.anyio
-async def test_delete_entity_nonexistent_succeeds_silently(mock_client):
+async def test_delete_entity_nonexistent_succeeds_silently(mock_client: MagicMock) -> None:
     """delete_entity for non-existent id succeeds silently."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -258,7 +260,7 @@ async def test_delete_entity_nonexistent_succeeds_silently(mock_client):
 
 
 @pytest.mark.anyio
-async def test_list_entities_no_filter(mock_client):
+async def test_list_entities_no_filter(mock_client: MagicMock) -> None:
     """list_entities without type filter queries MATCH (n:Entity) RETURN n."""
     node1 = _make_node_mock(["Entity", "Character"], {"id": "c1", "name": "Alice", "body": "desc", "unseen": False, "inventory": []})
     node2 = _make_node_mock(["Entity", "Location"], {"id": "l1", "name": "Tavern", "body": "desc"})
@@ -272,7 +274,7 @@ async def test_list_entities_no_filter(mock_client):
 
 
 @pytest.mark.anyio
-async def test_list_entities_with_type_filter(mock_client):
+async def test_list_entities_with_type_filter(mock_client: MagicMock) -> None:
     """list_entities with type filter queries MATCH (n:Character) RETURN n."""
     node = _make_node_mock(["Entity", "Character"], {"id": "c1", "name": "Alice", "body": "desc", "unseen": False, "inventory": []})
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
@@ -285,7 +287,7 @@ async def test_list_entities_with_type_filter(mock_client):
 
 
 @pytest.mark.anyio
-async def test_list_entities_returns_empty_list(mock_client):
+async def test_list_entities_returns_empty_list(mock_client: MagicMock) -> None:
     """list_entities returns empty list when result_set is empty."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -295,7 +297,7 @@ async def test_list_entities_returns_empty_list(mock_client):
 
 
 @pytest.mark.anyio
-async def test_list_entities_invalid_type_raises(mock_client):
+async def test_list_entities_invalid_type_raises(mock_client: MagicMock) -> None:
     """list_entities raises QueryError for unknown entity type."""
     with pytest.raises(QueryError, match="Unknown entity type"):
         await list_entities(mock_client, entity_type="Bogus")
@@ -305,7 +307,7 @@ async def test_list_entities_invalid_type_raises(mock_client):
 
 
 @pytest.mark.anyio
-async def test_create_entity_non_constraint_error_raises_query_error(mock_client, sample_character):
+async def test_create_entity_non_constraint_error_raises_query_error(mock_client: MagicMock, sample_character: Character) -> None:
     """create_entity raises QueryError for non-constraint exceptions."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -317,7 +319,7 @@ async def test_create_entity_non_constraint_error_raises_query_error(mock_client
 
 
 @pytest.mark.anyio
-async def test_find_entities_single_filter(mock_client):
+async def test_find_entities_single_filter(mock_client: MagicMock) -> None:
     """find_entities with name='Alice' generates WHERE clause."""
     node = _make_node_mock(["Entity", "Character"], {"id": "c1", "name": "Alice", "body": "desc", "unseen": False, "inventory": []})
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
@@ -331,7 +333,7 @@ async def test_find_entities_single_filter(mock_client):
 
 
 @pytest.mark.anyio
-async def test_find_entities_multiple_filters(mock_client):
+async def test_find_entities_multiple_filters(mock_client: MagicMock) -> None:
     """find_entities with multiple filters generates AND conditions."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -342,7 +344,7 @@ async def test_find_entities_multiple_filters(mock_client):
 
 
 @pytest.mark.anyio
-async def test_find_entities_returns_empty_list(mock_client):
+async def test_find_entities_returns_empty_list(mock_client: MagicMock) -> None:
     """find_entities returns empty list when no matches."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 

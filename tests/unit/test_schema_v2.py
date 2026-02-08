@@ -1,5 +1,7 @@
 """Tests for schema v2 migration: Memory indexes and vector index."""
 
+from collections.abc import Sequence
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,7 +12,7 @@ from sidestage.graph.schema import (
 from sidestage.graph.errors import SchemaError
 
 
-def _make_client(query_side_effects):
+def _make_client(query_side_effects: Sequence[MagicMock | Exception]) -> MagicMock:
     """Create a mock GraphClient with a sequence of query results."""
     client = MagicMock()
     mock_graph = MagicMock()
@@ -26,7 +28,7 @@ def _ok():
     return result
 
 
-def _version_result(version):
+def _version_result(version: int) -> MagicMock:
     """Return a MagicMock representing a SchemaVersion query result."""
     result = MagicMock()
     result.result_set = [[version]]

@@ -1,4 +1,6 @@
 """Unit tests for graph query functions."""
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,7 +18,7 @@ from sidestage.schemas import Character, ChatMessage, Event, Location
 
 
 @pytest.fixture
-def mock_client():
+def mock_client() -> MagicMock:
     """Create a mock GraphClient with an async query method."""
     client = MagicMock()
     client.graph = MagicMock()
@@ -24,7 +26,7 @@ def mock_client():
     return client
 
 
-def _make_node_mock(labels, properties):
+def _make_node_mock(labels: list[str], properties: dict[str, Any]) -> MagicMock:
     """Helper to create a mock graph node."""
     node = MagicMock()
     node.labels = labels
@@ -36,7 +38,7 @@ def _make_node_mock(labels, properties):
 
 
 @pytest.mark.anyio
-async def test_characters_at_location_returns_characters(mock_client):
+async def test_characters_at_location_returns_characters(mock_client: MagicMock) -> None:
     """characters_at_location returns characters LOCATED_IN the given location."""
     node = _make_node_mock(
         ["Entity", "Character"],
@@ -56,7 +58,7 @@ async def test_characters_at_location_returns_characters(mock_client):
 
 
 @pytest.mark.anyio
-async def test_characters_at_location_empty(mock_client):
+async def test_characters_at_location_empty(mock_client: MagicMock) -> None:
     """characters_at_location returns empty list for empty location."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -66,7 +68,7 @@ async def test_characters_at_location_empty(mock_client):
 
 
 @pytest.mark.anyio
-async def test_characters_at_location_query_error(mock_client):
+async def test_characters_at_location_query_error(mock_client: MagicMock) -> None:
     """characters_at_location raises QueryError on failure."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -78,7 +80,7 @@ async def test_characters_at_location_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_connected_locations_both_directions(mock_client):
+async def test_connected_locations_both_directions(mock_client: MagicMock) -> None:
     """connected_locations returns all CONNECTS_TO locations (both directions)."""
     node1 = _make_node_mock(
         ["Entity", "Location"],
@@ -103,7 +105,7 @@ async def test_connected_locations_both_directions(mock_client):
 
 
 @pytest.mark.anyio
-async def test_connected_locations_empty(mock_client):
+async def test_connected_locations_empty(mock_client: MagicMock) -> None:
     """connected_locations returns empty list when no connections."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -113,7 +115,7 @@ async def test_connected_locations_empty(mock_client):
 
 
 @pytest.mark.anyio
-async def test_connected_locations_query_error(mock_client):
+async def test_connected_locations_query_error(mock_client: MagicMock) -> None:
     """connected_locations raises QueryError on failure."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -125,7 +127,7 @@ async def test_connected_locations_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_scene_events_returns_events(mock_client):
+async def test_scene_events_returns_events(mock_client: MagicMock) -> None:
     """scene_events returns all events in a scene via HAS_EVENT."""
     node = _make_node_mock(
         ["Entity", "Event"],
@@ -147,7 +149,7 @@ async def test_scene_events_returns_events(mock_client):
 
 
 @pytest.mark.anyio
-async def test_scene_events_with_since_gametime(mock_client):
+async def test_scene_events_with_since_gametime(mock_client: MagicMock) -> None:
     """scene_events with since_gametime filters by gametime."""
     node = _make_node_mock(
         ["Entity", "Event"],
@@ -168,7 +170,7 @@ async def test_scene_events_with_since_gametime(mock_client):
 
 
 @pytest.mark.anyio
-async def test_scene_events_returns_chat_messages(mock_client):
+async def test_scene_events_returns_chat_messages(mock_client: MagicMock) -> None:
     """scene_events correctly deserializes ChatMessage subtypes."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
@@ -187,7 +189,7 @@ async def test_scene_events_returns_chat_messages(mock_client):
 
 
 @pytest.mark.anyio
-async def test_scene_events_empty(mock_client):
+async def test_scene_events_empty(mock_client: MagicMock) -> None:
     """scene_events returns empty list when scene has no events."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -197,7 +199,7 @@ async def test_scene_events_empty(mock_client):
 
 
 @pytest.mark.anyio
-async def test_scene_events_query_error(mock_client):
+async def test_scene_events_query_error(mock_client: MagicMock) -> None:
     """scene_events raises QueryError on failure."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -209,7 +211,7 @@ async def test_scene_events_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_depth_1(mock_client):
+async def test_entity_graph_depth_1(mock_client: MagicMock) -> None:
     """entity_graph at depth=1 returns entity and directly connected entities."""
     center_node = _make_node_mock(
         ["Entity", "Character"],
@@ -235,7 +237,7 @@ async def test_entity_graph_depth_1(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_depth_2(mock_client):
+async def test_entity_graph_depth_2(mock_client: MagicMock) -> None:
     """entity_graph at depth=2 returns two levels of connections."""
     center_node = _make_node_mock(
         ["Entity", "Character"],
@@ -263,7 +265,7 @@ async def test_entity_graph_depth_2(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_not_found(mock_client):
+async def test_entity_graph_not_found(mock_client: MagicMock) -> None:
     """entity_graph returns None entity when center not found."""
     mock_client.graph.query.return_value = MagicMock(result_set=[])
 
@@ -274,7 +276,7 @@ async def test_entity_graph_not_found(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_no_neighbors(mock_client):
+async def test_entity_graph_no_neighbors(mock_client: MagicMock) -> None:
     """entity_graph returns entity with empty related when no neighbors."""
     center_node = _make_node_mock(
         ["Entity", "Character"],
@@ -291,7 +293,7 @@ async def test_entity_graph_no_neighbors(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_query_error(mock_client):
+async def test_entity_graph_query_error(mock_client: MagicMock) -> None:
     """entity_graph raises QueryError on failure."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 
@@ -300,7 +302,7 @@ async def test_entity_graph_query_error(mock_client):
 
 
 @pytest.mark.anyio
-async def test_entity_graph_invalid_depth(mock_client):
+async def test_entity_graph_invalid_depth(mock_client: MagicMock) -> None:
     """entity_graph raises ValueError for invalid depth."""
     with pytest.raises(ValueError, match="positive integer"):
         await entity_graph(mock_client, "char_alice", depth=0)

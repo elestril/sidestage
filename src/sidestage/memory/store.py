@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from sidestage.memory.models import Memory, MemoryType, ContextMemories
 from sidestage.graph.errors import QueryError
@@ -28,7 +28,7 @@ _TYPE_TO_SUBLABEL: dict[MemoryType, str] = {
 }
 
 
-def _node_to_memory(node) -> Memory:
+def _node_to_memory(node: Any) -> Memory:
     """Convert a FalkorDB node to a Memory model."""
     props = dict(node.properties)
     # FalkorDB may store embedding as a special vector type; convert if needed

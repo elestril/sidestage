@@ -1,9 +1,9 @@
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any, List
+from typing import AsyncGenerator, Optional, Dict, Any, List, cast
 from datetime import datetime
 import uuid
 
-from sidestage.schemas import Scene, ChatRequest, ChatMessage, Event
+from sidestage.schemas import Character, Scene, ChatRequest, ChatMessage, Event
 from sidestage.entities import entity_to_markdown
 from sidestage.bus import SceneMessageBus
 from sidestage.character import CharacterLogic
@@ -108,7 +108,7 @@ class SceneLogic:
 
         for char_data in all_chars:
             char_logic = CharacterLogic(
-                char_data, self,
+                cast(Character, char_data), self,
                 graph_client=self.graph_client,
                 embed_config=self.embed_config,
                 health=self.health,

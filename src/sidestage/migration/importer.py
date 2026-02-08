@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from sidestage.graph.entities import create_entity, list_entities
 from sidestage.graph.relationships import link
@@ -31,7 +31,7 @@ async def import_campaign(
     campaign: Campaign,
     parse_result: ParseResult,
     sync_manager: SyncManager | None = None,
-    active_scenes: dict | None = None,
+    active_scenes: dict[str, Any] | None = None,
 ) -> MigrationImportResult:
     """Import parsed entities and memories into FalkorDB, replacing the existing graph.
 
@@ -149,6 +149,7 @@ async def import_campaign(
 async def _drop_and_recreate_graph(campaign: Campaign) -> None:
     """Drop the existing graph and reinitialize the schema."""
     client = campaign.graph_client
+    assert client is not None, "graph_client must not be None"
     await client.graph.delete()
     client.graph = client.db.select_graph(client.graph_name)
     await initialize_schema(

@@ -3,12 +3,14 @@
 import time
 import uuid
 
+from typing import Any
+
 import pytest
 
 from sidestage.memory.models import Memory, MemoryType, ContextResult, ContextMemories
 
 
-def make_memory(**overrides):
+def make_memory(**overrides: Any) -> Memory:
     """Create a Memory with sensible test defaults."""
     defaults = {
         "content": "The tavern is dimly lit.",
@@ -17,7 +19,7 @@ def make_memory(**overrides):
         "target_id": "scene_001",
     }
     defaults.update(overrides)
-    return Memory(**defaults)
+    return Memory(**defaults)  # type: ignore[arg-type]
 
 
 class TestMemoryType:
@@ -91,7 +93,9 @@ class TestContextMemories:
             character_memories={"char_1": char_mem},
             world_facts=[fact],
         )
+        assert cm.common_scene_memory is not None
         assert cm.common_scene_memory.content == "common scene"
+        assert cm.private_scene_memory is not None
         assert cm.private_scene_memory.content == "private scene"
         assert cm.character_memories["char_1"].content == "char memory"
         assert len(cm.world_facts) == 1
