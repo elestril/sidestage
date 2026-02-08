@@ -49,6 +49,10 @@
     "section-08-routes-and-frontend": {
       "status": "complete",
       "commit_hash": "5d90462"
+    },
+    "section-09-integration-tests": {
+      "status": "complete",
+      "commit_hash": "d9ef0c8"
     }
   },
   "pre_commit": {

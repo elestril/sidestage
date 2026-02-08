@@ -202,7 +202,7 @@ async def test_connect_calls_schema_initialization():
         config = GraphConfig(graph_name="test")
         client = await connect(config)
 
-        mock_init.assert_awaited_once_with(client)
+        mock_init.assert_awaited_once_with(client, vector_dimension=None)
 
 
 # --- close() ---
