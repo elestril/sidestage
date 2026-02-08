@@ -8,7 +8,7 @@ and FalkorDB graph node properties.
 
 ## Functions
 
-### `create_entity(client: GraphClient, entity: Entity) -> Entity` *async*
+### `create_entity(client: GraphClient, entity: EntityModel) -> EntityModel` *async*
 
 Create a new entity node in the graph.
 
@@ -21,32 +21,32 @@ Delete an entity and all its relationships.
 
 Succeeds silently if the entity does not exist.
 
-### `entity_to_labels(entity: Entity) -> list[str]`
+### `entity_to_labels(entity: EntityModel) -> list[str]`
 
 Return the FalkorDB labels for an entity instance.
 
-### `entity_to_properties(entity: Entity) -> dict[str, Any]`
+### `entity_to_properties(entity: EntityModel) -> dict[str, Any]`
 
 Convert a Pydantic entity to a dict of graph node properties.
 
 Excludes fields listed in EXCLUDED_FIELDS for the entity type,
 and omits None values.
 
-### `find_entities(client: GraphClient, filters: Any) -> list[Entity]` *async*
+### `find_entities(client: GraphClient, filters: Any) -> list[EntityModel]` *async*
 
 Find entities matching all given property filters.
 
-### `get_entity(client: GraphClient, entity_id: str) -> Entity | None` *async*
+### `get_entity(client: GraphClient, entity_id: str) -> EntityModel | None` *async*
 
 Retrieve an entity by ID, or None if not found.
 
-### `list_entities(client: GraphClient, entity_type: str | None = None) -> list[Entity]` *async*
+### `list_entities(client: GraphClient, entity_type: str | None = None) -> list[EntityModel]` *async*
 
 List all entities, optionally filtered by type label.
 
 The entity_type string is validated against known labels.
 
-### `node_to_entity(labels: list[str], properties: dict[str, Any]) -> Entity`
+### `node_to_entity(labels: list[str], properties: dict[str, Any]) -> EntityModel`
 
 Reconstruct a Pydantic entity from graph node labels and properties.
 
@@ -55,7 +55,7 @@ and picks the first matching label.
 
 Raises QueryError if no matching label is found.
 
-### `update_entity(client: GraphClient, entity_id: str, updates: dict[str, Any]) -> Entity` *async*
+### `update_entity(client: GraphClient, entity_id: str, updates: dict[str, Any]) -> EntityModel` *async*
 
 Update specified properties on an entity node.
 

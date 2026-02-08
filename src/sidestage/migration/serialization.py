@@ -11,29 +11,29 @@ from collections import OrderedDict
 from typing import Any
 
 from sidestage.memory.models import Memory
-from sidestage.schemas import (
-    Character,
-    ChatMessage,
-    Entity,
-    Event,
-    FastForwardEvent,
-    Item,
-    JoinEvent,
-    LeaveEvent,
-    Location,
-    Scene,
+from sidestage.models import (
+    CharacterModel,
+    ChatMessageModel,
+    EntityModel,
+    EventModel,
+    FastForwardEventModel,
+    ItemModel,
+    JoinEventModel,
+    LeaveEventModel,
+    LocationModel,
+    SceneModel,
 )
 
-TYPE_MAP: dict[str, type[Entity]] = {
-    "Character": Character,
-    "Location": Location,
-    "Item": Item,
-    "Scene": Scene,
-    "Event": Event,
-    "ChatMessage": ChatMessage,
-    "JoinEvent": JoinEvent,
-    "LeaveEvent": LeaveEvent,
-    "FastForwardEvent": FastForwardEvent,
+TYPE_MAP: dict[str, type[EntityModel]] = {
+    "Character": CharacterModel,
+    "Location": LocationModel,
+    "Item": ItemModel,
+    "Scene": SceneModel,
+    "Event": EventModel,
+    "ChatMessage": ChatMessageModel,
+    "JoinEvent": JoinEventModel,
+    "LeaveEvent": LeaveEventModel,
+    "FastForwardEvent": FastForwardEventModel,
 }
 
 TYPE_TO_SUBDIR: dict[str, str] = {
@@ -59,14 +59,14 @@ SUBDIR_TO_DEFAULT_TYPE: dict[str, str] = {
 _PRIORITY_KEYS = ["name", "id", "type"]
 
 
-def entity_to_frontmatter_dict(entity: Entity) -> tuple[dict[str, Any], str]:
+def entity_to_frontmatter_dict(entity: EntityModel) -> tuple[dict[str, Any], str]:
     """Convert entity to (frontmatter_dict, body_markdown)."""
     data = entity.model_dump()
     body = data.pop("body", "")
-    data["type"] = entity.__class__.__name__
+    data["type"] = entity.entity_type
 
     # Exclude messages from Scene (stored as chatlog.log)
-    if isinstance(entity, Scene):
+    if isinstance(entity, SceneModel):
         data.pop("messages", None)
 
     # Build ordered dict: name, id, type first, then remaining sorted
@@ -82,7 +82,7 @@ def entity_to_frontmatter_dict(entity: Entity) -> tuple[dict[str, Any], str]:
 
 def frontmatter_dict_to_entity(
     data: dict[str, Any], body: str, type_hint: str | None = None
-) -> Entity:
+) -> EntityModel:
     """Reconstruct entity from frontmatter dict + body."""
     data = dict(data)  # copy to avoid mutating caller's dict
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from opentelemetry import trace
 
-from sidestage.schemas import Character, Event, ChatMessage
+from sidestage.models import CharacterModel, EventModel, ChatMessageModel
 from sidestage.agent import LiteLLMAgent
 from sidestage.tracing.middleware import record_error
 
@@ -28,7 +28,7 @@ class AgentActor:
     """
     def __init__(
         self,
-        character: Character,
+        character: CharacterModel,
         scene_logic: Any,
         graph_client: "GraphClient | None" = None,
         embed_config: "LLMConfig | None" = None,
@@ -102,17 +102,17 @@ class AgentActor:
             debug_mode=base_agent.debug_mode
         )
 
-    async def on_event(self, event: Event) -> None:
+    async def on_event(self, event: EventModel) -> None:
         """
         Handle an event dispatched by the scene's queue worker.
 
-        Called directly by SceneLogic._dispatch_to_npcs for user-originated
+        Called directly by Scene._dispatch_to_npcs for user-originated
         messages. Generates a response and puts it back on the queue.
 
         Args:
             event (Event): The event to process.
         """
-        if not isinstance(event, ChatMessage):
+        if not isinstance(event, ChatMessageModel):
             return
 
         with tracer.start_as_current_span("agent.on_event") as span:
@@ -155,7 +155,7 @@ class AgentActor:
                 logger.exception("Error in on_event for %s", self.character.name)
                 raise
 
-class CharacterLogic:
+class Character:
     """
     Runtime wrapper for a Character entity within a Scene.
     
@@ -164,7 +164,7 @@ class CharacterLogic:
     """
     def __init__(
         self,
-        character: Character,
+        character: CharacterModel,
         scene_logic: Any,
         graph_client: "GraphClient | None" = None,
         embed_config: "LLMConfig | None" = None,

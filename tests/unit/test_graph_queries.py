@@ -11,7 +11,7 @@ from sidestage.graph.queries import (
     scene_events,
     entity_graph,
 )
-from sidestage.schemas import Character, ChatMessage, Event, Location
+from sidestage.models import CharacterModel, ChatMessageModel, EventModel, LocationModel
 
 
 # --- Fixtures ---
@@ -49,7 +49,7 @@ async def test_characters_at_location_returns_characters(mock_client: MagicMock)
     result = await characters_at_location(mock_client, "loc_tavern")
 
     assert len(result) == 1
-    assert isinstance(result[0], Character)
+    assert isinstance(result[0], CharacterModel)
     assert result[0].id == "char_1"
 
     cypher = mock_client.graph.query.call_args[0][0]
@@ -95,7 +95,7 @@ async def test_connected_locations_both_directions(mock_client: MagicMock) -> No
     result = await connected_locations(mock_client, "loc_tavern")
 
     assert len(result) == 2
-    assert all(isinstance(loc, Location) for loc in result)
+    assert all(isinstance(loc, LocationModel) for loc in result)
 
     cypher = mock_client.graph.query.call_args[0][0]
     assert "CONNECTS_TO" in cypher
@@ -141,7 +141,7 @@ async def test_scene_events_returns_events(mock_client: MagicMock) -> None:
     result = await scene_events(mock_client, "scene_01")
 
     assert len(result) == 1
-    assert isinstance(result[0], Event)
+    assert isinstance(result[0], EventModel)
 
     cypher = mock_client.graph.query.call_args[0][0]
     assert "HAS_EVENT" in cypher
@@ -171,7 +171,7 @@ async def test_scene_events_with_since_gametime(mock_client: MagicMock) -> None:
 
 @pytest.mark.anyio
 async def test_scene_events_returns_chat_messages(mock_client: MagicMock) -> None:
-    """scene_events correctly deserializes ChatMessage subtypes."""
+    """scene_events correctly deserializes ChatMessageModel subtypes."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
         {
@@ -185,7 +185,7 @@ async def test_scene_events_returns_chat_messages(mock_client: MagicMock) -> Non
     result = await scene_events(mock_client, "scene_01")
 
     assert len(result) == 1
-    assert isinstance(result[0], ChatMessage)
+    assert isinstance(result[0], ChatMessageModel)
 
 
 @pytest.mark.anyio
@@ -227,10 +227,10 @@ async def test_entity_graph_depth_1(mock_client: MagicMock) -> None:
 
     result = await entity_graph(mock_client, "char_alice", depth=1)
 
-    assert isinstance(result["entity"], Character)
+    assert isinstance(result["entity"], CharacterModel)
     assert result["entity"].id == "char_alice"
     assert len(result["related"]) == 1
-    assert isinstance(result["related"][0], Location)
+    assert isinstance(result["related"][0], LocationModel)
 
     cypher = mock_client.graph.query.call_args[0][0]
     assert "1..1" in cypher or "*1" in cypher
@@ -257,7 +257,7 @@ async def test_entity_graph_depth_2(mock_client: MagicMock) -> None:
 
     result = await entity_graph(mock_client, "char_alice", depth=2)
 
-    assert isinstance(result["entity"], Character)
+    assert isinstance(result["entity"], CharacterModel)
     assert len(result["related"]) == 2
 
     cypher = mock_client.graph.query.call_args[0][0]
@@ -288,7 +288,7 @@ async def test_entity_graph_no_neighbors(mock_client: MagicMock) -> None:
 
     result = await entity_graph(mock_client, "char_alice")
 
-    assert isinstance(result["entity"], Character)
+    assert isinstance(result["entity"], CharacterModel)
     assert result["related"] == []
 
 

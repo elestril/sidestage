@@ -192,7 +192,7 @@ async def test_upsert_scene_memory_delegates_correctly(mock_client: MagicMock) -
     """upsert_scene_memory creates private scene memory with correct owner_id and target_id."""
     node = _make_node_mock({
         "id": "mem-1",
-        "content": "Scene memory",
+        "content": "SceneModel memory",
         "memory_type": "scene",
         "visibility": "private",
         "owner_id": "char-1",
@@ -203,7 +203,7 @@ async def test_upsert_scene_memory_delegates_correctly(mock_client: MagicMock) -
     })
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
 
-    result = await upsert_scene_memory(mock_client, "char-1", "scene-1", "Scene memory")
+    result = await upsert_scene_memory(mock_client, "char-1", "scene-1", "SceneModel memory")
 
     cypher = mock_client.graph.query.call_args[0][0]
     assert "Memory:SceneMemory" in cypher
@@ -317,7 +317,7 @@ async def test_get_scene_memory_returns_memory(mock_client: MagicMock) -> None:
     """get_scene_memory returns memory for matching owner_id + scene_id."""
     node = _make_node_mock({
         "id": "mem-1",
-        "content": "Scene content",
+        "content": "SceneModel content",
         "memory_type": "scene",
         "visibility": "private",
         "owner_id": "char-1",
@@ -331,7 +331,7 @@ async def test_get_scene_memory_returns_memory(mock_client: MagicMock) -> None:
     result = await get_scene_memory(mock_client, "char-1", "scene-1")
 
     assert isinstance(result, Memory)
-    assert result.content == "Scene content"
+    assert result.content == "SceneModel content"
 
 
 @pytest.mark.anyio
@@ -423,7 +423,7 @@ async def test_get_memories_for_context_returns_context_memories(mock_client: Ma
         "updated_at": 1000.0,
         "access_count": 0,
     })
-    # Character memory query
+    # CharacterModel memory query
     char_node = _make_node_mock({
         "id": "mem-char",
         "content": "About char-2",
@@ -550,7 +550,7 @@ async def test_get_all_memories_filters_by_type(mock_client: MagicMock) -> None:
     """get_all_memories filters by memory_type when specified."""
     node = _make_node_mock({
         "id": "mem-1",
-        "content": "Scene memory",
+        "content": "SceneModel memory",
         "memory_type": "scene",
         "visibility": "private",
         "owner_id": "char-1",

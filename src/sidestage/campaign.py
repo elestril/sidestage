@@ -9,8 +9,9 @@ from opentelemetry import trace
 from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
-from sidestage.scene import SceneLogic
-from sidestage.schemas import Scene, Character, Location, Item, Entity, Event, ChatResponse, ChatMessage, ChatRequest
+from sidestage.scene import Scene
+from sidestage.models import SceneModel, CharacterModel, LocationModel, ItemModel, EntityModel, EventModel, ChatMessageModel
+from sidestage.schemas import ChatResponse, ChatRequest
 from sidestage.entities import entity_to_markdown, markdown_to_entity
 from sidestage.migration.parser import parse_directory
 from sidestage.graph import GraphConfig, GraphClient, connect, close
@@ -183,18 +184,18 @@ class Campaign:
             count = 0
             for entity in result.entities:
                 try:
-                    if isinstance(entity, Character):
+                    if isinstance(entity, CharacterModel):
                         self.storage.add_character(entity)
-                    elif isinstance(entity, Location):
+                    elif isinstance(entity, LocationModel):
                         self.storage.add_location(entity)
-                    elif isinstance(entity, Item):
+                    elif isinstance(entity, ItemModel):
                         self.storage.add_item(entity)
-                    elif isinstance(entity, Scene):
+                    elif isinstance(entity, SceneModel):
                         self.storage.add_scene(entity)
-                    elif isinstance(entity, Event):
+                    elif isinstance(entity, EventModel):
                         self.storage.add_event(entity)
                     count += 1
-                    logger.info(f"Loaded default {type(entity).__name__}: {entity.name} ({entity.id})")
+                    logger.info(f"Loaded default {entity.entity_type}: {entity.name} ({entity.id})")
                 except Exception as e:
                     logger.error(f"Error loading default entity {entity.id}: {e}")
 
@@ -321,7 +322,7 @@ class Campaign:
         result = []
         for e in entities:
             d = e.model_dump()
-            d["type"] = e.__class__.__name__
+            d["type"] = e.entity_type
             result.append(d)
         return result
 
@@ -347,13 +348,13 @@ class Campaign:
                 if props:
                     await graph_update_entity(self.graph_client, entity_id, props)
             else:
-                if isinstance(entity, Character):
+                if isinstance(entity, CharacterModel):
                     self.storage.update_character(entity)
-                elif isinstance(entity, Location):
+                elif isinstance(entity, LocationModel):
                     self.storage.update_location(entity)
-                elif isinstance(entity, Item):
+                elif isinstance(entity, ItemModel):
                     self.storage.update_item(entity)
-                elif isinstance(entity, Scene):
+                elif isinstance(entity, SceneModel):
                     self.storage.update_scene(entity)
             return True
         except Exception as e:
@@ -374,20 +375,20 @@ class Campaign:
             if not entity_type:
                 existing = next((e for e in self.storage.list_all_entities() if e.id == entity_id), None)
                 if existing:
-                    entity_type = existing.__class__.__name__
+                    entity_type = existing.entity_type
 
             if entity_type == "Character":
-                obj = Character(**data)
+                obj = CharacterModel(**data)
             elif entity_type == "Location":
-                obj = Location(**data)
+                obj = LocationModel(**data)
             elif entity_type == "Item":
-                obj = Item(**data)
+                obj = ItemModel(**data)
             elif entity_type == "Scene":
-                obj = Scene(**data)
+                obj = SceneModel(**data)
             else:
                 raise ValueError(f"Unknown entity type: {entity_type}")
 
-            if isinstance(obj, Character):
+            if isinstance(obj, CharacterModel):
                 self.storage.update_character(obj)
             return True
         except Exception as e:
@@ -425,15 +426,15 @@ class Campaign:
                 if self.graph_client is not None:
                     await graph_create_entity(self.graph_client, entity)
                 else:
-                    if isinstance(entity, Character):
+                    if isinstance(entity, CharacterModel):
                         self.storage.add_character(entity)
-                    elif isinstance(entity, Location):
+                    elif isinstance(entity, LocationModel):
                         self.storage.add_location(entity)
-                    elif isinstance(entity, Item):
+                    elif isinstance(entity, ItemModel):
                         self.storage.add_item(entity)
-                    elif isinstance(entity, Scene):
+                    elif isinstance(entity, SceneModel):
                         self.storage.add_scene(entity)
-                    elif isinstance(entity, Event):
+                    elif isinstance(entity, EventModel):
                         self.storage.add_event(entity)
                 count += 1
             except Exception as e:
@@ -448,11 +449,11 @@ class Campaign:
             scenes = self.storage.list_scenes()
         return [s.model_dump() for s in scenes]
 
-    async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> Scene:
+    async def create_scene(self, name: str, description: str, current_gametime: Optional[int]) -> SceneModel:
         """Create and persist a new scene."""
         import uuid
         scene_id = f"scene_{str(uuid.uuid4())[:8]}"
-        scene = Scene(
+        scene = SceneModel(
             id=scene_id,
             name=name,
             body=description,
@@ -464,22 +465,22 @@ class Campaign:
             self.storage.add_scene(scene)
         return scene
 
-    def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessage]]:
+    def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessageModel]]:
         """Get the message history for a specific scene."""
         scene_schema = self.storage.get_scene(scene_id)
         if not scene_schema:
             return None
         return scene_schema.messages
 
-    def get_scene_object(self, scene_id: str) -> Optional[SceneLogic]:
+    def get_scene_object(self, scene_id: str) -> Optional[Scene]:
         """
-        Factory to get a SceneLogic object for the given ID.
+        Factory to get a Scene object for the given ID.
         
         Args:
             scene_id (str): The scene ID.
 
         Returns:
-            Optional[SceneLogic]: The logic object, or None if scene doesn't exist.
+            Optional[Scene]: The logic object, or None if scene doesn't exist.
         """
         data = self.storage.get_scene(scene_id)
         if not data:
@@ -487,7 +488,7 @@ class Campaign:
         embed_config = self.config.llms.get("embed")
         default_llm = self.get_llm_config("default")
         context_limit = getattr(default_llm, "context_limit", None) or 4096
-        return SceneLogic(
+        return Scene(
             self.storage, self.agent, data,
             graph_client=self.graph_client,
             embed_config=embed_config,

@@ -1,12 +1,12 @@
 import asyncio
 import logging
 from typing import Callable, Awaitable, Optional
-from sidestage.schemas import Event
+from sidestage.models import EventModel
 
 logger = logging.getLogger(__name__)
 
 # Type for the event handler callback
-EventHandler = Callable[[Event], Awaitable[None]]
+EventHandler = Callable[[EventModel], Awaitable[None]]
 
 class EventQueue:
     """
@@ -16,7 +16,7 @@ class EventQueue:
     No subscriptions, no hooks — the handler does all the work.
     """
     def __init__(self):
-        self.queue: asyncio.Queue[Event] = asyncio.Queue()
+        self.queue: asyncio.Queue[EventModel] = asyncio.Queue()
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -39,7 +39,7 @@ class EventQueue:
                 pass
         logger.info("EventQueue stopped.")
 
-    async def put(self, event: Event) -> None:
+    async def put(self, event: EventModel) -> None:
         """Add an event to the queue."""
         await self.queue.put(event)
 

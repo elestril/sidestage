@@ -32,6 +32,7 @@ Auto-generated from source. Run `python scripts/generate_api_docs.py` to regener
 - [sidestage.migration.parser](sidestage.migration.parser.md)
 - [sidestage.migration.serialization](sidestage.migration.serialization.md)
 - [sidestage.migration.validator](sidestage.migration.validator.md)
+- [sidestage.models](sidestage.models.md)
 - [sidestage.orchestrator](sidestage.orchestrator.md)
 - [sidestage.scene](sidestage.scene.md)
 - [sidestage.schemas](sidestage.schemas.md)

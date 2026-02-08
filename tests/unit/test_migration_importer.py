@@ -10,7 +10,7 @@ from sidestage.health import CampaignHealth, HealthStatus
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.migration.importer import import_campaign
 from sidestage.migration.models import MigrationValidationIssue, ParseResult
-from sidestage.schemas import Character, Entity, Event, Item, JoinEvent, Location, Scene
+from sidestage.models import CharacterModel, EntityModel, EventModel, ItemModel, JoinEventModel, LocationModel, SceneModel
 
 
 # --- Fixtures ---
@@ -56,30 +56,30 @@ def mock_sync_manager() -> MagicMock:
 
 
 @pytest.fixture
-def sample_entities() -> list[Entity]:
-    """Return a list of representative Entity objects."""
+def sample_entities() -> list[EntityModel]:
+    """Return a list of representative EntityModel objects."""
     return [
-        Character(
+        CharacterModel(
             name="Eldric the Bold", body="A brave warrior.", id="char_eldric",
             location_id="loc_tavern", inventory=["item_sword"],
         ),
-        Character(
+        CharacterModel(
             name="Alice the Merchant", body="A shrewd merchant.", id="char_alice",
         ),
-        Location(
+        LocationModel(
             name="The Rusty Tavern", body="A dingy tavern.", id="loc_tavern",
             connected_locations=["loc_square"],
         ),
-        Location(
+        LocationModel(
             name="Town Square", body="The town square.", id="loc_square",
             connected_locations=["loc_tavern"],
         ),
-        Item(name="Flame Tongue Sword", body="A fiery blade.", id="item_sword"),
-        Scene(
+        ItemModel(name="Flame Tongue Sword", body="A fiery blade.", id="item_sword"),
+        SceneModel(
             name="Tavern Brawl", body="A brawl erupts.", id="scene_brawl",
             location_id="loc_tavern", events=["evt_join"],
         ),
-        JoinEvent(
+        JoinEventModel(
             name="Eldric Joins Brawl", body="Eldric enters the fray.",
             id="evt_join", scene_id="scene_brawl", gametime=3600,
             walltime="2026-01-15T14:30:00Z", actor_id="actor_1",
@@ -112,7 +112,7 @@ def sample_memories() -> list[Memory]:
 
 
 @pytest.fixture
-def sample_parse_result(sample_entities: list[Entity], sample_memories: list[Memory]) -> ParseResult:
+def sample_parse_result(sample_entities: list[EntityModel], sample_memories: list[Memory]) -> ParseResult:
     """Return a ParseResult with representative entities, memories, and chatlogs."""
     return ParseResult(
         entities=sample_entities,
@@ -215,7 +215,7 @@ async def test_graph_drop_failure_aborts_import(mock_campaign: MagicMock, sample
     assert result.processed_memories == 0
 
 
-# --- Entity insertion tests ---
+# --- EntityModel insertion tests ---
 
 
 @pytest.mark.anyio
@@ -239,8 +239,8 @@ async def test_creates_located_in_edges_for_characters(mock_campaign: MagicMock,
     """Characters with a location_id get a LOCATED_IN edge to that location."""
     parse_result = ParseResult(
         entities=[
-            Character(name="A", body="", id="c1", location_id="loc1"),
-            Location(name="B", body="", id="loc1"),
+            CharacterModel(name="A", body="", id="c1", location_id="loc1"),
+            LocationModel(name="B", body="", id="loc1"),
         ],
         memories=[], chatlogs={}, errors=[],
     )
@@ -263,8 +263,8 @@ async def test_creates_connects_to_edges_deduplicated(mock_campaign: MagicMock, 
     """CONNECTS_TO edges are created once per pair, not twice for A->B and B->A."""
     parse_result = ParseResult(
         entities=[
-            Location(name="A", body="", id="loc1", connected_locations=["loc2"]),
-            Location(name="B", body="", id="loc2", connected_locations=["loc1"]),
+            LocationModel(name="A", body="", id="loc1", connected_locations=["loc2"]),
+            LocationModel(name="B", body="", id="loc2", connected_locations=["loc1"]),
         ],
         memories=[], chatlogs={}, errors=[],
     )
@@ -284,8 +284,8 @@ async def test_creates_at_location_edges_for_scenes(mock_campaign: MagicMock, mo
     """Scenes with a location_id get an AT_LOCATION edge to that location."""
     parse_result = ParseResult(
         entities=[
-            Scene(name="S", body="", id="s1", location_id="loc1"),
-            Location(name="L", body="", id="loc1"),
+            SceneModel(name="S", body="", id="s1", location_id="loc1"),
+            LocationModel(name="L", body="", id="loc1"),
         ],
         memories=[], chatlogs={}, errors=[],
     )
@@ -306,8 +306,8 @@ async def test_creates_has_event_edges_for_events(mock_campaign: MagicMock, mock
     """Events with a scene_id get a HAS_EVENT edge from the scene."""
     parse_result = ParseResult(
         entities=[
-            Scene(name="S", body="", id="s1"),
-            JoinEvent(
+            SceneModel(name="S", body="", id="s1"),
+            JoinEventModel(
                 name="E", body="", id="e1", scene_id="s1",
                 gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1",
             ),
@@ -377,7 +377,7 @@ async def test_restores_chat_logs_via_storage(mock_campaign: MagicMock, mock_syn
     """Chat logs from ParseResult are restored via campaign.storage."""
     parse_result = ParseResult(
         entities=[
-            Scene(name="Tavern Brawl", body="", id="scene_brawl"),
+            SceneModel(name="Tavern Brawl", body="", id="scene_brawl"),
         ],
         memories=[],
         chatlogs={

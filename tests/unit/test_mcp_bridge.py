@@ -35,7 +35,7 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
             {"id": "scene_1", "name": "The Tavern", "type": "Scene", "body": "A noisy place."}
         ])
         mock_campaign.create_scene = AsyncMock(return_value=MagicMock(
-            model_dump=lambda: {"id": "scene_2", "name": "New Scene", "type": "Scene"}
+            model_dump=lambda: {"id": "scene_2", "name": "New SceneModel", "type": "Scene"}
         ))
         mock_campaign.get_scene_messages = MagicMock(return_value=[])
         MockCampaign.return_value = mock_campaign
@@ -73,7 +73,7 @@ def test_expected_tools_registered(mcp):
     assert expected == tool_names
 
 
-# --- Entity tools ---
+# --- EntityModel tools ---
 
 
 @pytest.mark.anyio
@@ -151,7 +151,7 @@ async def test_backup_campaign_degraded(mcp, mock_orchestrator):
         await mcp.call_tool("backup_campaign", {})
 
 
-# --- Scene tools ---
+# --- SceneModel tools ---
 
 
 @pytest.mark.anyio
@@ -164,11 +164,11 @@ async def test_list_scenes(mcp, mock_orchestrator):
 @pytest.mark.anyio
 async def test_create_scene(mcp, mock_orchestrator):
     result = await mcp.call_tool("create_scene", {
-        "name": "New Scene",
+        "name": "New SceneModel",
         "description": "A test scene.",
     })
     mock_orchestrator.campaign.create_scene.assert_awaited_once_with(
-        name="New Scene", description="A test scene.", current_gametime=None,
+        name="New SceneModel", description="A test scene.", current_gametime=None,
     )
     mock_orchestrator.sync_manager.broadcast.assert_awaited_with({"type": "scene_updated"})
     assert result is not None

@@ -12,17 +12,17 @@ import re
 from typing import Any, TYPE_CHECKING
 
 from sidestage.graph.errors import DuplicateEntityError, EntityNotFoundError, QueryError
-from sidestage.schemas import (
-    Entity,
-    Character,
-    ChatMessage,
-    Event,
-    FastForwardEvent,
-    Item,
-    JoinEvent,
-    LeaveEvent,
-    Location,
-    Scene,
+from sidestage.models import (
+    EntityModel,
+    CharacterModel,
+    ChatMessageModel,
+    EventModel,
+    FastForwardEventModel,
+    ItemModel,
+    JoinEventModel,
+    LeaveEventModel,
+    LocationModel,
+    SceneModel,
 )
 
 if TYPE_CHECKING:
@@ -33,35 +33,35 @@ logger = logging.getLogger(__name__)
 # --- Label/Model Registries ---
 
 # Ordered most-specific first so deserialization picks the right model.
-LABEL_TO_MODEL: dict[str, type[Entity]] = {
-    "ChatMessage": ChatMessage,
-    "JoinEvent": JoinEvent,
-    "LeaveEvent": LeaveEvent,
-    "FastForwardEvent": FastForwardEvent,
-    "Character": Character,
-    "Location": Location,
-    "Item": Item,
-    "Scene": Scene,
-    "Event": Event,
+LABEL_TO_MODEL: dict[str, type[EntityModel]] = {
+    "ChatMessage": ChatMessageModel,
+    "JoinEvent": JoinEventModel,
+    "LeaveEvent": LeaveEventModel,
+    "FastForwardEvent": FastForwardEventModel,
+    "Character": CharacterModel,
+    "Location": LocationModel,
+    "Item": ItemModel,
+    "Scene": SceneModel,
+    "Event": EventModel,
 }
 
-MODEL_TO_LABELS: dict[type[Entity], list[str]] = {
-    Character: ["Entity", "Character"],
-    Location: ["Entity", "Location"],
-    Item: ["Entity", "Item"],
-    Scene: ["Entity", "Scene"],
-    Event: ["Entity", "Event"],
-    ChatMessage: ["Entity", "Event", "ChatMessage"],
-    JoinEvent: ["Entity", "Event", "JoinEvent"],
-    LeaveEvent: ["Entity", "Event", "LeaveEvent"],
-    FastForwardEvent: ["Entity", "Event", "FastForwardEvent"],
+MODEL_TO_LABELS: dict[type[EntityModel], list[str]] = {
+    CharacterModel: ["Entity", "Character"],
+    LocationModel: ["Entity", "Location"],
+    ItemModel: ["Entity", "Item"],
+    SceneModel: ["Entity", "Scene"],
+    EventModel: ["Entity", "Event"],
+    ChatMessageModel: ["Entity", "Event", "ChatMessage"],
+    JoinEventModel: ["Entity", "Event", "JoinEvent"],
+    LeaveEventModel: ["Entity", "Event", "LeaveEvent"],
+    FastForwardEventModel: ["Entity", "Event", "FastForwardEvent"],
 }
 
 # Fields that should NOT be stored as graph node properties.
-EXCLUDED_FIELDS: dict[type[Entity], set[str]] = {
-    Location: {"connected_locations"},
-    Scene: {"messages"},
-    ChatMessage: {"widget"},
+EXCLUDED_FIELDS: dict[type[EntityModel], set[str]] = {
+    LocationModel: {"connected_locations"},
+    SceneModel: {"messages"},
+    ChatMessageModel: {"widget"},
 }
 
 # Valid property key pattern for Cypher safety.
@@ -90,12 +90,12 @@ def _validate_property_keys(keys: dict[str, Any] | set[str]) -> None:
 # --- Serialization Helpers ---
 
 
-def entity_to_labels(entity: Entity) -> list[str]:
+def entity_to_labels(entity: EntityModel) -> list[str]:
     """Return the FalkorDB labels for an entity instance."""
     return MODEL_TO_LABELS.get(type(entity), ["Entity"])
 
 
-def entity_to_properties(entity: Entity) -> dict[str, Any]:
+def entity_to_properties(entity: EntityModel) -> dict[str, Any]:
     """Convert a Pydantic entity to a dict of graph node properties.
 
     Excludes fields listed in EXCLUDED_FIELDS for the entity type,
@@ -112,7 +112,7 @@ def entity_to_properties(entity: Entity) -> dict[str, Any]:
     return props
 
 
-def node_to_entity(labels: list[str], properties: dict[str, Any]) -> Entity:
+def node_to_entity(labels: list[str], properties: dict[str, Any]) -> EntityModel:
     """Reconstruct a Pydantic entity from graph node labels and properties.
 
     Iterates LABEL_TO_MODEL in specificity order (most-specific first)
@@ -130,7 +130,7 @@ def node_to_entity(labels: list[str], properties: dict[str, Any]) -> Entity:
 # --- CRUD Functions ---
 
 
-async def create_entity(client: GraphClient, entity: Entity) -> Entity:
+async def create_entity(client: GraphClient, entity: EntityModel) -> EntityModel:
     """Create a new entity node in the graph.
 
     Raises DuplicateEntityError on unique constraint violation.
@@ -159,7 +159,7 @@ async def create_entity(client: GraphClient, entity: Entity) -> Entity:
     return entity
 
 
-async def get_entity(client: GraphClient, entity_id: str) -> Entity | None:
+async def get_entity(client: GraphClient, entity_id: str) -> EntityModel | None:
     """Retrieve an entity by ID, or None if not found."""
     cypher = "MATCH (n:Entity {id: $id}) RETURN n"
 
@@ -179,7 +179,7 @@ async def get_entity(client: GraphClient, entity_id: str) -> Entity | None:
 
 async def update_entity(
     client: GraphClient, entity_id: str, updates: dict[str, Any]
-) -> Entity:
+) -> EntityModel:
     """Update specified properties on an entity node.
 
     Raises EntityNotFoundError if the entity does not exist.
@@ -227,7 +227,7 @@ async def delete_entity(client: GraphClient, entity_id: str) -> None:
 
 async def list_entities(
     client: GraphClient, entity_type: str | None = None
-) -> list[Entity]:
+) -> list[EntityModel]:
     """List all entities, optionally filtered by type label.
 
     The entity_type string is validated against known labels.
@@ -249,7 +249,7 @@ async def list_entities(
     return [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set]
 
 
-async def find_entities(client: GraphClient, **filters: Any) -> list[Entity]:
+async def find_entities(client: GraphClient, **filters: Any) -> list[EntityModel]:
     """Find entities matching all given property filters."""
     if not filters:
         return await list_entities(client)

@@ -38,14 +38,14 @@ def markdown_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def populated_dir(markdown_dir: Path) -> Path:
     """Return a markdown/ directory with sample entities and memories."""
-    # Character with body
+    # CharacterModel with body
     _write_md(
         markdown_dir / "characters" / "Eldric_the_Bold.md",
         {"name": "Eldric the Bold", "id": "char_eldric", "type": "Character",
          "location_id": "loc_tavern", "inventory": ["item_sword"], "unseen": False},
         body="A brave warrior.",
     )
-    # Character memory in .d/
+    # CharacterModel memory in .d/
     _write_md(
         markdown_dir / "characters" / "Eldric_the_Bold.d" / "mem_tavern_brawl.md",
         {"id": "mem_tavern_brawl", "memory_type": "scene", "visibility": "private",
@@ -54,14 +54,14 @@ def populated_dir(markdown_dir: Path) -> Path:
          "access_count": 0},
         body="Eldric saw a fierce brawl.",
     )
-    # Location
+    # LocationModel
     _write_md(
         markdown_dir / "locations" / "The_Rusty_Tavern.md",
         {"name": "The Rusty Tavern", "id": "loc_tavern", "type": "Location",
          "connected_locations": ["loc_castle", "loc_square"]},
         body="A dimly lit tavern.",
     )
-    # Scene with chatlog
+    # SceneModel with chatlog
     _write_md(
         markdown_dir / "scenes" / "Tavern_Brawl.md",
         {"name": "Tavern Brawl", "id": "scene_brawl", "type": "Scene",
@@ -75,13 +75,13 @@ def populated_dir(markdown_dir: Path) -> Path:
             '[2026-01-15T14:30:05Z] (char_alice) Alice: "You\'ll regret that."',
         ],
     )
-    # Item
+    # ItemModel
     _write_md(
         markdown_dir / "items" / "Flame_Tongue_Sword.md",
         {"name": "Flame Tongue Sword", "id": "item_sword", "type": "Item"},
         body="A sword wreathed in flame.",
     )
-    # Event (JoinEvent subtype)
+    # EventModel (JoinEventModel subtype)
     _write_md(
         markdown_dir / "events" / "Eldric_Joins_Brawl.md",
         {"name": "Eldric Joins Brawl", "id": "evt_join_1", "type": "JoinEvent",
@@ -97,7 +97,7 @@ def populated_dir(markdown_dir: Path) -> Path:
 def test_parse_directory_reads_all_entity_types(populated_dir: Path) -> None:
     """parse_directory finds entities from all type subdirectories."""
     result = parse_directory(populated_dir)
-    entity_types = {type(e).__name__ for e in result.entities}
+    entity_types = {e.entity_type for e in result.entities}
     assert "Character" in entity_types
     assert "Location" in entity_types
     assert "Item" in entity_types
@@ -137,7 +137,7 @@ def test_parse_directory_infers_type_from_subdirectory(markdown_dir: Path) -> No
     )
     result = parse_directory(markdown_dir)
     entity = next(e for e in result.entities if e.id == "char_no_type")
-    assert type(entity).__name__ == "Character"
+    assert entity.entity_type == "Character"
     # Should also produce a warning
     assert any("type" in w.message.lower() for w in result.warnings)
 
@@ -209,10 +209,10 @@ def test_parse_directory_warns_duplicate_entity_ids(markdown_dir: Path) -> None:
 
 
 def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir: Path) -> None:
-    """Scene.messages in frontmatter is ignored; messages come from chatlog.log."""
+    """SceneModel.messages in frontmatter is ignored; messages come from chatlog.log."""
     _write_md(
         markdown_dir / "scenes" / "Scene_With_Messages.md",
-        {"name": "Scene With Messages", "id": "scene_msg", "type": "Scene",
+        {"name": "SceneModel With Messages", "id": "scene_msg", "type": "Scene",
          "messages": [{"name": "msg", "id": "msg_1", "body": "", "scene_id": "scene_msg",
                         "gametime": 0, "walltime": "2026-01-01T00:00:00Z",
                         "character_id": "c1", "message": "hello"}]},

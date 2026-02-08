@@ -10,7 +10,8 @@
 | `src/sidestage/agent.py` | `docs/api/sidestage.agent.md` | LiteLLM-based AI agent with tool use |
 | `src/sidestage/scene.py` | `docs/api/sidestage.scene.md` | Scene logic: chat flow, context assembly, message persistence |
 | `src/sidestage/entities.py` | `docs/api/sidestage.entities.md` | Entity ↔ markdown serialization |
-| `src/sidestage/schemas.py` | `docs/api/sidestage.schemas.md` | Pydantic models: Entity, Character, Location, Scene, Event, etc. |
+| `src/sidestage/models.py` | `docs/api/sidestage.models.md` | Domain models: EntityModel, CharacterModel, LocationModel, SceneModel, EventModel, etc. |
+| `src/sidestage/schemas.py` | `docs/api/sidestage.schemas.md` | API request/response schemas: ChatRequest, ChatResponse, etc. |
 | `src/sidestage/config.py` | `docs/api/sidestage.config.md` | Config loading from `config.yml` |
 | `src/sidestage/bus.py` | `docs/api/sidestage.bus.md` | EventQueue for decoupled internal events |
 | `src/sidestage/storage.py` | `docs/api/sidestage.storage.md` | SQLite storage for chat logs |

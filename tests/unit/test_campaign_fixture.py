@@ -93,7 +93,7 @@ def test_all_entity_files_have_valid_frontmatter(test_campaign_markdown: Path):
 
 
 def test_all_entity_files_deserialize(test_campaign_markdown: Path):
-    """Every entity .md file produces a valid Entity via frontmatter_dict_to_entity."""
+    """Every entity .md file produces a valid EntityModel via frontmatter_dict_to_entity."""
     entity_files = _collect_entity_files(test_campaign_markdown)
     for path in entity_files:
         fm, body = _parse_frontmatter(path)

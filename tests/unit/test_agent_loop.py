@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock
-from sidestage.character import AgentActor, CharacterLogic
-from sidestage.schemas import Character, ChatMessage, Scene
+from sidestage.character import AgentActor, Character
+from sidestage.models import CharacterModel, ChatMessageModel, SceneModel
 
 @pytest.mark.anyio
 async def test_agent_responds_to_user():
@@ -10,7 +10,7 @@ async def test_agent_responds_to_user():
     scene_logic = MagicMock()
     scene_logic.agent.model = "mock-model"
     scene_logic.messages = []
-    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
+    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessageModel(
         id=f"reply_{len(scene_logic.messages)}",
         name="Reply",
         body=text,
@@ -23,12 +23,12 @@ async def test_agent_responds_to_user():
     )
     scene_logic.queue.put = AsyncMock()
 
-    char = Character(id="c1", name="Alice", body="I am Alice")
+    char = CharacterModel(id="c1", name="Alice", body="I am Alice")
     actor = AgentActor(char, scene_logic)
     actor.agent = MagicMock()
     actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hello"))
 
-    user_msg = ChatMessage(
+    user_msg = ChatMessageModel(
         id="m1", name="User Msg", body="Hi",
         actor_id="user",
         character_id="user",
@@ -47,7 +47,7 @@ async def test_agent_puts_reply_on_queue():
     scene_logic = MagicMock()
     scene_logic.agent.model = "mock-model"
     scene_logic.messages = []
-    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
+    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessageModel(
         id="reply_1",
         name="Reply",
         body=text,
@@ -60,12 +60,12 @@ async def test_agent_puts_reply_on_queue():
     )
     scene_logic.queue.put = AsyncMock()
 
-    char = Character(id="c1", name="Alice", body="I am Alice")
+    char = CharacterModel(id="c1", name="Alice", body="I am Alice")
     actor = AgentActor(char, scene_logic)
     actor.agent = MagicMock()
     actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hello from Alice"))
 
-    user_msg = ChatMessage(
+    user_msg = ChatMessageModel(
         id="m1", name="User Msg", body="Hi",
         actor_id="user", character_id="user", message="Hi",
         scene_id="s1", gametime=0, walltime="now"
@@ -89,7 +89,7 @@ async def test_multiple_agents_unique_actor_ids():
     scene_logic = MagicMock()
     scene_logic.agent.model = "mock-model"
     scene_logic.messages = []
-    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
+    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessageModel(
         id=f"reply_{actor_id}",
         name="Reply",
         body=text,
@@ -102,8 +102,8 @@ async def test_multiple_agents_unique_actor_ids():
     )
     scene_logic.queue.put = AsyncMock()
 
-    char1 = Character(id="c1", name="Alice", body="I am Alice")
-    char2 = Character(id="c2", name="Bob", body="I am Bob")
+    char1 = CharacterModel(id="c1", name="Alice", body="I am Alice")
+    char2 = CharacterModel(id="c2", name="Bob", body="I am Bob")
 
     actor1 = AgentActor(char1, scene_logic)
     actor2 = AgentActor(char2, scene_logic)
@@ -118,7 +118,7 @@ async def test_multiple_agents_unique_actor_ids():
     actor2.agent.arun = AsyncMock(return_value=MagicMock(content="Hello from Bob"))
 
     # User speaks - both should reply
-    user_msg = ChatMessage(
+    user_msg = ChatMessageModel(
         id="m1", name="User Msg", body="Hi everyone",
         actor_id="user", character_id="user", message="Hi everyone",
         scene_id="s1", gametime=0, walltime="now"

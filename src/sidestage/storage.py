@@ -2,7 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import Type, List, Optional, cast, Union
-from sidestage.models import Character, Location, Item, Entity, Scene, Event
+from sidestage.models import CharacterModel, LocationModel, ItemModel, EntityModel, SceneModel, EventModel
 
 class Storage:
     def __init__(self, db_path: Union[str, Path]):
@@ -17,14 +17,14 @@ class Storage:
             conn.execute("CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, data TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, data TEXT)")
 
-    def _save_entity(self, table: str, entity: Entity):
+    def _save_entity(self, table: str, entity: EntityModel):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 f"INSERT OR REPLACE INTO {table} (id, data) VALUES (?, ?)",
                 (entity.id, entity.model_dump_json())
             )
 
-    def _get_entity(self, table: str, entity_id: str, model_cls: Type[Entity]) -> Optional[Entity]:
+    def _get_entity(self, table: str, entity_id: str, model_cls: Type[EntityModel]) -> Optional[EntityModel]:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(f"SELECT data FROM {table} WHERE id = ?", (entity_id,))
             row = cursor.fetchone()
@@ -36,85 +36,85 @@ class Storage:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(f"DELETE FROM {table} WHERE id = ?", (entity_id,))
 
-    def _list_entities(self, table: str, model_cls: Type[Entity]) -> List[Entity]:
+    def _list_entities(self, table: str, model_cls: Type[EntityModel]) -> List[EntityModel]:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(f"SELECT data FROM {table}")
             return [model_cls.model_validate_json(row[0]) for row in cursor.fetchall()]
 
     # Character
-    def add_character(self, character: Character):
-        self._save_entity("characters", character)
-    
-    def update_character(self, character: Character):
+    def add_character(self, character: CharacterModel):
         self._save_entity("characters", character)
 
-    def get_character(self, character_id: str) -> Optional[Character]:
-        return cast(Optional[Character], self._get_entity("characters", character_id, Character))
+    def update_character(self, character: CharacterModel):
+        self._save_entity("characters", character)
+
+    def get_character(self, character_id: str) -> Optional[CharacterModel]:
+        return cast(Optional[CharacterModel], self._get_entity("characters", character_id, CharacterModel))
 
     def delete_character(self, character_id: str):
         self._delete_entity("characters", character_id)
 
-    def list_characters(self) -> List[Character]:
-        return cast(List[Character], self._list_entities("characters", Character))
+    def list_characters(self) -> List[CharacterModel]:
+        return cast(List[CharacterModel], self._list_entities("characters", CharacterModel))
 
     # Location
-    def add_location(self, location: Location):
-        self._save_entity("locations", location)
-    
-    def update_location(self, location: Location):
+    def add_location(self, location: LocationModel):
         self._save_entity("locations", location)
 
-    def get_location(self, location_id: str) -> Optional[Location]:
-        return cast(Optional[Location], self._get_entity("locations", location_id, Location))
+    def update_location(self, location: LocationModel):
+        self._save_entity("locations", location)
+
+    def get_location(self, location_id: str) -> Optional[LocationModel]:
+        return cast(Optional[LocationModel], self._get_entity("locations", location_id, LocationModel))
 
     def delete_location(self, location_id: str):
         self._delete_entity("locations", location_id)
-        
-    def list_locations(self) -> List[Location]:
-        return cast(List[Location], self._list_entities("locations", Location))
+
+    def list_locations(self) -> List[LocationModel]:
+        return cast(List[LocationModel], self._list_entities("locations", LocationModel))
 
     # Item
-    def add_item(self, item: Item):
-        self._save_entity("items", item)
-    
-    def update_item(self, item: Item):
+    def add_item(self, item: ItemModel):
         self._save_entity("items", item)
 
-    def get_item(self, item_id: str) -> Optional[Item]:
-        return cast(Optional[Item], self._get_entity("items", item_id, Item))
+    def update_item(self, item: ItemModel):
+        self._save_entity("items", item)
+
+    def get_item(self, item_id: str) -> Optional[ItemModel]:
+        return cast(Optional[ItemModel], self._get_entity("items", item_id, ItemModel))
 
     def delete_item(self, item_id: str):
         self._delete_entity("items", item_id)
 
-    def list_items(self) -> List[Item]:
-        return cast(List[Item], self._list_entities("items", Item))
+    def list_items(self) -> List[ItemModel]:
+        return cast(List[ItemModel], self._list_entities("items", ItemModel))
 
     # Scene
-    def add_scene(self, scene: Scene):
+    def add_scene(self, scene: SceneModel):
         self._save_entity("scenes", scene)
 
-    def update_scene(self, scene: Scene):
+    def update_scene(self, scene: SceneModel):
         self._save_entity("scenes", scene)
 
-    def get_scene(self, scene_id: str) -> Optional[Scene]:
-        return cast(Optional[Scene], self._get_entity("scenes", scene_id, Scene))
+    def get_scene(self, scene_id: str) -> Optional[SceneModel]:
+        return cast(Optional[SceneModel], self._get_entity("scenes", scene_id, SceneModel))
 
     def delete_scene(self, scene_id: str):
         self._delete_entity("scenes", scene_id)
 
-    def list_scenes(self) -> List[Scene]:
-        return cast(List[Scene], self._list_entities("scenes", Scene))
+    def list_scenes(self) -> List[SceneModel]:
+        return cast(List[SceneModel], self._list_entities("scenes", SceneModel))
 
     # Event
-    def add_event(self, event: Event):
+    def add_event(self, event: EventModel):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO events (id, data) VALUES (?, ?)",
                 (event.id, event.model_dump_json())
             )
 
-    def list_all_entities(self) -> List[Entity]:
-        all_entities: List[Entity] = []
+    def list_all_entities(self) -> List[EntityModel]:
+        all_entities: List[EntityModel] = []
         all_entities.extend(self.list_characters())
         all_entities.extend(self.list_locations())
         all_entities.extend(self.list_items())

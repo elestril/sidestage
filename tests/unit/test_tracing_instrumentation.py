@@ -11,7 +11,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
-from sidestage.schemas import Character, ChatMessage, Scene
+from sidestage.models import CharacterModel, ChatMessageModel, SceneModel
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def otel_exporter():
     provider.shutdown()
 
 
-def _make_chat_message(**overrides) -> ChatMessage:
+def _make_chat_message(**overrides) -> ChatMessageModel:
     defaults = dict(
         id="msg_test1",
         name="Test Message",
@@ -89,27 +89,27 @@ def _make_chat_message(**overrides) -> ChatMessage:
         walltime="2025-01-01T00:00:00",
     )
     defaults.update(overrides)
-    return ChatMessage(**defaults)
+    return ChatMessageModel(**defaults)
 
 
-def _make_scene(**overrides) -> Scene:
+def _make_scene(**overrides) -> SceneModel:
     defaults = dict(
         id="scene_01",
-        name="Test Scene",
+        name="Test SceneModel",
         body="A test scene",
     )
     defaults.update(overrides)
-    return Scene(**defaults)
+    return SceneModel(**defaults)
 
 
-def _make_character(**overrides) -> Character:
+def _make_character(**overrides) -> CharacterModel:
     defaults = dict(
         id="char_npc1",
         name="NPC One",
         body="A test NPC",
     )
     defaults.update(overrides)
-    return Character(**defaults)
+    return CharacterModel(**defaults)
 
 
 def _find_spans(exporter, name):
@@ -117,19 +117,19 @@ def _find_spans(exporter, name):
 
 
 # ===========================================================================
-# 4.1 SceneLogic._process_event tests
+# 4.1 Scene._process_event tests
 # ===========================================================================
 
 
 class TestProcessEvent:
     @pytest.mark.anyio
     async def test_creates_root_span(self, otel_exporter):
-        from sidestage.scene import SceneLogic
+        from sidestage.scene import Scene
 
         storage = MagicMock()
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
         logic._broadcast_fn = None
 
         msg = _make_chat_message()
@@ -140,12 +140,12 @@ class TestProcessEvent:
 
     @pytest.mark.anyio
     async def test_root_span_attributes(self, otel_exporter):
-        from sidestage.scene import SceneLogic
+        from sidestage.scene import Scene
 
         storage = MagicMock()
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
         logic._broadcast_fn = None
 
         msg = _make_chat_message(scene_id="scene_01", actor_id="user", id="msg_x")
@@ -159,15 +159,15 @@ class TestProcessEvent:
 
     @pytest.mark.anyio
     async def test_non_chatmessage_no_span(self, otel_exporter):
-        from sidestage.scene import SceneLogic
-        from sidestage.schemas import Event
+        from sidestage.scene import Scene
+        from sidestage.models import EventModel
 
         storage = MagicMock()
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
 
-        event = Event(id="evt_1", name="Test", body="test", scene_id="s1", gametime=0, walltime="2025-01-01")
+        event = EventModel(id="evt_1", name="Test", body="test", scene_id="s1", gametime=0, walltime="2025-01-01")
         await logic._process_event(event)
 
         spans = _find_spans(otel_exporter, "scene.process_event")
@@ -175,13 +175,13 @@ class TestProcessEvent:
 
     @pytest.mark.anyio
     async def test_exception_sets_error_status(self, otel_exporter):
-        from sidestage.scene import SceneLogic
+        from sidestage.scene import Scene
 
         storage = MagicMock()
         storage.update_scene = MagicMock(side_effect=RuntimeError("db error"))
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
 
         msg = _make_chat_message()
         with pytest.raises(RuntimeError):
@@ -192,19 +192,19 @@ class TestProcessEvent:
 
 
 # ===========================================================================
-# 4.2 SceneLogic._dispatch_to_npcs tests
+# 4.2 Scene._dispatch_to_npcs tests
 # ===========================================================================
 
 
 class TestDispatchToNpcs:
     @pytest.mark.anyio
     async def test_creates_dispatch_span(self, otel_exporter):
-        from sidestage.scene import SceneLogic
+        from sidestage.scene import Scene
 
         storage = MagicMock()
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
 
         msg = _make_chat_message()
         await logic._dispatch_to_npcs(msg)
@@ -214,13 +214,13 @@ class TestDispatchToNpcs:
 
     @pytest.mark.anyio
     async def test_npc_count_attribute(self, otel_exporter):
-        from sidestage.scene import SceneLogic
-        from sidestage.character import CharacterLogic
+        from sidestage.scene import Scene
+        from sidestage.character import Character
 
         storage = MagicMock()
         agent = MagicMock()
         scene_data = _make_scene()
-        logic = SceneLogic(storage, agent, scene_data)
+        logic = Scene(storage, agent, scene_data)
 
         # Add mock characters
         char1 = MagicMock()
@@ -667,7 +667,7 @@ class TestMemoryToolTracing:
 
 
 # ===========================================================================
-# 4.9 Entity import tracing tests
+# 4.9 EntityModel import tracing tests
 # ===========================================================================
 
 

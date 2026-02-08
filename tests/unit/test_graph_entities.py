@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from sidestage.schemas import Character, Location, Item, Scene, Event, ChatMessage
+from sidestage.models import CharacterModel, LocationModel, ItemModel, SceneModel, EventModel, ChatMessageModel
 from sidestage.graph.errors import DuplicateEntityError, EntityNotFoundError, QueryError
 from sidestage.graph.entities import (
     create_entity,
@@ -29,16 +29,16 @@ def mock_client() -> MagicMock:
 
 
 @pytest.fixture
-def sample_character() -> Character:
-    return Character(
+def sample_character() -> CharacterModel:
+    return CharacterModel(
         id="char_1", name="Alice", body="A brave warrior",
         location_id="loc_1", inventory=["item_sword"],
     )
 
 
 @pytest.fixture
-def sample_location() -> Location:
-    return Location(
+def sample_location() -> LocationModel:
+    return LocationModel(
         id="loc_1", name="Tavern", body="A cozy tavern",
         connected_locations=["loc_2"],
     )
@@ -56,8 +56,8 @@ def _make_node_mock(labels: list[str], properties: dict[str, Any]) -> MagicMock:
 
 
 @pytest.mark.anyio
-async def test_create_entity_character_cypher(mock_client: MagicMock, sample_character: Character) -> None:
-    """create_entity with Character generates correct Cypher with :Entity:Character labels."""
+async def test_create_entity_character_cypher(mock_client: MagicMock, sample_character: CharacterModel) -> None:
+    """create_entity with CharacterModel generates correct Cypher with :Entity:Character labels."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
     await create_entity(mock_client, sample_character)
@@ -69,8 +69,8 @@ async def test_create_entity_character_cypher(mock_client: MagicMock, sample_cha
 
 
 @pytest.mark.anyio
-async def test_create_entity_location_excludes_connected_locations(mock_client: MagicMock, sample_location: Location) -> None:
-    """create_entity with Location does not include connected_locations in Cypher properties."""
+async def test_create_entity_location_excludes_connected_locations(mock_client: MagicMock, sample_location: LocationModel) -> None:
+    """create_entity with LocationModel does not include connected_locations in Cypher properties."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
     await create_entity(mock_client, sample_location)
@@ -82,8 +82,8 @@ async def test_create_entity_location_excludes_connected_locations(mock_client: 
 
 @pytest.mark.anyio
 async def test_create_entity_chat_message_labels(mock_client: MagicMock) -> None:
-    """create_entity with ChatMessage generates Cypher with :Entity:Event:ChatMessage labels."""
-    msg = ChatMessage(
+    """create_entity with ChatMessageModel generates Cypher with :Entity:Event:ChatMessage labels."""
+    msg = ChatMessageModel(
         id="m1", name="msg", body="desc", scene_id="s1",
         gametime=100, walltime="2024-01-01T00:00:00",
         character_id="c1", message="Hello",
@@ -97,7 +97,7 @@ async def test_create_entity_chat_message_labels(mock_client: MagicMock) -> None
 
 
 @pytest.mark.anyio
-async def test_create_entity_raises_duplicate_on_constraint_violation(mock_client: MagicMock, sample_character: Character) -> None:
+async def test_create_entity_raises_duplicate_on_constraint_violation(mock_client: MagicMock, sample_character: CharacterModel) -> None:
     """create_entity raises DuplicateEntityError on unique constraint violation."""
     mock_client.graph.query.side_effect = Exception("unique constraint")
 
@@ -106,7 +106,7 @@ async def test_create_entity_raises_duplicate_on_constraint_violation(mock_clien
 
 
 @pytest.mark.anyio
-async def test_create_entity_returns_entity(mock_client: MagicMock, sample_character: Character) -> None:
+async def test_create_entity_returns_entity(mock_client: MagicMock, sample_character: CharacterModel) -> None:
     """create_entity returns the created entity."""
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
@@ -129,7 +129,7 @@ async def test_get_entity_returns_correct_entity(mock_client: MagicMock) -> None
 
     entity = await get_entity(mock_client, "c1")
 
-    assert isinstance(entity, Character)
+    assert isinstance(entity, CharacterModel)
     assert entity.id == "c1"
     assert entity.name == "Alice"
 
@@ -146,7 +146,7 @@ async def test_get_entity_returns_none_when_not_found(mock_client: MagicMock) ->
 
 @pytest.mark.anyio
 async def test_get_entity_chat_message_reconstructs_correctly(mock_client: MagicMock) -> None:
-    """get_entity for ChatMessage node reconstructs as ChatMessage, not Event."""
+    """get_entity for ChatMessageModel node reconstructs as ChatMessageModel, not EventModel."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
         {
@@ -159,7 +159,7 @@ async def test_get_entity_chat_message_reconstructs_correctly(mock_client: Magic
 
     entity = await get_entity(mock_client, "m1")
 
-    assert isinstance(entity, ChatMessage)
+    assert isinstance(entity, ChatMessageModel)
 
 
 @pytest.mark.anyio
@@ -229,7 +229,7 @@ async def test_update_entity_returns_updated_entity(mock_client: MagicMock) -> N
 
     result = await update_entity(mock_client, "c1", {"name": "Bob"})
 
-    assert isinstance(result, Character)
+    assert isinstance(result, CharacterModel)
     assert result.name == "Bob"
 
 
@@ -269,8 +269,8 @@ async def test_list_entities_no_filter(mock_client: MagicMock) -> None:
     result = await list_entities(mock_client)
 
     assert len(result) == 2
-    assert isinstance(result[0], Character)
-    assert isinstance(result[1], Location)
+    assert isinstance(result[0], CharacterModel)
+    assert isinstance(result[1], LocationModel)
 
 
 @pytest.mark.anyio
@@ -307,7 +307,7 @@ async def test_list_entities_invalid_type_raises(mock_client: MagicMock) -> None
 
 
 @pytest.mark.anyio
-async def test_create_entity_non_constraint_error_raises_query_error(mock_client: MagicMock, sample_character: Character) -> None:
+async def test_create_entity_non_constraint_error_raises_query_error(mock_client: MagicMock, sample_character: CharacterModel) -> None:
     """create_entity raises QueryError for non-constraint exceptions."""
     mock_client.graph.query.side_effect = Exception("network timeout")
 

@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from sidestage.graph.entities import node_to_entity
 from sidestage.graph.errors import EntityNotFoundError, QueryError
-from sidestage.schemas import Entity
+from sidestage.models import EntityModel
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
@@ -165,7 +165,7 @@ async def get_related(
     entity_id: str,
     rel_type: str,
     direction: str = "outgoing",
-) -> list[Entity]:
+) -> list[EntityModel]:
     """Get entities related via a specific relationship type.
 
     Args:

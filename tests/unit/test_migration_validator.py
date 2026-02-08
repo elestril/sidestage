@@ -6,49 +6,49 @@ from sidestage.memory.models import Memory, MemoryType
 from sidestage.migration.models import ParseResult
 from sidestage.migration.validator import validate_parse_result
 from sidestage.migration.models import MigrationValidationIssue
-from sidestage.schemas import Character, ChatMessage, Event, Item, Location, Scene
+from sidestage.models import CharacterModel, ChatMessageModel, EventModel, ItemModel, LocationModel, SceneModel
 
 
 # --- Fixtures ---
 
 
 @pytest.fixture
-def valid_location() -> Location:
-    """A Location with all required fields."""
-    return Location(id="loc_tavern", name="The Rusty Tavern", body="A dusty old tavern.", connected_locations=["loc_castle"])
+def valid_location() -> LocationModel:
+    """A LocationModel with all required fields."""
+    return LocationModel(id="loc_tavern", name="The Rusty Tavern", body="A dusty old tavern.", connected_locations=["loc_castle"])
 
 
 @pytest.fixture
-def valid_location_2() -> Location:
-    """A second Location for connectivity tests."""
-    return Location(id="loc_castle", name="Castle Blackmoor", body="A dark foreboding castle.", connected_locations=["loc_tavern"])
+def valid_location_2() -> LocationModel:
+    """A second LocationModel for connectivity tests."""
+    return LocationModel(id="loc_castle", name="Castle Blackmoor", body="A dark foreboding castle.", connected_locations=["loc_tavern"])
 
 
 @pytest.fixture
-def valid_character(valid_location: Location) -> Character:
-    """A Character at a valid location with a valid inventory item."""
-    return Character(
+def valid_character(valid_location: LocationModel) -> CharacterModel:
+    """A CharacterModel at a valid location with a valid inventory item."""
+    return CharacterModel(
         id="char_eldric", name="Eldric", body="A brave warrior.",
         location_id="loc_tavern", inventory=["item_sword"],
     )
 
 
 @pytest.fixture
-def valid_item() -> Item:
-    """An Item with all required fields."""
-    return Item(id="item_sword", name="Flame Tongue Sword", body="A magical sword.")
+def valid_item() -> ItemModel:
+    """An ItemModel with all required fields."""
+    return ItemModel(id="item_sword", name="Flame Tongue Sword", body="A magical sword.")
 
 
 @pytest.fixture
-def valid_scene(valid_location: Location) -> Scene:
-    """A Scene at a valid location."""
-    return Scene(id="scene_brawl", name="Tavern Brawl", body="A brawl breaks out.", location_id="loc_tavern")
+def valid_scene(valid_location: LocationModel) -> SceneModel:
+    """A SceneModel at a valid location."""
+    return SceneModel(id="scene_brawl", name="Tavern Brawl", body="A brawl breaks out.", location_id="loc_tavern")
 
 
 @pytest.fixture
-def valid_event(valid_scene: Scene) -> Event:
-    """An Event in a valid scene."""
-    return Event(id="evt_join", name="Eldric Joins", body="Eldric enters the fray.",
+def valid_event(valid_scene: SceneModel) -> EventModel:
+    """An EventModel in a valid scene."""
+    return EventModel(id="evt_join", name="Eldric Joins", body="Eldric enters the fray.",
                  scene_id="scene_brawl", gametime=3600, walltime="2026-01-15T14:30:00Z")
 
 
@@ -60,7 +60,7 @@ def valid_memory() -> Memory:
 
 
 @pytest.fixture
-def valid_parse_result(valid_character: Character, valid_location: Location, valid_location_2: Location, valid_item: Item, valid_scene: Scene, valid_event: Event, valid_memory: Memory) -> ParseResult:
+def valid_parse_result(valid_character: CharacterModel, valid_location: LocationModel, valid_location_2: LocationModel, valid_item: ItemModel, valid_scene: SceneModel, valid_event: EventModel, valid_memory: Memory) -> ParseResult:
     """A fully valid ParseResult with consistent references."""
     return ParseResult(
         entities=[valid_character, valid_location, valid_location_2, valid_item, valid_scene, valid_event],
@@ -86,12 +86,12 @@ def test_validates_successfully_with_correct_references(valid_parse_result: Pars
     assert report.entity_counts["Event"] == 1
 
 
-# --- Entity ID checks ---
+# --- EntityModel ID checks ---
 
 def test_detects_duplicate_entity_ids():
     """Two entities with the same ID produce an error-severity issue."""
-    loc1 = Location(id="loc_dup", name="Place A", body="A place.")
-    loc2 = Location(id="loc_dup", name="Place B", body="Another place.")
+    loc1 = LocationModel(id="loc_dup", name="Place A", body="A place.")
+    loc2 = LocationModel(id="loc_dup", name="Place B", body="Another place.")
     pr = ParseResult(entities=[loc1, loc2], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -99,11 +99,11 @@ def test_detects_duplicate_entity_ids():
     assert any("loc_dup" in m for m in error_messages)
 
 
-# --- Character reference checks ---
+# --- CharacterModel reference checks ---
 
 def test_detects_character_location_id_referencing_nonexistent_location():
-    """Character.location_id pointing to a non-existent Location ID produces an error."""
-    char = Character(id="char_1", name="Hero", body="A hero.", location_id="loc_nowhere")
+    """CharacterModel.location_id pointing to a non-existent LocationModel ID produces an error."""
+    char = CharacterModel(id="char_1", name="Hero", body="A hero.", location_id="loc_nowhere")
     pr = ParseResult(entities=[char], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -112,41 +112,41 @@ def test_detects_character_location_id_referencing_nonexistent_location():
 
 
 def test_detects_character_inventory_referencing_nonexistent_item():
-    """Character.inventory containing an Item ID that does not exist produces an error."""
-    char = Character(id="char_1", name="Hero", body="A hero.", inventory=["item_ghost"])
+    """CharacterModel.inventory containing an ItemModel ID that does not exist produces an error."""
+    char = CharacterModel(id="char_1", name="Hero", body="A hero.", inventory=["item_ghost"])
     pr = ParseResult(entities=[char], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
     assert any("item_ghost" in e.message for e in report.errors)
 
 
-# --- Location reference checks ---
+# --- LocationModel reference checks ---
 
 def test_detects_location_connected_locations_referencing_nonexistent_location():
-    """Location.connected_locations containing a non-existent Location ID produces an error."""
-    loc = Location(id="loc_1", name="Place", body="A place.", connected_locations=["loc_missing"])
+    """LocationModel.connected_locations containing a non-existent LocationModel ID produces an error."""
+    loc = LocationModel(id="loc_1", name="Place", body="A place.", connected_locations=["loc_missing"])
     pr = ParseResult(entities=[loc], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
     assert any("loc_missing" in e.message for e in report.errors)
 
 
-# --- Scene reference checks ---
+# --- SceneModel reference checks ---
 
 def test_detects_scene_location_id_referencing_nonexistent_location():
-    """Scene.location_id pointing to a non-existent Location ID produces an error."""
-    scene = Scene(id="scene_1", name="Scene", body="A scene.", location_id="loc_void")
+    """SceneModel.location_id pointing to a non-existent LocationModel ID produces an error."""
+    scene = SceneModel(id="scene_1", name="Scene", body="A scene.", location_id="loc_void")
     pr = ParseResult(entities=[scene], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
     assert any("loc_void" in e.message for e in report.errors)
 
 
-# --- Event reference checks ---
+# --- EventModel reference checks ---
 
 def test_detects_event_scene_id_referencing_nonexistent_scene():
-    """Event.scene_id pointing to a non-existent Scene ID produces an error."""
-    evt = Event(id="evt_1", name="Event", body="An event.", scene_id="scene_gone", gametime=0, walltime="2026-01-01T00:00:00Z")
+    """EventModel.scene_id pointing to a non-existent SceneModel ID produces an error."""
+    evt = EventModel(id="evt_1", name="Event", body="An event.", scene_id="scene_gone", gametime=0, walltime="2026-01-01T00:00:00Z")
     pr = ParseResult(entities=[evt], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -154,8 +154,8 @@ def test_detects_event_scene_id_referencing_nonexistent_scene():
 
 
 def test_detects_chat_message_scene_id_referencing_nonexistent_scene():
-    """ChatMessage (Event subtype) with bad scene_id triggers an error via isinstance(Event) check."""
-    msg = ChatMessage(
+    """ChatMessageModel (EventModel subtype) with bad scene_id triggers an error via isinstance(EventModel) check."""
+    msg = ChatMessageModel(
         id="msg_1", name="Message", body="Hello.", scene_id="scene_missing",
         gametime=0, walltime="2026-01-01T00:00:00Z",
         character_id="char_1", message="Hello.",
@@ -170,7 +170,7 @@ def test_detects_chat_message_scene_id_referencing_nonexistent_scene():
 
 def test_detects_missing_required_entity_fields():
     """Entities with empty id or name produce an error."""
-    loc = Location(id="", name="Place", body="A place.")
+    loc = LocationModel(id="", name="Place", body="A place.")
     pr = ParseResult(entities=[loc], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -178,8 +178,8 @@ def test_detects_missing_required_entity_fields():
 
 
 def test_detects_empty_entity_name():
-    """Entity with empty name produces an error."""
-    loc = Location(id="loc_1", name="", body="A place.")
+    """EntityModel with empty name produces an error."""
+    loc = LocationModel(id="loc_1", name="", body="A place.")
     pr = ParseResult(entities=[loc], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -190,7 +190,7 @@ def test_detects_empty_entity_name():
 
 def test_detects_memory_owner_id_referencing_nonexistent_entity():
     """Memory.owner_id set to a non-existent entity ID produces an error."""
-    loc = Location(id="loc_1", name="Place", body="A place.")
+    loc = LocationModel(id="loc_1", name="Place", body="A place.")
     mem = Memory(id="mem_1", content="A memory.", memory_type=MemoryType.SCENE,
                  visibility="common", owner_id="char_nobody", target_id="loc_1")
     pr = ParseResult(entities=[loc], memories=[mem], chatlogs={}, errors=[])
@@ -201,7 +201,7 @@ def test_detects_memory_owner_id_referencing_nonexistent_entity():
 
 def test_detects_memory_target_id_referencing_nonexistent_entity():
     """Memory.target_id set to a non-existent entity ID produces an error."""
-    loc = Location(id="loc_1", name="Place", body="A place.")
+    loc = LocationModel(id="loc_1", name="Place", body="A place.")
     mem = Memory(id="mem_1", content="A memory.", memory_type=MemoryType.SCENE,
                  visibility="common", owner_id="loc_1", target_id="entity_missing")
     pr = ParseResult(entities=[loc], memories=[mem], chatlogs={}, errors=[])
@@ -212,7 +212,7 @@ def test_detects_memory_target_id_referencing_nonexistent_entity():
 
 def test_allows_memory_owner_id_null():
     """Memory with owner_id=None is valid (world facts may have no owner)."""
-    loc = Location(id="loc_1", name="Place", body="A place.")
+    loc = LocationModel(id="loc_1", name="Place", body="A place.")
     mem = Memory(id="mem_1", content="A memory.", memory_type=MemoryType.WORLD_FACT,
                  visibility="common", owner_id=None, target_id="loc_1")
     pr = ParseResult(entities=[loc], memories=[mem], chatlogs={}, errors=[])
@@ -225,7 +225,7 @@ def test_detects_invalid_memory_type():
     """Memory with an invalid memory_type string produces an error.
     Since Pydantic enforces MemoryType at construction, we test by injecting
     a raw dict memory with a bad type into the parse result."""
-    loc = Location(id="loc_1", name="Place", body="A place.")
+    loc = LocationModel(id="loc_1", name="Place", body="A place.")
     # Build a memory-like object with an invalid type by bypassing Pydantic
     mem = Memory.model_construct(
         id="mem_1", content="A memory.", memory_type="invalid_type",
@@ -239,7 +239,7 @@ def test_detects_invalid_memory_type():
 
 def test_detects_missing_required_memory_fields():
     """Memories with empty id, content, or target_id produce errors."""
-    loc = Location(id="loc_1", name="Place", body="A place.")
+    loc = LocationModel(id="loc_1", name="Place", body="A place.")
     mem = Memory.model_construct(
         id="", content="", memory_type=MemoryType.SCENE,
         visibility="common", owner_id=None, target_id="",
@@ -294,7 +294,7 @@ def test_distinguishes_errors_from_warnings():
     assert len(report.warnings) >= 1
 
     # Parse result with a reference error should be invalid
-    char = Character(id="char_1", name="Hero", body="A hero.", location_id="loc_nonexistent")
+    char = CharacterModel(id="char_1", name="Hero", body="A hero.", location_id="loc_nonexistent")
     pr2 = ParseResult(entities=[char], memories=[], chatlogs={}, errors=[])
     report2 = validate_parse_result(pr2)
     assert report2.valid is False

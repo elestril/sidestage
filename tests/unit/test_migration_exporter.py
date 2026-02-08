@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sidestage.memory.models import Memory, MemoryType
-from sidestage.schemas import Character, Entity, Event, Item, Location, Scene
+from sidestage.models import CharacterModel, EntityModel, EventModel, ItemModel, LocationModel, SceneModel
 
 
 # --- Fixtures ---
@@ -36,44 +36,44 @@ def mock_campaign(mock_graph_client: MagicMock, tmp_path: Path) -> MagicMock:
 
 
 @pytest.fixture
-def sample_entities() -> list[Entity]:
-    """Return a list of sample Entity objects (Character, Location, Item, Scene, Event)."""
+def sample_entities() -> list[EntityModel]:
+    """Return a list of sample EntityModel objects (CharacterModel, LocationModel, ItemModel, SceneModel, EventModel)."""
     return [
-        Character(
+        CharacterModel(
             id="char_eldric",
             name="Eldric the Bold",
             body="A brave warrior.",
             unseen=False,
             inventory=["item_sword"],
         ),
-        Character(
+        CharacterModel(
             id="char_mira",
             name="Mira",
             body="A cunning rogue.",
             unseen=True,
         ),
-        Location(
+        LocationModel(
             id="loc_tavern",
             name="Rusty Tavern",
             body="A dimly lit tavern.",
         ),
-        Location(
+        LocationModel(
             id="loc_forest",
             name="Dark Forest",
             body="Tall trees block the sun.",
         ),
-        Item(
+        ItemModel(
             id="item_sword",
             name="Flame Tongue",
             body="A sword wreathed in fire.",
         ),
-        Scene(
+        SceneModel(
             id="scene_01",
             name="Tavern Brawl",
             body="A fight breaks out.",
             current_gametime=100,
         ),
-        Event(
+        EventModel(
             id="event_01",
             name="Door Opens",
             body="The door swings open.",
@@ -121,7 +121,7 @@ def sample_memories() -> list[Memory]:
     ]
 
 
-def _setup_list_entities(mock_campaign: MagicMock, entities: list[Entity]) -> Any:
+def _setup_list_entities(mock_campaign: MagicMock, entities: list[EntityModel]) -> Any:
     """Helper to set up list_entities mock to return given entities."""
     # Patch at the module level where it's imported
     return patch(
@@ -145,12 +145,12 @@ def _setup_memories_query(mock_campaign: MagicMock, memories: list[Memory]) -> N
     )
 
 
-def _setup_get_related(return_map: dict[tuple[str, str], list[Entity]] | None = None) -> Any:
+def _setup_get_related(return_map: dict[tuple[str, str], list[EntityModel]] | None = None) -> Any:
     """Patch get_related to return entities from a mapping."""
     if return_map is None:
         return_map = {}
 
-    async def _mock_get_related(client: Any, entity_id: str, rel_type: str, direction: str = "outgoing") -> list[Entity]:
+    async def _mock_get_related(client: Any, entity_id: str, rel_type: str, direction: str = "outgoing") -> list[EntityModel]:
         return return_map.get((entity_id, rel_type), [])
 
     return patch(
@@ -159,11 +159,11 @@ def _setup_get_related(return_map: dict[tuple[str, str], list[Entity]] | None = 
     )
 
 
-# --- Entity export tests ---
+# --- EntityModel export tests ---
 
 
 @pytest.mark.anyio
-async def test_queries_all_entities(mock_campaign: MagicMock, sample_entities: list[Entity]) -> None:
+async def test_queries_all_entities(mock_campaign: MagicMock, sample_entities: list[EntityModel]) -> None:
     """export_campaign calls list_entities(client) to retrieve all entities."""
     from sidestage.migration.exporter import export_campaign
 
@@ -190,14 +190,14 @@ async def test_queries_all_memories(mock_campaign: MagicMock, sample_memories: l
 
 
 @pytest.mark.anyio
-async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_entities: list[Entity]) -> None:
-    """For each Scene entity, export_campaign reads messages from storage."""
+async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_entities: list[EntityModel]) -> None:
+    """For each SceneModel entity, export_campaign reads messages from storage."""
     from sidestage.migration.exporter import export_campaign
-    from sidestage.schemas import ChatMessage as CM
+    from sidestage.models import ChatMessageModel as CM
 
-    scene = Scene(
+    scene = SceneModel(
         id="scene_chat",
-        name="Chat Scene",
+        name="Chat SceneModel",
         body="A scene with chat.",
         current_gametime=200,
         messages=[
@@ -226,8 +226,8 @@ async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_e
 
 
 @pytest.mark.anyio
-async def test_writes_entities_to_correct_subdirs(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
-    """Character -> characters/, Location -> locations/, etc."""
+async def test_writes_entities_to_correct_subdirs(mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path) -> None:
+    """CharacterModel -> characters/, LocationModel -> locations/, etc."""
     from sidestage.migration.exporter import export_campaign
 
     with _setup_list_entities(mock_campaign, sample_entities), \
@@ -257,7 +257,7 @@ async def test_writes_entities_to_correct_subdirs(mock_campaign: MagicMock, samp
 
 @pytest.mark.anyio
 async def test_writes_memories_to_dot_d_dirs(
-    mock_campaign: MagicMock, sample_entities: list[Entity], sample_memories: list[Memory], tmp_path: Path
+    mock_campaign: MagicMock, sample_entities: list[EntityModel], sample_memories: list[Memory], tmp_path: Path
 ) -> None:
     """Memories placed inside parent entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
@@ -281,19 +281,19 @@ async def test_writes_memories_to_dot_d_dirs(
 
 @pytest.mark.anyio
 async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path: Path) -> None:
-    """Scene chat logs written as chatlog.log inside scene_name.d/."""
+    """SceneModel chat logs written as chatlog.log inside scene_name.d/."""
     from sidestage.migration.exporter import export_campaign
-    from sidestage.schemas import ChatMessage as CM
+    from sidestage.models import ChatMessageModel as CM
 
-    scene = Scene(
+    scene = SceneModel(
         id="scene_chat",
-        name="Chat Scene",
+        name="Chat SceneModel",
         body="A scene.",
         current_gametime=100,
     )
-    scene_with_msgs = Scene(
+    scene_with_msgs = SceneModel(
         id="scene_chat",
-        name="Chat Scene",
+        name="Chat SceneModel",
         body="A scene.",
         current_gametime=100,
         messages=[
@@ -329,7 +329,7 @@ async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path:
 
 
 @pytest.mark.anyio
-async def test_dot_d_created_only_when_needed(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
+async def test_dot_d_created_only_when_needed(mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path) -> None:
     """Entities without memories or chat logs should not have .d/ directories."""
     from sidestage.migration.exporter import export_campaign
 
@@ -348,7 +348,7 @@ async def test_dot_d_created_only_when_needed(mock_campaign: MagicMock, sample_e
 
 @pytest.mark.anyio
 async def test_writes_status_json(
-    mock_campaign: MagicMock, sample_entities: list[Entity], sample_memories: list[Memory], tmp_path: Path
+    mock_campaign: MagicMock, sample_entities: list[EntityModel], sample_memories: list[Memory], tmp_path: Path
 ) -> None:
     """status.json contains entity counts, memory count, chatlog count, timestamp."""
     from sidestage.migration.exporter import export_campaign
@@ -396,9 +396,9 @@ async def test_filename_collision_handling(mock_campaign: MagicMock, tmp_path: P
     """Two entities with the same sanitized name get _2 suffix."""
     from sidestage.migration.exporter import export_campaign
 
-    entities: list[Entity] = [
-        Character(id="char_1", name="Test Entity!", body="First."),
-        Character(id="char_2", name="Test Entity?", body="Second."),
+    entities: list[EntityModel] = [
+        CharacterModel(id="char_1", name="Test Entity!", body="First."),
+        CharacterModel(id="char_2", name="Test Entity?", body="Second."),
     ]
 
     with _setup_list_entities(mock_campaign, entities), \
@@ -414,7 +414,7 @@ async def test_filename_collision_handling(mock_campaign: MagicMock, tmp_path: P
 
 
 @pytest.mark.anyio
-async def test_memory_placed_in_owner_dot_d(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
+async def test_memory_placed_in_owner_dot_d(mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path) -> None:
     """Memory with owner_id goes into the owner entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
 
@@ -447,7 +447,7 @@ async def test_memory_placed_in_owner_dot_d(mock_campaign: MagicMock, sample_ent
 
 @pytest.mark.anyio
 async def test_memory_placed_in_target_dot_d_when_no_owner(
-    mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path
+    mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path
 ) -> None:
     """Memory with owner_id=None goes into target entity's .d/ directory."""
     from sidestage.migration.exporter import export_campaign
@@ -480,7 +480,7 @@ async def test_memory_placed_in_target_dot_d_when_no_owner(
 
 @pytest.mark.anyio
 async def test_memory_falls_back_to_target_when_owner_unknown(
-    mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path
+    mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path
 ) -> None:
     """Memory with owner_id set to unknown entity falls back to target's .d/ dir."""
     from sidestage.migration.exporter import export_campaign
@@ -513,7 +513,7 @@ async def test_memory_falls_back_to_target_when_owner_unknown(
 
 
 @pytest.mark.anyio
-async def test_memory_with_both_unknown_ids_skipped(mock_campaign: MagicMock, sample_entities: list[Entity], tmp_path: Path) -> None:
+async def test_memory_with_both_unknown_ids_skipped(mock_campaign: MagicMock, sample_entities: list[EntityModel], tmp_path: Path) -> None:
     """Memory where both owner_id and target_id are unknown is skipped with error."""
     from sidestage.migration.exporter import export_campaign
 
@@ -541,13 +541,13 @@ async def test_memory_with_both_unknown_ids_skipped(mock_campaign: MagicMock, sa
 
 @pytest.mark.anyio
 async def test_queries_located_in_for_characters(mock_campaign: MagicMock, tmp_path: Path) -> None:
-    """Character frontmatter includes location_id from LOCATED_IN relationship."""
+    """CharacterModel frontmatter includes location_id from LOCATED_IN relationship."""
     from sidestage.migration.exporter import export_campaign
 
-    char = Character(id="char_test", name="Test Char", body="")
-    loc = Location(id="loc_home", name="Home", body="")
+    char = CharacterModel(id="char_test", name="Test Char", body="")
+    loc = LocationModel(id="loc_home", name="Home", body="")
 
-    related_map: dict[tuple[str, str], list[Entity]] = {
+    related_map: dict[tuple[str, str], list[EntityModel]] = {
         ("char_test", "LOCATED_IN"): [loc],
     }
 
@@ -564,13 +564,13 @@ async def test_queries_located_in_for_characters(mock_campaign: MagicMock, tmp_p
 
 @pytest.mark.anyio
 async def test_queries_connects_to_for_locations(mock_campaign: MagicMock, tmp_path: Path) -> None:
-    """Location frontmatter includes connected_locations from CONNECTS_TO edges."""
+    """LocationModel frontmatter includes connected_locations from CONNECTS_TO edges."""
     from sidestage.migration.exporter import export_campaign
 
-    loc1 = Location(id="loc_a", name="Place A", body="")
-    loc2 = Location(id="loc_b", name="Place B", body="")
+    loc1 = LocationModel(id="loc_a", name="Place A", body="")
+    loc2 = LocationModel(id="loc_b", name="Place B", body="")
 
-    related_map: dict[tuple[str, str], list[Entity]] = {
+    related_map: dict[tuple[str, str], list[EntityModel]] = {
         ("loc_a", "CONNECTS_TO"): [loc2],
         ("loc_b", "CONNECTS_TO"): [loc1],
     }

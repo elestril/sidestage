@@ -10,7 +10,7 @@ from sidestage.migration.models import (
     MigrationValidationReport,
     ParseResult,
 )
-from sidestage.schemas import Character, Event, Item, Location, Scene
+from sidestage.models import CharacterModel, EventModel, ItemModel, LocationModel, SceneModel
 
 
 def validate_parse_result(parse_result: ParseResult) -> MigrationValidationReport:
@@ -34,13 +34,13 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
 
     for entity in parse_result.entities:
         entity_ids.add(entity.id)
-        if isinstance(entity, Location):
+        if isinstance(entity, LocationModel):
             location_ids.add(entity.id)
-        elif isinstance(entity, Scene):
+        elif isinstance(entity, SceneModel):
             scene_ids.add(entity.id)
-        elif isinstance(entity, Event):
+        elif isinstance(entity, EventModel):
             pass  # Events don't form a reference target set
-        elif isinstance(entity, Item):
+        elif isinstance(entity, ItemModel):
             item_ids.add(entity.id)
 
     # Step 2: Check entity ID uniqueness
@@ -58,7 +58,7 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
 
     # Step 3: Check entity cross-references
     for entity in parse_result.entities:
-        if isinstance(entity, Character):
+        if isinstance(entity, CharacterModel):
             if entity.location_id is not None and entity.location_id not in location_ids:
                 errors.append(MigrationValidationIssue(
                     entity_id=entity.id,
@@ -74,7 +74,7 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
                         severity="error",
                         message=f"Character '{entity.id}' references non-existent inventory item '{inv_id}'",
                     ))
-        elif isinstance(entity, Location):
+        elif isinstance(entity, LocationModel):
             for conn_id in entity.connected_locations:
                 if conn_id not in location_ids:
                     errors.append(MigrationValidationIssue(
@@ -83,7 +83,7 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
                         severity="error",
                         message=f"Location '{entity.id}' references non-existent connected location '{conn_id}'",
                     ))
-        elif isinstance(entity, Scene):
+        elif isinstance(entity, SceneModel):
             if entity.location_id is not None and entity.location_id not in location_ids:
                 errors.append(MigrationValidationIssue(
                     entity_id=entity.id,
@@ -91,7 +91,7 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
                     severity="error",
                     message=f"Scene '{entity.id}' references non-existent location '{entity.location_id}'",
                 ))
-        elif isinstance(entity, Event):
+        elif isinstance(entity, EventModel):
             if entity.scene_id not in scene_ids:
                 errors.append(MigrationValidationIssue(
                     entity_id=entity.id,
@@ -188,7 +188,7 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
     # Step 8: Build entity counts
     type_counts: Counter[str] = Counter()
     for entity in parse_result.entities:
-        type_counts[type(entity).__name__] += 1
+        type_counts[entity.entity_type] += 1
 
     return MigrationValidationReport(
         valid=len(errors) == 0,

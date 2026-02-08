@@ -13,7 +13,7 @@ from sidestage.health import HealthStatus
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.memory.store import _TYPE_TO_SUBLABEL
 from sidestage.migration.models import MigrationImportResult, ParseResult
-from sidestage.schemas import Character, ChatMessage, Entity, Event, Location, Scene
+from sidestage.models import CharacterModel, ChatMessageModel, EntityModel, EventModel, LocationModel, SceneModel
 
 if TYPE_CHECKING:
     from sidestage.campaign import Campaign
@@ -159,7 +159,7 @@ async def _drop_and_recreate_graph(campaign: Campaign) -> None:
 
 
 async def _insert_entities(
-    client: GraphClient, entities: list[Entity],
+    client: GraphClient, entities: list[EntityModel],
 ) -> tuple[int, list[str]]:
     """Insert all entities into the graph. Returns (success_count, errors)."""
     count = 0
@@ -175,7 +175,7 @@ async def _insert_entities(
 
 
 async def _create_relationships(
-    client: GraphClient, entities: list[Entity],
+    client: GraphClient, entities: list[EntityModel],
 ) -> list[str]:
     """Create all entity-to-entity relationship edges.
 
@@ -186,12 +186,12 @@ async def _create_relationships(
 
     for entity in entities:
         try:
-            if isinstance(entity, Character) and entity.location_id:
+            if isinstance(entity, CharacterModel) and entity.location_id:
                 await link(client, entity.id, "LOCATED_IN", entity.location_id)
         except Exception as exc:
             errors.append(f"LOCATED_IN failed for '{entity.id}': {exc}")
 
-        if isinstance(entity, Location):
+        if isinstance(entity, LocationModel):
             for other_id in entity.connected_locations:
                 pair = frozenset({entity.id, other_id})
                 if pair not in connected_pairs:
@@ -202,13 +202,13 @@ async def _create_relationships(
                         errors.append(f"CONNECTS_TO failed for '{entity.id}' -> '{other_id}': {exc}")
 
         try:
-            if isinstance(entity, Scene) and entity.location_id:
+            if isinstance(entity, SceneModel) and entity.location_id:
                 await link(client, entity.id, "AT_LOCATION", entity.location_id)
         except Exception as exc:
             errors.append(f"AT_LOCATION failed for '{entity.id}': {exc}")
 
         try:
-            if isinstance(entity, Event):
+            if isinstance(entity, EventModel):
                 await link(client, entity.scene_id, "HAS_EVENT", entity.id)
         except Exception as exc:
             errors.append(f"HAS_EVENT failed for '{entity.id}': {exc}")
@@ -292,7 +292,7 @@ def _restore_chatlogs(
                 existing.messages = messages
                 campaign.storage.update_scene(existing)
             else:
-                scene = Scene(
+                scene = SceneModel(
                     name=scene_id, body="", id=scene_id, messages=messages,
                 )
                 campaign.storage.add_scene(scene)
@@ -303,19 +303,19 @@ def _restore_chatlogs(
     return errors
 
 
-def _parse_chatlog_lines(scene_id: str, lines: list[str]) -> list[ChatMessage]:
+def _parse_chatlog_lines(scene_id: str, lines: list[str]) -> list[ChatMessageModel]:
     """Parse raw chatlog lines into ChatMessage objects.
 
     Format: [{walltime}] ({character_id}) {name}: "{message}"
     """
-    messages: list[ChatMessage] = []
+    messages: list[ChatMessageModel] = []
     for line in lines:
         match = _CHATLOG_RE.match(line.strip())
         if not match:
             logger.warning("Unparseable chatlog line: %s", line)
             continue
         walltime, character_id, name, message = match.groups()
-        msg = ChatMessage(
+        msg = ChatMessageModel(
             name=name.strip(),
             body="",
             id=f"{scene_id}_msg_{len(messages)}",

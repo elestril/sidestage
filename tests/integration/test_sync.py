@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
-from sidestage.schemas import Character
+from sidestage.models import CharacterModel
 from unittest.mock import patch, AsyncMock
 
 @pytest.mark.timeout(5)
@@ -22,7 +22,7 @@ class TestSyncIntegration:
 
     def test_websocket_broadcast_on_entity_update(self, client: TestClient):
         # Create a dummy entity via REST
-        char_data = {"id": "sync_char", "name": "Sync Character", "body": "Original", "type": "Character"}
+        char_data = {"id": "sync_char", "name": "Sync CharacterModel", "body": "Original", "type": "Character"}
         
         with client.websocket_connect("/v1/ws") as websocket:
             # Trigger an update via REST

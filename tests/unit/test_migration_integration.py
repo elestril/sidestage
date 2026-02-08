@@ -26,7 +26,7 @@ from sidestage.migration.serialization import (
     entity_to_frontmatter_dict,
     frontmatter_dict_to_entity,
 )
-from sidestage.schemas import Character, Entity, Event, JoinEvent, Location, Scene
+from sidestage.models import CharacterModel, EntityModel, EventModel, JoinEventModel, LocationModel, SceneModel
 
 
 # --- Constants ---
@@ -61,7 +61,7 @@ EXPECTED_MEMORY_IDS = {
 # --- Helpers ---
 
 
-def _find_entity_by_id(entities: list[Entity], entity_id: str) -> Entity | None:
+def _find_entity_by_id(entities: list[EntityModel], entity_id: str) -> EntityModel | None:
     """Find an entity in a list by its id field."""
     for e in entities:
         if e.id == entity_id:
@@ -184,7 +184,7 @@ class TestFullRoundtrip:
         """Parsing the test campaign yields the expected number and types of entities."""
         from collections import Counter
 
-        type_counts = Counter(type(e).__name__ for e in parsed_campaign.entities)
+        type_counts = Counter(e.entity_type for e in parsed_campaign.entities)
         for type_name, expected_count in EXPECTED_ENTITY_COUNTS.items():
             assert type_counts[type_name] == expected_count, (
                 f"Expected {expected_count} {type_name}, got {type_counts[type_name]}"
@@ -261,7 +261,7 @@ class TestFullRoundtrip:
 
 
 # =============================================================================
-# Test 2: Entity Fidelity (canonical format = API format)
+# Test 2: EntityModel Fidelity (canonical format = API format)
 # =============================================================================
 
 
@@ -277,65 +277,65 @@ class TestEntityFidelity:
             assert restored.id == entity.id
             assert restored.name == entity.name
             assert restored.body == entity.body
-            assert type(restored).__name__ == type(entity).__name__
+            assert restored.entity_type == entity.entity_type
             # Type-specific fields
-            if isinstance(entity, Character):
-                assert isinstance(restored, Character)
+            if isinstance(entity, CharacterModel):
+                assert isinstance(restored, CharacterModel)
                 assert restored.location_id == entity.location_id
                 assert restored.inventory == entity.inventory
                 assert restored.unseen == entity.unseen
-            elif isinstance(entity, Location):
-                assert isinstance(restored, Location)
+            elif isinstance(entity, LocationModel):
+                assert isinstance(restored, LocationModel)
                 assert set(restored.connected_locations) == set(entity.connected_locations)
-            elif isinstance(entity, Scene):
-                assert isinstance(restored, Scene)
+            elif isinstance(entity, SceneModel):
+                assert isinstance(restored, SceneModel)
                 assert restored.location_id == entity.location_id
                 assert restored.current_gametime == entity.current_gametime
                 assert restored.events == entity.events
-            elif isinstance(entity, Event):
-                assert isinstance(restored, Event)
+            elif isinstance(entity, EventModel):
+                assert isinstance(restored, EventModel)
                 assert restored.scene_id == entity.scene_id
 
     def test_character_fields_preserved(self, parsed_campaign: ParseResult):
-        """Character-specific fields survive roundtrip."""
+        """CharacterModel-specific fields survive roundtrip."""
         eldric = _find_entity_by_id(parsed_campaign.entities, "char_eldric")
-        assert isinstance(eldric, Character)
+        assert isinstance(eldric, CharacterModel)
         assert eldric.location_id == "loc_rusty_tavern"
         assert eldric.inventory == ["item_flame_tongue"]
 
         alice = _find_entity_by_id(parsed_campaign.entities, "char_alice")
-        assert isinstance(alice, Character)
+        assert isinstance(alice, CharacterModel)
         assert alice.location_id is None
         assert alice.inventory == []
 
     def test_location_fields_preserved(self, parsed_campaign: ParseResult):
         """Each of the 3 locations should have exactly 2 entries in connected_locations."""
-        locations = [e for e in parsed_campaign.entities if isinstance(e, Location)]
+        locations = [e for e in parsed_campaign.entities if isinstance(e, LocationModel)]
         assert len(locations) == 3
         for loc in locations:
             assert len(loc.connected_locations) == 2, (
-                f"Location {loc.id} has {len(loc.connected_locations)} connections, expected 2"
+                f"LocationModel {loc.id} has {len(loc.connected_locations)} connections, expected 2"
             )
 
     def test_scene_fields_preserved(self, parsed_campaign: ParseResult):
-        """Scene-specific fields survive roundtrip."""
+        """SceneModel-specific fields survive roundtrip."""
         tavern = _find_entity_by_id(parsed_campaign.entities, "scene_tavern_brawl")
-        assert isinstance(tavern, Scene)
+        assert isinstance(tavern, SceneModel)
         assert tavern.location_id == "loc_rusty_tavern"
         assert tavern.current_gametime == 7200
         assert tavern.events == ["event_eldric_joins"]
         assert tavern.messages == []
 
         castle = _find_entity_by_id(parsed_campaign.entities, "scene_castle_audience")
-        assert isinstance(castle, Scene)
+        assert isinstance(castle, SceneModel)
         assert castle.location_id == "loc_castle_blackmoor"
         assert castle.current_gametime is None
         assert castle.messages == []
 
     def test_event_subtype_preserved(self, parsed_campaign: ParseResult):
-        """JoinEvent subtype and its fields survive roundtrip."""
+        """JoinEventModel subtype and its fields survive roundtrip."""
         event = _find_entity_by_id(parsed_campaign.entities, "event_eldric_joins")
-        assert isinstance(event, JoinEvent)
+        assert isinstance(event, JoinEventModel)
         assert event.actor_id == "char_eldric"
         assert event.scene_id == "scene_tavern_brawl"
 
@@ -443,27 +443,27 @@ class TestRelationshipIntegrity:
     """Verify that entity cross-references are consistent in the parsed data."""
 
     def test_character_location_references_valid(self, parsed_campaign: ParseResult):
-        """Location references from characters point to valid locations."""
-        location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Location)}
+        """LocationModel references from characters point to valid locations."""
+        location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, LocationModel)}
         eldric = _find_entity_by_id(parsed_campaign.entities, "char_eldric")
-        assert isinstance(eldric, Character)
+        assert isinstance(eldric, CharacterModel)
         assert eldric.location_id in location_ids
 
         alice = _find_entity_by_id(parsed_campaign.entities, "char_alice")
-        assert isinstance(alice, Character)
+        assert isinstance(alice, CharacterModel)
         assert alice.location_id is None
 
     def test_character_inventory_references_valid(self, parsed_campaign: ParseResult):
         """Eldric's inventory references a valid item entity."""
         item_ids = {e.id for e in parsed_campaign.entities if hasattr(e, "id") and e.id.startswith("item_")}
         eldric = _find_entity_by_id(parsed_campaign.entities, "char_eldric")
-        assert isinstance(eldric, Character)
+        assert isinstance(eldric, CharacterModel)
         for inv_id in eldric.inventory:
             assert inv_id in item_ids, f"Inventory item {inv_id} not found in items"
 
     def test_location_connectivity_triangle(self, parsed_campaign: ParseResult):
         """The 3 locations form a complete connectivity triangle."""
-        locations = {e.id: e for e in parsed_campaign.entities if isinstance(e, Location)}
+        locations = {e.id: e for e in parsed_campaign.entities if isinstance(e, LocationModel)}
 
         assert set(locations["loc_rusty_tavern"].connected_locations) == {"loc_castle_blackmoor", "loc_town_square"}
         assert set(locations["loc_castle_blackmoor"].connected_locations) == {"loc_rusty_tavern", "loc_town_square"}
@@ -471,7 +471,7 @@ class TestRelationshipIntegrity:
 
     def test_connects_to_deduplication_count(self, parsed_campaign: ParseResult):
         """The triangle has 6 directional references but should produce only 3 unique pairs."""
-        locations = [e for e in parsed_campaign.entities if isinstance(e, Location)]
+        locations = [e for e in parsed_campaign.entities if isinstance(e, LocationModel)]
         pairs = set()
         for loc in locations:
             for other_id in loc.connected_locations:
@@ -480,19 +480,19 @@ class TestRelationshipIntegrity:
 
     def test_scene_location_references_valid(self, parsed_campaign: ParseResult):
         """Both scenes reference valid location IDs."""
-        location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Location)}
+        location_ids = {e.id for e in parsed_campaign.entities if isinstance(e, LocationModel)}
         tavern = _find_entity_by_id(parsed_campaign.entities, "scene_tavern_brawl")
         castle = _find_entity_by_id(parsed_campaign.entities, "scene_castle_audience")
-        assert isinstance(tavern, Scene)
-        assert isinstance(castle, Scene)
+        assert isinstance(tavern, SceneModel)
+        assert isinstance(castle, SceneModel)
         assert tavern.location_id in location_ids
         assert castle.location_id in location_ids
 
     def test_event_scene_references_valid(self, parsed_campaign: ParseResult):
-        """The JoinEvent references scene_tavern_brawl which exists in parsed scenes."""
-        scene_ids = {e.id for e in parsed_campaign.entities if isinstance(e, Scene)}
+        """The JoinEventModel references scene_tavern_brawl which exists in parsed scenes."""
+        scene_ids = {e.id for e in parsed_campaign.entities if isinstance(e, SceneModel)}
         event = _find_entity_by_id(parsed_campaign.entities, "event_eldric_joins")
-        assert isinstance(event, Event)
+        assert isinstance(event, EventModel)
         assert event.scene_id in scene_ids
 
 
@@ -675,7 +675,7 @@ class TestReimportFromBackup:
         backup_md = tmp_path / "backup_markdown"
         for entity in original.entities:
             fm, body = entity_to_frontmatter_dict(entity)
-            subdir = entity_type_to_subdir(type(entity).__name__)
+            subdir = entity_type_to_subdir(entity.entity_type)
             target_dir = backup_md / subdir
             target_dir.mkdir(parents=True, exist_ok=True)
             filename = sanitize_filename(entity.name) + ".md"
@@ -712,7 +712,7 @@ class TestReimportFromBackup:
             reparsed_entity = _find_entity_by_id(reparsed.entities, orig.id)
             assert reparsed_entity is not None, f"Missing entity {orig.id} in reparsed"
             assert reparsed_entity.name == orig.name
-            assert type(reparsed_entity).__name__ == type(orig).__name__
+            assert reparsed_entity.entity_type == orig.entity_type
 
         # Compare memory IDs
         original_mem_ids = {m.id for m in original.memories}

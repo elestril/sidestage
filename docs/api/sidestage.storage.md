@@ -6,15 +6,15 @@
 
 #### `__init__(db_path: str | Path)`
 
-#### `add_character(character: Character)`
+#### `add_character(character: CharacterModel)`
 
-#### `add_event(event: Event)`
+#### `add_event(event: EventModel)`
 
-#### `add_item(item: Item)`
+#### `add_item(item: ItemModel)`
 
-#### `add_location(location: Location)`
+#### `add_location(location: LocationModel)`
 
-#### `add_scene(scene: Scene)`
+#### `add_scene(scene: SceneModel)`
 
 #### `delete_character(character_id: str)`
 
@@ -24,28 +24,28 @@
 
 #### `delete_scene(scene_id: str)`
 
-#### `get_character(character_id: str) -> Character | None`
+#### `get_character(character_id: str) -> CharacterModel | None`
 
-#### `get_item(item_id: str) -> Item | None`
+#### `get_item(item_id: str) -> ItemModel | None`
 
-#### `get_location(location_id: str) -> Location | None`
+#### `get_location(location_id: str) -> LocationModel | None`
 
-#### `get_scene(scene_id: str) -> Scene | None`
+#### `get_scene(scene_id: str) -> SceneModel | None`
 
-#### `list_all_entities() -> list[Entity]`
+#### `list_all_entities() -> list[EntityModel]`
 
-#### `list_characters() -> list[Character]`
+#### `list_characters() -> list[CharacterModel]`
 
-#### `list_items() -> list[Item]`
+#### `list_items() -> list[ItemModel]`
 
-#### `list_locations() -> list[Location]`
+#### `list_locations() -> list[LocationModel]`
 
-#### `list_scenes() -> list[Scene]`
+#### `list_scenes() -> list[SceneModel]`
 
-#### `update_character(character: Character)`
+#### `update_character(character: CharacterModel)`
 
-#### `update_item(item: Item)`
+#### `update_item(item: ItemModel)`
 
-#### `update_location(location: Location)`
+#### `update_location(location: LocationModel)`
 
-#### `update_scene(scene: Scene)`
+#### `update_scene(scene: SceneModel)`

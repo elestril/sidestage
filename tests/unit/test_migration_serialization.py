@@ -2,16 +2,16 @@
 
 import pytest
 
-from sidestage.schemas import (
-    Character,
-    ChatMessage,
-    Event,
-    FastForwardEvent,
-    Item,
-    JoinEvent,
-    LeaveEvent,
-    Location,
-    Scene,
+from sidestage.models import (
+    CharacterModel,
+    ChatMessageModel,
+    EventModel,
+    FastForwardEventModel,
+    ItemModel,
+    JoinEventModel,
+    LeaveEventModel,
+    LocationModel,
+    SceneModel,
 )
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.migration.serialization import (
@@ -29,8 +29,8 @@ from sidestage.migration.serialization import (
 
 
 def test_entity_to_frontmatter_dict_character_all_fields():
-    """entity_to_frontmatter_dict returns (dict, body) for Character with all fields populated."""
-    char = Character(
+    """entity_to_frontmatter_dict returns (dict, body) for CharacterModel with all fields populated."""
+    char = CharacterModel(
         id="char_eldric",
         name="Eldric the Bold",
         body="A brave warrior.",
@@ -49,8 +49,8 @@ def test_entity_to_frontmatter_dict_character_all_fields():
 
 
 def test_entity_to_frontmatter_dict_location_with_connected():
-    """entity_to_frontmatter_dict returns (dict, body) for Location with connected_locations."""
-    loc = Location(
+    """entity_to_frontmatter_dict returns (dict, body) for LocationModel with connected_locations."""
+    loc = LocationModel(
         id="loc_tavern",
         name="Rusty Tavern",
         body="A dingy tavern.",
@@ -63,8 +63,8 @@ def test_entity_to_frontmatter_dict_location_with_connected():
 
 
 def test_entity_to_frontmatter_dict_item_minimal():
-    """entity_to_frontmatter_dict returns (dict, body) for Item with minimal fields."""
-    item = Item(id="item_sword", name="Sword", body="Sharp.")
+    """entity_to_frontmatter_dict returns (dict, body) for ItemModel with minimal fields."""
+    item = ItemModel(id="item_sword", name="Sword", body="Sharp.")
     fm, body = entity_to_frontmatter_dict(item)
     assert fm["type"] == "Item"
     assert fm["id"] == "item_sword"
@@ -72,8 +72,8 @@ def test_entity_to_frontmatter_dict_item_minimal():
 
 
 def test_entity_to_frontmatter_dict_scene_excludes_messages():
-    """entity_to_frontmatter_dict excludes messages list from Scene frontmatter."""
-    scene = Scene(
+    """entity_to_frontmatter_dict excludes messages list from SceneModel frontmatter."""
+    scene = SceneModel(
         id="scene_brawl",
         name="Tavern Brawl",
         body="A brawl breaks out.",
@@ -86,8 +86,8 @@ def test_entity_to_frontmatter_dict_scene_excludes_messages():
 
 
 def test_entity_to_frontmatter_dict_event_subtypes():
-    """entity_to_frontmatter_dict handles ChatMessage and JoinEvent subtypes."""
-    chat = ChatMessage(
+    """entity_to_frontmatter_dict handles ChatMessageModel and JoinEventModel subtypes."""
+    chat = ChatMessageModel(
         id="evt_chat_1",
         name="Chat",
         body="",
@@ -102,7 +102,7 @@ def test_entity_to_frontmatter_dict_event_subtypes():
     assert fm["character_id"] == "char_eldric"
     assert fm["message"] == "Hello!"
 
-    join = JoinEvent(
+    join = JoinEventModel(
         id="evt_join_1",
         name="Join",
         body="",
@@ -118,7 +118,7 @@ def test_entity_to_frontmatter_dict_event_subtypes():
 
 def test_entity_to_frontmatter_dict_matches_model_dump_plus_type():
     """Frontmatter dict is identical to model_dump() + type, minus body."""
-    char = Character(
+    char = CharacterModel(
         id="char_test",
         name="Test",
         body="Body text.",
@@ -136,7 +136,7 @@ def test_entity_to_frontmatter_dict_matches_model_dump_plus_type():
 
 def test_entity_to_frontmatter_dict_field_ordering():
     """Field ordering is deterministic: name, id, type first, then remaining."""
-    char = Character(
+    char = CharacterModel(
         id="char_test",
         name="Test",
         body="Body.",
@@ -154,7 +154,7 @@ def test_entity_to_frontmatter_dict_field_ordering():
 
 
 def test_frontmatter_dict_to_entity_character():
-    """frontmatter_dict_to_entity reconstructs Character from dict + body."""
+    """frontmatter_dict_to_entity reconstructs CharacterModel from dict + body."""
     data = {
         "name": "Eldric",
         "id": "char_eldric",
@@ -164,14 +164,14 @@ def test_frontmatter_dict_to_entity_character():
         "unseen": False,
     }
     entity = frontmatter_dict_to_entity(data, "A brave warrior.")
-    assert isinstance(entity, Character)
+    assert isinstance(entity, CharacterModel)
     assert entity.name == "Eldric"
     assert entity.body == "A brave warrior."
     assert entity.location_id == "loc_tavern"
 
 
 def test_frontmatter_dict_to_entity_location_connected():
-    """frontmatter_dict_to_entity reconstructs Location with connected_locations."""
+    """frontmatter_dict_to_entity reconstructs LocationModel with connected_locations."""
     data = {
         "name": "Tavern",
         "id": "loc_tavern",
@@ -179,7 +179,7 @@ def test_frontmatter_dict_to_entity_location_connected():
         "connected_locations": ["loc_castle"],
     }
     entity = frontmatter_dict_to_entity(data, "A tavern.")
-    assert isinstance(entity, Location)
+    assert isinstance(entity, LocationModel)
     assert entity.connected_locations == ["loc_castle"]
 
 
@@ -187,7 +187,7 @@ def test_frontmatter_dict_to_entity_infers_type_from_subdir():
     """When type field missing, infers from subdirectory hint."""
     data = {"name": "Sword", "id": "item_sword"}
     entity = frontmatter_dict_to_entity(data, "Sharp.", type_hint="items")
-    assert isinstance(entity, Item)
+    assert isinstance(entity, ItemModel)
 
 
 def test_frontmatter_dict_to_entity_raises_on_unknown_type():
@@ -299,15 +299,15 @@ def test_memory_roundtrip():
 def test_entity_roundtrip_all_types():
     """Full roundtrip entity -> frontmatter_dict -> entity for all entity types."""
     entities = [
-        Character(id="c1", name="C", body="B", location_id="l1", inventory=["i1"]),
-        Location(id="l1", name="L", body="B", connected_locations=["l2"]),
-        Item(id="i1", name="I", body="B"),
-        Scene(id="s1", name="S", body="B", location_id="l1"),
-        Event(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z"),
-        JoinEvent(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
-        LeaveEvent(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
-        FastForwardEvent(id="ff1", name="FF", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", duration_str="2 hours"),
-        ChatMessage(id="cm1", name="Chat", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", character_id="c1", message="Hello"),
+        CharacterModel(id="c1", name="C", body="B", location_id="l1", inventory=["i1"]),
+        LocationModel(id="l1", name="L", body="B", connected_locations=["l2"]),
+        ItemModel(id="i1", name="I", body="B"),
+        SceneModel(id="s1", name="S", body="B", location_id="l1"),
+        EventModel(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z"),
+        JoinEventModel(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
+        LeaveEventModel(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
+        FastForwardEventModel(id="ff1", name="FF", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", duration_str="2 hours"),
+        ChatMessageModel(id="cm1", name="Chat", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", character_id="c1", message="Hello"),
     ]
     for original in entities:
         fm, body = entity_to_frontmatter_dict(original)
@@ -355,7 +355,7 @@ def test_entity_type_to_subdir_mapping():
 
 
 def test_entity_type_to_subdir_event_subtypes():
-    """Event subtypes all map to events/."""
+    """EventModel subtypes all map to events/."""
     assert entity_type_to_subdir("ChatMessage") == "events"
     assert entity_type_to_subdir("JoinEvent") == "events"
     assert entity_type_to_subdir("LeaveEvent") == "events"

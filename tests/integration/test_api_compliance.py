@@ -2,10 +2,12 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
+from sidestage.models import (
+    EntityModel, SceneModel, CharacterModel, LocationModel, ItemModel, EventModel, ChatMessageModel,
+)
 from sidestage.schemas import (
-    Entity, Scene, Character, Location, Item, Event, ChatMessage,
     SceneCreateRequest, EntityMarkdownUpdateRequest, ChatRequest,
-    EntityListResponse, EntityMarkdownResponse, StatusResponse
+    EntityListResponse, EntityMarkdownResponse, StatusResponse,
 )
 from sidestage.agent import AgentResponse
 from unittest.mock import MagicMock, AsyncMock
@@ -41,7 +43,7 @@ class TestApiCompliance:
 
     def test_list_entities_schema(self):
         # Create a dummy entity
-        char = Character(id="char_1", name="Test Character", body="Body")
+        char = CharacterModel(id="char_1", name="Test CharacterModel", body="Body")
         self.orchestrator.campaign.storage.add_character(char)
         
         response = self.client.get("/v1/entities")
@@ -58,18 +60,18 @@ class TestApiCompliance:
         assert found["type"] == "Character"
 
     def test_create_scene_schema(self):
-        req = SceneCreateRequest(name="Test Scene", description="Desc", current_gametime=100)
+        req = SceneCreateRequest(name="Test SceneModel", description="Desc", current_gametime=100)
         response = self.client.post("/v1/scenes", json=req.model_dump())
         assert response.status_code == 200
         data = response.json()
         
         # Validate response schema
-        scene = Scene(**data) # Should not raise
-        assert scene.name == "Test Scene"
+        scene = SceneModel(**data) # Should not raise
+        assert scene.name == "Test SceneModel"
         assert scene.current_gametime == 100
 
     def test_update_entity_markdown_schema(self):
-        char = Character(id="char_2", name="Markdown Character", body="Body")
+        char = CharacterModel(id="char_2", name="Markdown CharacterModel", body="Body")
         self.orchestrator.campaign.storage.add_character(char)
         
         req = EntityMarkdownUpdateRequest(markdown="---\nname: Updated Name\ntype: Character\n---\nNew Body")
@@ -88,7 +90,7 @@ class TestApiCompliance:
 
     def test_chat_endpoint_schema(self):
         # Ensure scene exists
-        self.orchestrator.campaign.storage.add_scene(Scene(id="scene_1", name="S1", body="B"))
+        self.orchestrator.campaign.storage.add_scene(SceneModel(id="scene_1", name="S1", body="B"))
         
         req = ChatRequest(message="Hello", scene_id="scene_1")
         response = self.client.post("/v1/chat", json=req.model_dump())
@@ -101,18 +103,18 @@ class TestApiCompliance:
         assert data["agent_message"] is None # Asynchronous architecture means None in response
 
     def test_get_entity_markdown(self):
-        char = Character(id="char_md", name="MD Character", body="MD Body")
+        char = CharacterModel(id="char_md", name="MD CharacterModel", body="MD Body")
         self.orchestrator.campaign.storage.add_character(char)
         
         response = self.client.get("/v1/entities/char_md/markdown")
         assert response.status_code == 200
         data = response.json()
         assert "markdown" in data
-        assert "MD Character" in data["markdown"]
+        assert "MD CharacterModel" in data["markdown"]
         assert "MD Body" in data["markdown"]
 
     def test_update_entity_data(self):
-        char = Character(id="char_data", name="Old Name", body="Old Body")
+        char = CharacterModel(id="char_data", name="Old Name", body="Old Body")
         self.orchestrator.campaign.storage.add_character(char)
         
         response = self.client.post("/v1/entities/char_data", json={"name": "New Name", "type": "Character", "body": "New Body"})
@@ -124,7 +126,7 @@ class TestApiCompliance:
         assert updated.name == "New Name"
 
     def test_list_scenes(self):
-        self.orchestrator.campaign.storage.add_scene(Scene(id="scene_list", name="S List", body="B"))
+        self.orchestrator.campaign.storage.add_scene(SceneModel(id="scene_list", name="S List", body="B"))
         response = self.client.get("/v1/scenes")
         assert response.status_code == 200
         data = response.json()
@@ -132,13 +134,13 @@ class TestApiCompliance:
         assert any(s["id"] == "scene_list" for s in data)
 
     def test_get_scene_messages(self):
-        # Fix ChatMessage instantiation to include required character_id and actor_id
-        msg = ChatMessage(
+        # Fix ChatMessageModel instantiation to include required character_id and actor_id
+        msg = ChatMessageModel(
             id="msg_1", name="M1", body="B1", scene_id="scene_msg", 
             gametime=0, walltime="now", actor_id="user", message="Hello",
             character_id="char_user"
         )
-        self.orchestrator.campaign.storage.add_scene(Scene(id="scene_msg", name="S Msg", body="B", messages=[msg]))
+        self.orchestrator.campaign.storage.add_scene(SceneModel(id="scene_msg", name="S Msg", body="B", messages=[msg]))
         
         response = self.client.get("/v1/scenes/scene_msg/messages")
         assert response.status_code == 200
@@ -148,7 +150,7 @@ class TestApiCompliance:
         assert data[0]["message"] == "Hello"
 
     def test_export_import_entities(self):
-        char = Character(id="char_exp", name="Export Character", body="Body")
+        char = CharacterModel(id="char_exp", name="Export CharacterModel", body="Body")
         self.orchestrator.campaign.storage.add_character(char)
         
         # Export
@@ -162,7 +164,7 @@ class TestApiCompliance:
         
         # Modify file and Import
         content = exp_file.read_text()
-        exp_file.write_text(content.replace("Export Character", "Imported Character"))
+        exp_file.write_text(content.replace("Export CharacterModel", "Imported CharacterModel"))
         
         resp_imp = self.client.post("/v1/entities/import", json={})
         assert resp_imp.status_code == 200
@@ -173,5 +175,5 @@ class TestApiCompliance:
         # Storage.add_character uses INSERT OR REPLACE, so it should update.
         # Let's verify.
         assert updated is not None
-        assert updated.name == "Imported Character"
+        assert updated.name == "Imported CharacterModel"
 

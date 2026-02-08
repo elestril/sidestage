@@ -36,4 +36,4 @@ Args:
     scene_id (str): The ID of the scene.
 
 Returns:
-    Optional[Any]: The active SceneLogic instance, or None if not found.
+    Optional[Any]: The active Scene instance, or None if not found.

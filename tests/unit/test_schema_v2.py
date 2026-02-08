@@ -166,11 +166,11 @@ async def test_fresh_graph_runs_v1_and_v2_migrations():
 
     queries = [c.args[0] for c in client.graph.query.call_args_list]
 
-    # v1 artifacts: Entity indexes and constraints
+    # v1 artifacts: EntityModel indexes and constraints
     assert any("CREATE INDEX" in q and "Entity" in q for q in queries), \
-        "v1 migration should create Entity indexes"
+        "v1 migration should create EntityModel indexes"
     assert any("CREATE CONSTRAINT" in q for q in queries), \
-        "v1 migration should create Entity constraints"
+        "v1 migration should create EntityModel constraints"
 
     # v2 artifacts: Memory range indexes
     assert any("CREATE INDEX" in q and "Memory" in q for q in queries), \

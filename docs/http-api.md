@@ -110,7 +110,7 @@ Sent by client when editing entity markdown content.
 
 Returns a list of all entities in the campaign.
 
-**Response:** `List[Entity]`
+**Response:** `List[EntityModel]`
 ```json
 [
   {
@@ -284,7 +284,7 @@ Returns `409 Conflict` if campaign health is DEGRADED.
 
 Returns a list of all scenes.
 
-**Response:** `List[Scene]`
+**Response:** `List[SceneModel]`
 
 #### Create Scene
 **POST** `/v1/scenes`
@@ -300,14 +300,14 @@ Creates a new scene.
 }
 ```
 
-**Response:** `Scene`
+**Response:** `SceneModel`
 
 #### Get Scene Messages
 **GET** `/v1/scenes/{scene_id}/messages`
 
 Returns the message history for a scene.
 
-**Response:** `List[ChatMessage]`
+**Response:** `List[ChatMessageModel]`
 ```json
 [
   {

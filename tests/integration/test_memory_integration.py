@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from sidestage.schemas import Scene, Character, ChatMessage
-from sidestage.scene import SceneLogic
-from sidestage.character import CharacterLogic, AgentActor
+from sidestage.models import SceneModel, CharacterModel, ChatMessageModel
+from sidestage.scene import Scene
+from sidestage.character import Character, AgentActor
 from sidestage.agent import LiteLLMAgent
 
 
@@ -15,25 +15,25 @@ from sidestage.agent import LiteLLMAgent
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_scene(**overrides: Any) -> Scene:
+def _make_scene(**overrides: Any) -> SceneModel:
     defaults = dict(
         id="scene_test",
-        name="Test Scene",
+        name="Test SceneModel",
         body="A test scene.",
         current_gametime=100,
     )
     defaults.update(overrides)
-    return Scene(**defaults)  # type: ignore[arg-type]
+    return SceneModel(**defaults)  # type: ignore[arg-type]
 
 
-def _make_character(**overrides: Any) -> Character:
+def _make_character(**overrides: Any) -> CharacterModel:
     defaults = dict(
         id="char_alice",
         name="Alice",
         body="A brave warrior.",
     )
     defaults.update(overrides)
-    return Character(**defaults)  # type: ignore[arg-type]
+    return CharacterModel(**defaults)  # type: ignore[arg-type]
 
 
 def _make_agent() -> MagicMock:
@@ -55,20 +55,20 @@ def _make_storage() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# SceneLogic accepts and stores memory deps
+# Scene accepts and stores memory deps
 # ---------------------------------------------------------------------------
 
 
-class TestSceneLogicMemoryDeps:
-    """SceneLogic accepts and stores memory-related parameters."""
+class TestSceneMemoryDeps:
+    """Scene accepts and stores memory-related parameters."""
 
     def test_accepts_memory_kwargs(self) -> None:
-        """SceneLogic stores embed_config, health, and context_limit."""
+        """Scene stores embed_config, health, and context_limit."""
         mock_client = MagicMock()
         mock_config = MagicMock()
         mock_health = MagicMock()
 
-        sl = SceneLogic(
+        sl = Scene(
             _make_storage(), _make_agent(), _make_scene(),
             graph_client=mock_client,
             embed_config=mock_config,
@@ -80,20 +80,20 @@ class TestSceneLogicMemoryDeps:
         assert sl.context_limit == 8192
 
     def test_backwards_compatible_without_memory_kwargs(self) -> None:
-        """SceneLogic works without memory-related arguments."""
-        sl = SceneLogic(_make_storage(), _make_agent(), _make_scene())
+        """Scene works without memory-related arguments."""
+        sl = Scene(_make_storage(), _make_agent(), _make_scene())
         assert sl.embed_config is None
         assert sl.health is None
         assert sl.context_limit == 4096
 
 
 # ---------------------------------------------------------------------------
-# SceneLogic.activate passes memory deps to CharacterLogic
+# Scene.activate passes memory deps to Character
 # ---------------------------------------------------------------------------
 
 
-class TestSceneLogicActivation:
-    """SceneLogic.activate() passes memory dependencies to CharacterLogic."""
+class TestSceneActivation:
+    """Scene.activate() passes memory dependencies to Character."""
 
     @pytest.mark.anyio
     async def test_activate_passes_graph_client_to_character_logic(self) -> None:
@@ -108,7 +108,7 @@ class TestSceneLogicActivation:
             _make_character(id="char_bob", name="Bob", body="A sly rogue."),
         ]
 
-        sl = SceneLogic(
+        sl = Scene(
             storage, _make_agent(), _make_scene(),
             embed_config=mock_config,
             health=mock_health,
@@ -119,7 +119,7 @@ class TestSceneLogicActivation:
         await sl.activate()
 
         for char_logic in sl.characters.values():
-            assert char_logic.graph_client is None  # No graph_client on SceneLogic
+            assert char_logic.graph_client is None  # No graph_client on Scene
             assert char_logic.embed_config is mock_config
             assert char_logic.health is mock_health
             assert char_logic.context_limit == 8192
@@ -132,7 +132,7 @@ class TestSceneLogicActivation:
         bob = _make_character(id="char_bob", name="Bob", body="A sly rogue.")
         storage.list_characters.return_value = [alice, bob]
 
-        sl = SceneLogic(
+        sl = Scene(
             storage, _make_agent(), _make_scene(id="scene_tavern"),
             health=MagicMock(),
         )
@@ -154,7 +154,7 @@ class TestSceneLogicActivation:
             _make_character(id="char_alice"),
         ]
 
-        sl = SceneLogic(
+        sl = Scene(
             _make_storage(), _make_agent(), _make_scene(),
             graph_client=mock_client,
             health=MagicMock(),
@@ -169,12 +169,12 @@ class TestSceneLogicActivation:
 
 
 # ---------------------------------------------------------------------------
-# Full wiring chain: SceneLogic -> CharacterLogic -> AgentActor
+# Full wiring chain: Scene -> Character -> AgentActor
 # ---------------------------------------------------------------------------
 
 
 class TestFullWiringChain:
-    """Verify memory deps flow from SceneLogic to AgentActor."""
+    """Verify memory deps flow from Scene to AgentActor."""
 
     @pytest.mark.anyio
     async def test_actor_receives_memory_deps_after_activation(self) -> None:
@@ -186,7 +186,7 @@ class TestFullWiringChain:
         storage = _make_storage()
         storage.list_characters.return_value = [_make_character(id="char_alice")]
 
-        sl = SceneLogic(
+        sl = Scene(
             storage, _make_agent(), _make_scene(id="scene_01"),
             embed_config=mock_config,
             health=mock_health,
@@ -215,7 +215,7 @@ class TestFullWiringChain:
         storage = _make_storage()
         storage.list_characters.return_value = [_make_character(id="char_alice")]
 
-        sl = SceneLogic(
+        sl = Scene(
             storage, _make_agent(), _make_scene(id="scene_01"),
             graph_client=mock_client,
             embed_config=mock_config,
@@ -238,12 +238,12 @@ class TestFullWiringChain:
 
 
 # ---------------------------------------------------------------------------
-# Health check in SceneLogic.chat()
+# Health check in Scene.chat()
 # ---------------------------------------------------------------------------
 
 
-class TestSceneLogicHealthCheck:
-    """SceneLogic.chat() respects health status."""
+class TestSceneHealthCheck:
+    """Scene.chat() respects health status."""
 
     @pytest.mark.anyio
     async def test_chat_proceeds_when_healthy(self) -> None:
@@ -251,14 +251,14 @@ class TestSceneLogicHealthCheck:
         mock_health = MagicMock()
         mock_health.is_accepting_chat = True
 
-        sl = SceneLogic(
+        sl = Scene(
             _make_storage(), _make_agent(), _make_scene(),
             health=mock_health,
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessage(
+        msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_test", gametime=0, walltime="now",
@@ -272,14 +272,14 @@ class TestSceneLogicHealthCheck:
         mock_health = MagicMock()
         mock_health.is_accepting_chat = False
 
-        sl = SceneLogic(
+        sl = Scene(
             _make_storage(), _make_agent(), _make_scene(),
             health=mock_health,
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessage(
+        msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_test", gametime=0, walltime="now",
@@ -290,13 +290,13 @@ class TestSceneLogicHealthCheck:
     @pytest.mark.anyio
     async def test_chat_proceeds_without_health(self) -> None:
         """Chat proceeds when health is None (backwards compatible)."""
-        sl = SceneLogic(
+        sl = Scene(
             _make_storage(), _make_agent(), _make_scene(),
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessage(
+        msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_test", gametime=0, walltime="now",
@@ -311,10 +311,10 @@ class TestSceneLogicHealthCheck:
 
 
 class TestCampaignGetSceneObject:
-    """Campaign.get_scene_object() passes memory dependencies to SceneLogic."""
+    """Campaign.get_scene_object() passes memory dependencies to Scene."""
 
     def test_get_scene_object_passes_health_and_embed_config(self) -> None:
-        """get_scene_object creates SceneLogic with health and embed config."""
+        """get_scene_object creates Scene with health and embed config."""
         from sidestage.campaign import Campaign
         from sidestage.config import LLMConfig, SidestageConfig
         from sidestage.graph import GraphConfig

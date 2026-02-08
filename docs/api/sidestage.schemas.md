@@ -1,34 +1,10 @@
 # `sidestage.schemas`
 
+API request/response schemas for Sidestage HTTP and WebSocket endpoints.
+
+Domain model classes live in models.py.
+
 ## Classes
-
-### `Character(Entity)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `unseen` | `bool` | False |
-| `location_id` | `str | None` | — |
-| `inventory` | `list[str]` | *factory* |
-
-### `ChatMessage(Event)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `scene_id` | `str` | — |
-| `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `character_id` | `str` | — |
-| `actor_id` | `str | None` | — |
-| `message` | `str` | — |
-| `widget` | `dict[str, Any] | None` | — |
-
-#### `backfill_legacy_fields(data: Any) -> Any`
 
 ### `ChatRequest(BaseModel)`
 
@@ -41,16 +17,8 @@
 
 | Field | Type | Default |
 |-------|------|---------|
-| `user_message` | `ChatMessage` | — |
-| `agent_message` | `ChatMessage | None` | — |
-
-### `Entity(BaseModel)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
+| `user_message` | `ChatMessageModel` | — |
+| `agent_message` | `ChatMessageModel | None` | — |
 
 ### `EntityListResponse(BaseModel)`
 
@@ -66,93 +34,17 @@
 |-------|------|---------|
 | `markdown` | `str` | — |
 
-### `Event(Entity)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `scene_id` | `str` | — |
-| `gametime` | `int` | — |
-| `walltime` | `str` | — |
-
 ### `ExportResponse(BaseModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `message` | `str` | — |
 
-### `FastForwardEvent(Event)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `scene_id` | `str` | — |
-| `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `duration_str` | `str` | — |
-
 ### `ImportResponse(BaseModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `message` | `str` | — |
-
-### `Item(Entity)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-
-### `JoinEvent(Event)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `scene_id` | `str` | — |
-| `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `actor_id` | `str` | — |
-
-### `LeaveEvent(Event)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `scene_id` | `str` | — |
-| `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `actor_id` | `str` | — |
-
-### `Location(Entity)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `connected_locations` | `list[str]` | *factory* |
-
-### `Scene(Entity)`
-
-| Field | Type | Default |
-|-------|------|---------|
-| `name` | `str` | — |
-| `body` | `str` | — |
-| `id` | `str` | — |
-| `current_gametime` | `int | None` | — |
-| `location_id` | `str | None` | — |
-| `events` | `list[str]` | *factory* |
-| `messages` | `list[ChatMessage]` | *factory* |
 
 ### `SceneCreateRequest(BaseModel)`
 

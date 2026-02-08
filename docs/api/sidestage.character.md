@@ -11,26 +11,26 @@ The AgentActor is responsible for:
 2. Processing events dispatched by the scene's EventQueue worker.
 3. Generating responses via the LLM and putting them back on the queue.
 
-#### `__init__(character: Character, scene_logic: Any, graph_client: GraphClient | None = None, embed_config: LLMConfig | None = None, health: CampaignHealth | None = None, scene_id: str | None = None, present_character_ids: list[str] | None = None, context_limit: int = 4096)`
+#### `__init__(character: CharacterModel, scene_logic: Any, graph_client: GraphClient | None = None, embed_config: LLMConfig | None = None, health: CampaignHealth | None = None, scene_id: str | None = None, present_character_ids: list[str] | None = None, context_limit: int = 4096)`
 
-#### `on_event(event: Event) -> None` *async*
+#### `on_event(event: EventModel) -> None` *async*
 
 Handle an event dispatched by the scene's queue worker.
 
-Called directly by SceneLogic._dispatch_to_npcs for user-originated
+Called directly by Scene._dispatch_to_npcs for user-originated
 messages. Generates a response and puts it back on the queue.
 
 Args:
     event (Event): The event to process.
 
-### `CharacterLogic`
+### `Character`
 
 Runtime wrapper for a Character entity within a Scene.
 
 Manages the lifecycle of the character's 'brain' (AgentActor) and 
 provides access to the underlying character data.
 
-#### `__init__(character: Character, scene_logic: Any, graph_client: GraphClient | None = None, embed_config: LLMConfig | None = None, health: CampaignHealth | None = None, scene_id: str | None = None, present_character_ids: list[str] | None = None, context_limit: int = 4096)`
+#### `__init__(character: CharacterModel, scene_logic: Any, graph_client: GraphClient | None = None, embed_config: LLMConfig | None = None, health: CampaignHealth | None = None, scene_id: str | None = None, present_character_ids: list[str] | None = None, context_limit: int = 4096)`
 
 #### `activate() -> None` *async*
 

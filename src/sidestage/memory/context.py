@@ -14,7 +14,7 @@ from opentelemetry import trace
 from sidestage.memory.models import ContextResult, ContextMemories
 from sidestage.memory.store import get_memories_for_context, touch_memory
 
-from sidestage.schemas import ChatMessage
+from sidestage.models import ChatMessageModel
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
@@ -60,7 +60,7 @@ def _format_memories(memories: ContextMemories, character_names: dict[str, str] 
     return "\n\n".join(sections)
 
 
-def _trim_chat_history(messages: list[ChatMessage], word_budget: int) -> str:
+def _trim_chat_history(messages: list[ChatMessageModel], word_budget: int) -> str:
     """Trim chat messages to fit word budget, keeping most recent."""
     if not messages or word_budget <= 0:
         return ""
@@ -91,7 +91,7 @@ async def assemble_context(
     owner_id: str,
     scene_id: str,
     present_character_ids: list[str],
-    recent_messages: list[ChatMessage],
+    recent_messages: list[ChatMessageModel],
     context_limit: int,
     chat_history_ratio: float = DEFAULT_CHAT_HISTORY_RATIO,
     character_names: dict[str, str] | None = None,

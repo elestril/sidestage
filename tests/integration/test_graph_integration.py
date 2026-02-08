@@ -1,11 +1,11 @@
-"""Integration tests: verify Campaign, SceneLogic, and WorldTools route through graph module."""
+"""Integration tests: verify Campaign, Scene, and WorldTools route through graph module."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 from sidestage.graph import GraphConfig
 from sidestage.graph.client import GraphClient
-from sidestage.schemas import Character, Location, Item, Scene
+from sidestage.models import CharacterModel, LocationModel, ItemModel, SceneModel
 
 
 # --- GraphConfig in SidestageConfig ---
@@ -128,7 +128,7 @@ async def test_world_tools_list_characters_delegates_to_graph():
 
     wt = WorldTools(storage=storage, graph_client=client)
 
-    mock_char = Character(id="char_1", name="Alice", body="A warrior")
+    mock_char = CharacterModel(id="char_1", name="Alice", body="A warrior")
     with patch("sidestage.graph.list_entities", new_callable=AsyncMock) as mock_list:
         mock_list.return_value = [mock_char]
         result = await wt.list_characters()
@@ -147,7 +147,7 @@ async def test_world_tools_get_character_delegates_to_graph():
 
     wt = WorldTools(storage=storage, graph_client=client)
 
-    mock_char = Character(id="char_1", name="Alice", body="A warrior")
+    mock_char = CharacterModel(id="char_1", name="Alice", body="A warrior")
     with patch("sidestage.graph.get_entity", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_char
         result = await wt.get_character("char_1")
@@ -157,52 +157,52 @@ async def test_world_tools_get_character_delegates_to_graph():
     assert "Alice" in result
 
 
-# --- SceneLogic graph delegation ---
+# --- Scene graph delegation ---
 
 
 def test_scene_logic_accepts_graph_client():
-    """SceneLogic constructor accepts optional graph_client."""
-    from sidestage.scene import SceneLogic
+    """Scene constructor accepts optional graph_client."""
+    from sidestage.scene import Scene
 
     storage = MagicMock()
     agent = MagicMock()
-    scene_data = Scene(id="s1", name="Test", body="desc", current_gametime=0)
+    scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
     client = MagicMock(spec=GraphClient)
 
-    sl = SceneLogic(storage, agent, scene_data, graph_client=client)
+    sl = Scene(storage, agent, scene_data, graph_client=client)
 
     assert sl.graph_client is client
 
 
 def test_scene_logic_graph_client_defaults_none():
-    """SceneLogic graph_client defaults to None."""
-    from sidestage.scene import SceneLogic
+    """Scene graph_client defaults to None."""
+    from sidestage.scene import Scene
 
     storage = MagicMock()
     agent = MagicMock()
-    scene_data = Scene(id="s1", name="Test", body="desc", current_gametime=0)
+    scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
 
-    sl = SceneLogic(storage, agent, scene_data)
+    sl = Scene(storage, agent, scene_data)
 
     assert sl.graph_client is None
 
 
 @pytest.mark.anyio
 async def test_scene_logic_activate_uses_graph_for_characters():
-    """SceneLogic.activate uses graph.list_entities for characters when graph_client set."""
-    from sidestage.scene import SceneLogic
+    """Scene.activate uses graph.list_entities for characters when graph_client set."""
+    from sidestage.scene import Scene
 
     storage = MagicMock()
     agent = MagicMock()
-    scene_data = Scene(id="s1", name="Test", body="desc", current_gametime=0)
+    scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
     client = MagicMock(spec=GraphClient)
 
-    sl = SceneLogic(storage, agent, scene_data, graph_client=client)
+    sl = Scene(storage, agent, scene_data, graph_client=client)
     # Mock the queue to avoid needing a real event loop for asyncio.create_task
     sl.queue = MagicMock()
     sl.queue.start = AsyncMock()
 
-    mock_char = Character(id="char_1", name="Alice", body="A warrior")
+    mock_char = CharacterModel(id="char_1", name="Alice", body="A warrior")
     with patch("sidestage.graph.list_entities", new_callable=AsyncMock) as mock_list:
         mock_list.return_value = [mock_char]
         await sl.activate()
@@ -213,15 +213,15 @@ async def test_scene_logic_activate_uses_graph_for_characters():
 
 @pytest.mark.anyio
 async def test_scene_logic_activate_falls_back_to_storage():
-    """SceneLogic.activate uses Storage for characters when graph_client is None."""
-    from sidestage.scene import SceneLogic
+    """Scene.activate uses Storage for characters when graph_client is None."""
+    from sidestage.scene import Scene
 
     storage = MagicMock()
     storage.list_characters.return_value = []
     agent = MagicMock()
-    scene_data = Scene(id="s1", name="Test", body="desc", current_gametime=0)
+    scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
 
-    sl = SceneLogic(storage, agent, scene_data)
+    sl = Scene(storage, agent, scene_data)
     # Mock the queue to avoid needing a real event loop for asyncio.create_task
     sl.queue = MagicMock()
     sl.queue.start = AsyncMock()

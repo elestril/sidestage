@@ -97,7 +97,7 @@ class SidestageOrchestrator:
         self.campaigns: Dict[str, Campaign] = {}
         self.active_campaign_name = campaign_name
 
-        # Active scenes across all campaigns (scene_id -> SceneLogic)
+        # Active scenes across all campaigns (scene_id -> Scene)
         self.active_scenes: Dict[str, Any] = {}
 
         # Initialize the requested campaign
@@ -180,7 +180,7 @@ class SidestageOrchestrator:
             scene_id (str): The ID of the scene.
 
         Returns:
-            Optional[Any]: The active SceneLogic instance, or None if not found.
+            Optional[Any]: The active Scene instance, or None if not found.
         """
         if scene_id in self.active_scenes:
             return self.active_scenes[scene_id]
@@ -219,7 +219,7 @@ class SidestageOrchestrator:
             if scene:
                 # Convert dict to ChatMessage schema
                 # This assumes the frontend sends a format that matches ChatMessage or can be adapted
-                from sidestage.schemas import ChatMessage
+                from sidestage.models import ChatMessageModel
                 try:
                     # If it's a raw text from user, we need to create a proper ChatMessage
                     text = message.get("text")

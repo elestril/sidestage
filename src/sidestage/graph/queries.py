@@ -11,7 +11,7 @@ from typing import Any, cast, TYPE_CHECKING
 
 from sidestage.graph.entities import node_to_entity
 from sidestage.graph.errors import QueryError
-from sidestage.schemas import Character, Entity, Event, Location
+from sidestage.models import CharacterModel, EntityModel, EventModel, LocationModel
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def characters_at_location(client: GraphClient, location_id: str) -> list[Character]:
+async def characters_at_location(client: GraphClient, location_id: str) -> list[CharacterModel]:
     """All characters currently at a location (via LOCATED_IN).
 
     Returns a list of Character models. Returns empty list if no characters
@@ -37,12 +37,12 @@ async def characters_at_location(client: GraphClient, location_id: str) -> list[
     except Exception as exc:
         raise QueryError(f"Failed to query characters at location '{location_id}': {exc}") from exc
 
-    characters = cast(list[Character], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
+    characters = cast(list[CharacterModel], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("characters_at_location returned %d characters", len(characters))
     return characters
 
 
-async def connected_locations(client: GraphClient, location_id: str) -> list[Location]:
+async def connected_locations(client: GraphClient, location_id: str) -> list[LocationModel]:
     """All locations connected to a given location (CONNECTS_TO, both directions).
 
     Uses undirected match since CONNECTS_TO is semantically bidirectional.
@@ -60,14 +60,14 @@ async def connected_locations(client: GraphClient, location_id: str) -> list[Loc
     except Exception as exc:
         raise QueryError(f"Failed to query connected locations for '{location_id}': {exc}") from exc
 
-    locations = cast(list[Location], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
+    locations = cast(list[LocationModel], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("connected_locations returned %d locations", len(locations))
     return locations
 
 
 async def scene_events(
     client: GraphClient, scene_id: str, since_gametime: int | None = None
-) -> list[Event]:
+) -> list[EventModel]:
     """Events in a scene, optionally filtered by gametime.
 
     Returns a list of Event models (may include ChatMessage subtype based
@@ -89,7 +89,7 @@ async def scene_events(
     except Exception as exc:
         raise QueryError(f"Failed to query events for scene '{scene_id}': {exc}") from exc
 
-    events = cast(list[Event], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
+    events = cast(list[EventModel], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
     logger.debug("scene_events returned %d events", len(events))
     return events
 

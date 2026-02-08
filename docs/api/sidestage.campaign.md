@@ -28,7 +28,7 @@ Instantiate the main Co-Author agent based on campaign config.
 Returns:
     LiteLLMAgent: The configured agent instance.
 
-#### `create_scene(name: str, description: str, current_gametime: int | None) -> Scene` *async*
+#### `create_scene(name: str, description: str, current_gametime: int | None) -> SceneModel` *async*
 
 Create and persist a new scene.
 
@@ -50,19 +50,19 @@ Args:
 Raises:
     KeyError: If the named LLM config doesn't exist.
 
-#### `get_scene_messages(scene_id: str) -> list[ChatMessage] | None`
+#### `get_scene_messages(scene_id: str) -> list[ChatMessageModel] | None`
 
 Get the message history for a specific scene.
 
-#### `get_scene_object(scene_id: str) -> SceneLogic | None`
+#### `get_scene_object(scene_id: str) -> Scene | None`
 
-Factory to get a SceneLogic object for the given ID.
+Factory to get a Scene object for the given ID.
 
 Args:
     scene_id (str): The scene ID.
 
 Returns:
-    Optional[SceneLogic]: The logic object, or None if scene doesn't exist.
+    Optional[Scene]: The logic object, or None if scene doesn't exist.
 
 #### `import_entities() -> int` *async*
 

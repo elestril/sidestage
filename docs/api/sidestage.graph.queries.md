@@ -7,14 +7,14 @@ entity and relationship operations into single graph traversals.
 
 ## Functions
 
-### `characters_at_location(client: GraphClient, location_id: str) -> list[Character]` *async*
+### `characters_at_location(client: GraphClient, location_id: str) -> list[CharacterModel]` *async*
 
 All characters currently at a location (via LOCATED_IN).
 
 Returns a list of Character models. Returns empty list if no characters
 are at the location or if the location does not exist.
 
-### `connected_locations(client: GraphClient, location_id: str) -> list[Location]` *async*
+### `connected_locations(client: GraphClient, location_id: str) -> list[LocationModel]` *async*
 
 All locations connected to a given location (CONNECTS_TO, both directions).
 
@@ -29,7 +29,7 @@ Returns a dict with:
     - "entity": the center Entity model (or None if not found)
     - "related": list of Entity models within the given depth
 
-### `scene_events(client: GraphClient, scene_id: str, since_gametime: int | None = None) -> list[Event]` *async*
+### `scene_events(client: GraphClient, scene_id: str, since_gametime: int | None = None) -> list[EventModel]` *async*
 
 Events in a scene, optionally filtered by gametime.
 

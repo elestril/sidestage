@@ -7,7 +7,7 @@ relationships between entity nodes.
 
 ## Functions
 
-### `get_related(client: GraphClient, entity_id: str, rel_type: str, direction: str = 'outgoing') -> list[Entity]` *async*
+### `get_related(client: GraphClient, entity_id: str, rel_type: str, direction: str = 'outgoing') -> list[EntityModel]` *async*
 
 Get entities related via a specific relationship type.
 

@@ -15,7 +15,7 @@ from sidestage.migration.serialization import (
     frontmatter_dict_to_entity,
     frontmatter_dict_to_memory,
 )
-from sidestage.schemas import Entity
+from sidestage.models import EntityModel
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def _parse_entity_file(
     subdir_type: str,
     errors: list[MigrationValidationIssue],
     warnings: list[MigrationValidationIssue],
-) -> Entity | None:
+) -> EntityModel | None:
     """Parse a single entity .md file. Returns entity or None on failure."""
     path_str = str(file_path)
     content = file_path.read_text()
@@ -162,7 +162,7 @@ def parse_directory(markdown_dir: Path) -> ParseResult:
     """
     errors: list[MigrationValidationIssue] = []
     warnings: list[MigrationValidationIssue] = []
-    entities: list[Entity] = []
+    entities: list[EntityModel] = []
     memories: list[Memory] = []
     chatlogs: dict[str, list[str]] = {}
 
@@ -202,7 +202,7 @@ def parse_directory(markdown_dir: Path) -> ParseResult:
                 entities.append(entity)
 
             seen_ids[entity_id] = file_str
-            stem_to_entity[(subdir_name, md_file.stem)] = (entity_id, type(entity).__name__)
+            stem_to_entity[(subdir_name, md_file.stem)] = (entity_id, entity.entity_type)
 
     # Step 3: Parse companion .d/ directories
     for subdir_name in SUBDIR_TO_TYPE:

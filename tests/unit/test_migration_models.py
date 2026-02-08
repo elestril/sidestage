@@ -85,7 +85,7 @@ class TestMigrationValidationReport:
         assert len(report.errors) == 1
 
     def test_entity_counts_dict(self):
-        """entity_counts holds per-type counts like {'Character': 3, 'Location': 2}."""
+        """entity_counts holds per-type counts like {'CharacterModel': 3, 'LocationModel': 2}."""
         report = MigrationValidationReport(
             valid=True,
             entities_found=5,

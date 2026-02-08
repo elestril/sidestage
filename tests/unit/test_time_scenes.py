@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from sidestage.time import Gametime
-from sidestage.models import Scene, Event
+from sidestage.models import SceneModel, EventModel
 from sidestage.storage import Storage
 
 def test_gametime_conversion():
@@ -15,9 +15,9 @@ def test_gametime_conversion():
 def test_scene_crud(tmp_path: Path):
     storage = Storage(db_path=tmp_path / "test.db")
     
-    scene = Scene(
+    scene = SceneModel(
         id="scene_1",
-        name="Test Scene",
+        name="Test SceneModel",
         body="A test scene",
         current_gametime=3600
     )
@@ -25,7 +25,7 @@ def test_scene_crud(tmp_path: Path):
     storage.add_scene(scene)
     retrieved = storage.get_scene("scene_1")
     assert retrieved is not None
-    assert retrieved.name == "Test Scene"
+    assert retrieved.name == "Test SceneModel"
     assert retrieved.current_gametime == 3600
     
     scenes = storage.list_scenes()
@@ -35,9 +35,9 @@ def test_scene_crud(tmp_path: Path):
 def test_event_storage(tmp_path: Path):
     storage = Storage(db_path=tmp_path / "test.db")
     
-    event = Event(
+    event = EventModel(
         id="event_1",
-        name="Test Event",
+        name="Test EventModel",
         scene_id="scene_1",
         gametime=3600,
         walltime="2026-01-30T22:30:00",

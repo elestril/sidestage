@@ -5,10 +5,10 @@ import uuid
 
 from opentelemetry import trace
 
-from sidestage.schemas import Character, Scene, ChatRequest, ChatMessage, Event
+from sidestage.models import CharacterModel, SceneModel, ChatMessageModel, EventModel
 from sidestage.entities import entity_to_markdown
 from sidestage.bus import EventQueue
-from sidestage.character import CharacterLogic
+from sidestage.character import Character
 from sidestage.storage import Storage
 from sidestage.agent import LiteLLMAgent
 from sidestage.tracing.middleware import record_error
@@ -23,15 +23,15 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("sidestage.scene")
 
 # Callback type for broadcasting events to websocket clients
-BroadcastFn = Callable[[ChatMessage], Awaitable[None]]
+BroadcastFn = Callable[[ChatMessageModel], Awaitable[None]]
 
-class SceneLogic:
+class Scene:
     """
     Manages the runtime state and logic of a specific Scene.
 
     This class orchestrates:
     - An EventQueue whose worker persists, broadcasts, and dispatches events.
-    - Active CharacterLogic instances (agents).
+    - Active Character instances (agents).
     - Persistence of scene data via Storage.
     - Creation and routing of chat messages.
     """
@@ -39,7 +39,7 @@ class SceneLogic:
         self,
         storage: Storage,
         agent: LiteLLMAgent,
-        data: Scene,
+        data: SceneModel,
         graph_client: "GraphClient | None" = None,
         embed_config: "LLMConfig | None" = None,
         health: "CampaignHealth | None" = None,
@@ -53,7 +53,7 @@ class SceneLogic:
         self.health = health
         self.context_limit = context_limit
         self.queue = EventQueue()
-        self.characters: Dict[str, CharacterLogic] = {}
+        self.characters: Dict[str, Character] = {}
         self._active = False
         self._broadcast_fn: Optional[BroadcastFn] = None
 
@@ -61,20 +61,20 @@ class SceneLogic:
         """Set the callback used to broadcast events to websocket clients."""
         self._broadcast_fn = fn
 
-    async def _process_event(self, event: Event) -> None:
+    async def _process_event(self, event: EventModel) -> None:
         """
         Queue worker handler. For each event:
         (a) Persist to storage and graph.
         (b) Broadcast to websocket clients.
         (c) For user-originated ChatMessages: dispatch to all NPCs.
         """
-        if not isinstance(event, ChatMessage):
+        if not isinstance(event, ChatMessageModel):
             return
 
         with tracer.start_as_current_span("scene.process_event") as span:
             span.set_attribute("sidestage.scene.id", self.id)
             span.set_attribute("sidestage.event.id", event.id)
-            span.set_attribute("sidestage.event.type", type(event).__name__)
+            span.set_attribute("sidestage.event.type", event.entity_type)
             span.set_attribute("sidestage.actor.id", event.actor_id or "unknown")
             try:
                 # (a) Persist
@@ -102,7 +102,7 @@ class SceneLogic:
                 record_error(span, exc)
                 raise
 
-    async def _dispatch_to_npcs(self, event: ChatMessage) -> None:
+    async def _dispatch_to_npcs(self, event: ChatMessageModel) -> None:
         """Send an event to all active NPC agents."""
         with tracer.start_as_current_span("scene.dispatch_to_npcs") as span:
             span.set_attribute("sidestage.npc_count", len(self.characters))
@@ -137,8 +137,8 @@ class SceneLogic:
         present_character_ids = [c.id for c in all_chars]
 
         for char_data in all_chars:
-            char_logic = CharacterLogic(
-                cast(Character, char_data), self,
+            char_logic = Character(
+                cast(CharacterModel, char_data), self,
                 graph_client=self.graph_client,
                 embed_config=self.embed_config,
                 health=self.health,
@@ -175,11 +175,11 @@ class SceneLogic:
         return self.data.id
 
     @property
-    def messages(self) -> List[ChatMessage]:
+    def messages(self) -> List[ChatMessageModel]:
         """Get the list of messages in this scene."""
         return self.data.messages
 
-    def create_message(self, actor_id: str, text: str, character_id: Optional[str] = None) -> ChatMessage:
+    def create_message(self, actor_id: str, text: str, character_id: Optional[str] = None) -> ChatMessageModel:
         """
         Factory method to create a ChatMessage associated with this scene.
 
@@ -192,7 +192,7 @@ class SceneLogic:
             character_id (Optional[str]): The ID of the character persona. Defaults to actor_id if None.
 
         Returns:
-            ChatMessage: The constructed message object.
+            ChatMessageModel: The constructed message object.
         """
         import uuid
         from datetime import datetime
@@ -200,7 +200,7 @@ class SceneLogic:
         # Fallback for now until Actor system is fully integrated
         final_character_id = character_id or actor_id
 
-        return ChatMessage(
+        return ChatMessageModel(
             id=f"msg_{str(uuid.uuid4())[:8]}",
             name=f"{actor_id.capitalize()} Message",
             body=text,
@@ -212,7 +212,7 @@ class SceneLogic:
             message=text
         )
 
-    async def chat(self, user_message: ChatMessage) -> None:
+    async def chat(self, user_message: ChatMessageModel) -> None:
         """
         Entry point for user chat interaction.
 
@@ -220,7 +220,7 @@ class SceneLogic:
         persist it, broadcast it, and dispatch it to NPCs.
 
         Args:
-            user_message (ChatMessage): The message from the user.
+            user_message (ChatMessageModel): The message from the user.
         """
         if self.health is not None and not self.health.is_accepting_chat:
             logger.warning("Chat rejected: campaign health is UNHEALTHY")

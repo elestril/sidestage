@@ -8,8 +8,8 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from sidestage.agent import LiteLLMAgent, AgentResponse
-from sidestage.character import AgentActor, CharacterLogic
-from sidestage.schemas import Character, ChatMessage
+from sidestage.character import AgentActor, Character
+from sidestage.models import CharacterModel, ChatMessageModel
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ def _make_scene_logic(**overrides: Any) -> MagicMock:
     sl.agent.debug_mode = False
     sl.messages = []
     sl.queue.put = AsyncMock()
-    sl.create_message = lambda actor_id, text, character_id: ChatMessage(
+    sl.create_message = lambda actor_id, text, character_id: ChatMessageModel(
         id="reply_1", name="Reply", body=text,
         actor_id=actor_id, character_id=character_id, message=text,
         scene_id="scene_01", gametime=0, walltime="now",
@@ -184,7 +184,7 @@ class TestAgentActorMemoryIntegration:
     def test_backwards_compatible_without_memory_args(self) -> None:
         """AgentActor still works without memory-related arguments."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(char, sl)
         assert actor.graph_client is None
         assert actor.embed_config is None
@@ -194,7 +194,7 @@ class TestAgentActorMemoryIntegration:
     def test_accepts_memory_kwargs(self) -> None:
         """AgentActor stores memory-related keyword arguments."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         mock_client = MagicMock()
         mock_config = MagicMock()
         mock_health = MagicMock()
@@ -225,7 +225,7 @@ class TestAgentActorMemoryIntegration:
         )
 
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(
             char, sl,
             graph_client=MagicMock(),
@@ -236,7 +236,7 @@ class TestAgentActorMemoryIntegration:
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi"))
 
-        user_msg = ChatMessage(
+        user_msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_01", gametime=0, walltime="now",
@@ -253,12 +253,12 @@ class TestAgentActorMemoryIntegration:
     async def test_on_event_no_context_without_graph(self) -> None:
         """on_event passes context=None when graph_client is not available."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(char, sl)  # No graph_client
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi"))
 
-        user_msg = ChatMessage(
+        user_msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_01", gametime=0, walltime="now",
@@ -278,7 +278,7 @@ class TestAgentActorMemoryIntegration:
         mock_assemble.side_effect = Exception("graph down")
 
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(
             char, sl,
             graph_client=MagicMock(),
@@ -287,7 +287,7 @@ class TestAgentActorMemoryIntegration:
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi anyway"))
 
-        user_msg = ChatMessage(
+        user_msg = ChatMessageModel(
             id="m1", name="Msg", body="Hello",
             actor_id="user", character_id="user", message="Hello",
             scene_id="scene_01", gametime=0, walltime="now",
@@ -300,7 +300,7 @@ class TestAgentActorMemoryIntegration:
     def test_memory_tools_added_when_graph_available(self) -> None:
         """MemoryTools methods are added to agent tools when graph_client is set."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(
             char, sl,
             graph_client=MagicMock(),
@@ -317,7 +317,7 @@ class TestAgentActorMemoryIntegration:
     def test_no_memory_tools_without_graph(self) -> None:
         """No memory tools added when graph_client is None."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(char, sl)  # No graph_client
         assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
@@ -327,7 +327,7 @@ class TestAgentActorMemoryIntegration:
     def test_no_memory_tools_without_health(self) -> None:
         """No memory tools added when health is None (even if graph_client is set)."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         actor = AgentActor(
             char, sl,
             graph_client=MagicMock(),
@@ -341,27 +341,27 @@ class TestAgentActorMemoryIntegration:
 
 
 # ---------------------------------------------------------------------------
-# CharacterLogic memory deps forwarding tests
+# Character memory deps forwarding tests
 # ---------------------------------------------------------------------------
 
 
-class TestCharacterLogicMemoryDeps:
-    """Tests for CharacterLogic forwarding memory dependencies to AgentActor."""
+class TestCharacterMemoryDeps:
+    """Tests for Character forwarding memory dependencies to AgentActor."""
 
     def test_backwards_compatible_without_memory_args(self) -> None:
-        """CharacterLogic still works without memory-related arguments."""
+        """Character still works without memory-related arguments."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
-        logic = CharacterLogic(char, sl)
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
+        logic = Character(char, sl)
         assert logic.graph_client is None
 
     def test_stores_memory_kwargs(self) -> None:
-        """CharacterLogic stores memory-related keyword arguments."""
+        """Character stores memory-related keyword arguments."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         mock_client = MagicMock()
 
-        logic = CharacterLogic(
+        logic = Character(
             char, sl,
             graph_client=mock_client,
             embed_config=MagicMock(),
@@ -377,12 +377,12 @@ class TestCharacterLogicMemoryDeps:
     async def test_activate_forwards_memory_deps_to_actor(self) -> None:
         """activate() forwards memory dependencies to AgentActor."""
         sl = _make_scene_logic()
-        char = Character(id="c1", name="Alice", body="I am Alice")
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
         mock_client = MagicMock()
         mock_config = MagicMock()
         mock_health = MagicMock()
 
-        logic = CharacterLogic(
+        logic = Character(
             char, sl,
             graph_client=mock_client,
             embed_config=mock_config,

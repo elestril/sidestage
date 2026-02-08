@@ -22,7 +22,7 @@ from sidestage.migration.serialization import (
     resolve_filename,
     sanitize_filename,
 )
-from sidestage.schemas import Character, ChatMessage, Entity, Location, Scene
+from sidestage.models import CharacterModel, ChatMessageModel, EntityModel, LocationModel, SceneModel
 
 if TYPE_CHECKING:
     from sidestage.campaign import Campaign
@@ -94,7 +94,7 @@ async def export_campaign(campaign: Campaign) -> MigrationBackupResult:
     # Step 4: Retrieve chat logs from SQLite
     chatlogs: dict[str, str] = {}
     for entity in entities:
-        if isinstance(entity, Scene):
+        if isinstance(entity, SceneModel):
             try:
                 scene_data = campaign.storage.get_scene(entity.id)
                 if scene_data and scene_data.messages:
@@ -156,7 +156,7 @@ async def export_campaign(campaign: Campaign) -> MigrationBackupResult:
     # Step 6: Write status.json
     entity_counts: dict[str, int] = {}
     for entity in entities:
-        type_name = type(entity).__name__
+        type_name = entity.entity_type
         entity_counts[type_name] = entity_counts.get(type_name, 0) + 1
 
     status = BackupStatus(
@@ -227,24 +227,24 @@ async def _query_all_memories(client: GraphClient) -> list[Memory]:
     return memories
 
 
-async def _enrich_entity_relationships(client: GraphClient, entity: Entity) -> None:
+async def _enrich_entity_relationships(client: GraphClient, entity: EntityModel) -> None:
     """Populate relationship-derived fields on entity in-place."""
-    if isinstance(entity, Character):
+    if isinstance(entity, CharacterModel):
         related = await get_related(client, entity.id, "LOCATED_IN", "outgoing")
         if related:
             entity.location_id = related[0].id
 
-    elif isinstance(entity, Location):
+    elif isinstance(entity, LocationModel):
         related = await get_related(client, entity.id, "CONNECTS_TO", "both")
         entity.connected_locations = [r.id for r in related]
 
-    elif isinstance(entity, Scene):
+    elif isinstance(entity, SceneModel):
         related = await get_related(client, entity.id, "AT_LOCATION", "outgoing")
         if related:
             entity.location_id = related[0].id
 
 
-def _format_chatlog(messages: list[ChatMessage]) -> str:
+def _format_chatlog(messages: list[ChatMessageModel]) -> str:
     """Format chat messages into chatlog.log content."""
     lines = []
     for msg in messages:
@@ -254,12 +254,12 @@ def _format_chatlog(messages: list[ChatMessage]) -> str:
 
 def _write_entity_file(
     base_dir: Path,
-    entity: Entity,
+    entity: EntityModel,
     used_filenames: dict[str, set[str]],
 ) -> tuple[str, Path]:
     """Write a single entity markdown file, returning (entity_id, file_path)."""
     fm_dict, body = entity_to_frontmatter_dict(entity)
-    subdir = entity_type_to_subdir(type(entity).__name__)
+    subdir = entity_type_to_subdir(entity.entity_type)
     stem = sanitize_filename(entity.name)
     stem = resolve_filename(stem, used_filenames[subdir])
     filename = stem + ".md"

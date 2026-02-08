@@ -12,7 +12,7 @@ from sidestage.graph.relationships import (
     get_related,
     get_relationships,
 )
-from sidestage.schemas import Character, Location
+from sidestage.models import CharacterModel, LocationModel
 
 
 # --- Fixtures ---
@@ -151,7 +151,7 @@ async def test_get_related_outgoing(mock_client: MagicMock) -> None:
     result = await get_related(mock_client, "char_1", "LOCATED_IN", direction="outgoing")
 
     assert len(result) == 1
-    assert isinstance(result[0], Location)
+    assert isinstance(result[0], LocationModel)
     assert result[0].id == "loc_1"
 
     cypher = mock_client.graph.query.call_args[0][0]
@@ -170,7 +170,7 @@ async def test_get_related_incoming(mock_client: MagicMock) -> None:
     result = await get_related(mock_client, "loc_1", "LOCATED_IN", direction="incoming")
 
     assert len(result) == 1
-    assert isinstance(result[0], Character)
+    assert isinstance(result[0], CharacterModel)
 
     cypher = mock_client.graph.query.call_args[0][0]
     assert "<-[" in cypher
@@ -221,7 +221,7 @@ async def test_get_related_connects_to_bidirectional(mock_client: MagicMock) -> 
     result = await get_related(mock_client, "loc_1", "CONNECTS_TO", direction="both")
 
     assert len(result) == 1
-    assert isinstance(result[0], Location)
+    assert isinstance(result[0], LocationModel)
 
 
 @pytest.mark.anyio

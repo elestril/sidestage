@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional, Callable, Any, TYPE_CHECKING
 import json
 from sidestage.storage import Storage
-from sidestage.models import Character, Location, Item
+from sidestage.models import CharacterModel, LocationModel, ItemModel
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
@@ -35,7 +35,7 @@ class WorldTools:
         import uuid
         entity_id = f"char_{str(uuid.uuid4())[:8]}"
 
-        char = Character(id=entity_id, name=name, body=body, location_id=location_id)
+        char = CharacterModel(id=entity_id, name=name, body=body, location_id=location_id)
 
         if self.graph_client is not None:
             from sidestage.graph import create_entity, link
@@ -153,7 +153,7 @@ class WorldTools:
         """
         import uuid
         entity_id = f"loc_{str(uuid.uuid4())[:8]}"
-        loc = Location(id=entity_id, name=name, body=body)
+        loc = LocationModel(id=entity_id, name=name, body=body)
 
         if self.graph_client is not None:
             from sidestage.graph import create_entity
@@ -236,7 +236,7 @@ class WorldTools:
         """
         import uuid
         entity_id = f"item_{str(uuid.uuid4())[:8]}"
-        item = Item(id=entity_id, name=name, body=body)
+        item = ItemModel(id=entity_id, name=name, body=body)
 
         if self.graph_client is not None:
             from sidestage.graph import create_entity

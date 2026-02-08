@@ -54,11 +54,11 @@ Called when a :class:`opentelemetry.sdk.trace.TracerProvider` is shutdown.
 Check whether the OTLP endpoint is reachable via TCP connect.
 
 Args:
-    endpoint: Base OTLP HTTP endpoint URL (e.g. `http://localhost:4318`)
+    endpoint: Base OTLP HTTP endpoint URL (e.g. ``http://localhost:4318``)
     timeout: Connection timeout in seconds
 
 Returns:
-    `(True, None)` if reachable, `(False, error_message)` otherwise.
+    ``(True, None)`` if reachable, ``(False, error_message)`` otherwise.
 
 ### `get_tracing_enabled() -> bool`
 
@@ -66,15 +66,15 @@ Return current tracing enabled state.
 
 ### `get_tracing_error() -> str | None`
 
-Return the current tracing error, or `None` if tracing is healthy.
+Return the current tracing error, or ``None`` if tracing is healthy.
 
 ### `init_tracing(config: 'TraceConfig', campaign_name: str) -> TracerProvider`
 
 Set up TracerProvider with OTLP exporter.
 
-If `config.enabled` is True but the OTLP endpoint is unreachable,
+If ``config.enabled`` is True but the OTLP endpoint is unreachable,
 the provider is created with tracing *disabled* and the error is
-stored (retrievable via `get_tracing_error()`).
+stored (retrievable via :func:`get_tracing_error`).
 
 Args:
     config: TraceConfig instance
@@ -89,7 +89,9 @@ Flush pending spans and shut down the provider.
 
 ### `toggle_tracing(enabled: bool) -> tuple[bool, str | None]`
 
-Flip tracing on/off at runtime. When enabling, validates the OTLP endpoint is reachable first.
+Flip tracing on/off at runtime.
+
+When enabling, validates the OTLP endpoint is reachable first.
 
 Returns:
-    `(new_enabled_state, error_message_or_none)`
+    ``(new_enabled_state, error_message_or_none)``

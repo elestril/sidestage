@@ -7,7 +7,7 @@ format. Also provides filename sanitization and type-to-subdirectory mapping.
 
 ## Functions
 
-### `entity_to_frontmatter_dict(entity: Entity) -> tuple[dict[str, Any], str]`
+### `entity_to_frontmatter_dict(entity: EntityModel) -> tuple[dict[str, Any], str]`
 
 Convert entity to (frontmatter_dict, body_markdown).
 
@@ -15,7 +15,7 @@ Convert entity to (frontmatter_dict, body_markdown).
 
 Map an entity type name to its directory name.
 
-### `frontmatter_dict_to_entity(data: dict[str, Any], body: str, type_hint: str | None = None) -> Entity`
+### `frontmatter_dict_to_entity(data: dict[str, Any], body: str, type_hint: str | None = None) -> EntityModel`
 
 Reconstruct entity from frontmatter dict + body.
 
