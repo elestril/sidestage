@@ -255,6 +255,78 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
     }
   };
 
+  const handleCampaignSync = async (type: 'import' | 'backup') => {
+    try {
+      if (type === 'backup') {
+        const response = await fetch('/v1/campaign/backup', { method: 'POST' });
+        if (response.status === 409) {
+          alert('Another operation is in progress. Please wait.');
+          return;
+        }
+        if (response.ok) {
+          const result = await response.json();
+          alert(`Backup complete: ${result.written_entities} entities, ${result.written_memories} memories, ${result.written_chatlogs} chat logs.`);
+        } else {
+          alert(`Backup failed (HTTP ${response.status}). Check server logs.`);
+        }
+      } else {
+        // Phase 1: Validate
+        const validateResponse = await fetch('/v1/campaign/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'validate' })
+        });
+        if (validateResponse.status === 409) {
+          alert('Another operation is in progress. Please wait.');
+          return;
+        }
+        const validateResult = await validateResponse.json();
+        const validation = validateResult.validation;
+
+        if (!validation.valid) {
+          alert(`Validation failed with ${validation.errors.length} error(s). Fix the issues and try again.`);
+          return;
+        }
+
+        // Show confirmation with counts
+        const counts = Object.entries(validation.entity_counts)
+          .map(([type, count]) => `${count} ${type}(s)`)
+          .join(', ');
+        const confirmed = confirm(
+          `Import will replace all existing data.\n\n` +
+          `Found: ${counts}\n` +
+          `Memories: ${validation.memories_found}\n` +
+          `Warnings: ${validation.warnings.length}\n\n` +
+          `This action cannot be undone. Continue?`
+        );
+
+        if (!confirmed) return;
+
+        // Phase 2: Execute
+        const executeResponse = await fetch('/v1/campaign/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'execute' })
+        });
+        if (executeResponse.status === 409) {
+          alert('Another operation is in progress. Please wait.');
+          return;
+        }
+        if (executeResponse.ok) {
+          const executeResult = await executeResponse.json();
+          const result = executeResult.result;
+          alert(`Import ${result.phase}: ${result.processed_entities} entities, ${result.processed_memories} memories.`);
+          await loadEntities();
+        } else {
+          alert(`Import failed (HTTP ${executeResponse.status}). Check server logs.`);
+        }
+      }
+    } catch (error) {
+      console.error(`Campaign ${type} failed:`, error);
+      alert(`Campaign ${type} failed. Check console for details.`);
+    }
+  };
+
   const getEntityIcon = (type: string) => {
     switch (type) {
       case 'Character': return <User size={14} className="text-orange-400" />;
@@ -288,11 +360,23 @@ export const EntityBrowser: React.FC<EntityBrowserProps> = ({ selectedId, onSele
               >
                 Import
               </button>
-              <button 
+              <button
                 onClick={() => handleSync('export')}
                 className="text-[10px] uppercase font-bold text-[#666] hover:text-white transition-colors"
               >
                 Export
+              </button>
+              <button
+                onClick={() => handleCampaignSync('import')}
+                className="text-[10px] uppercase font-bold text-[#bb86fc] hover:opacity-80 transition-opacity"
+              >
+                Import Campaign
+              </button>
+              <button
+                onClick={() => handleCampaignSync('backup')}
+                className="text-[10px] uppercase font-bold text-[#bb86fc] hover:opacity-80 transition-opacity"
+              >
+                Backup Campaign
               </button>
             </div>
           </div>

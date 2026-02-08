@@ -10,6 +10,18 @@ import asyncio
 
 from sidestage.campaign import Campaign
 from sidestage.sync import SyncManager
+from sidestage.health import HealthStatus
+from sidestage.migration.models import (
+    MigrationImportRequest,
+    MigrationImportResponse,
+    MigrationBackupResult,
+    MigrationValidationReport,
+    MigrationValidationIssue,
+)
+from sidestage.migration.parser import parse_directory
+from sidestage.migration.validator import validate_parse_result
+from sidestage.migration.importer import import_campaign
+from sidestage.migration.exporter import export_campaign
 from sidestage.schemas import (
     SceneCreateRequest, 
     EntityMarkdownUpdateRequest, 
@@ -219,6 +231,90 @@ class SidestageOrchestrator:
             self.campaign.reload_defaults()
             await self.sync_manager.broadcast({"type": "entities_updated"})
             return {"status": "ok"}
+
+        # Campaign migration (import/backup)
+        @self.fastapi_app.post("/v1/campaign/import")
+        async def import_campaign_route(
+            request: MigrationImportRequest,
+        ) -> MigrationImportResponse:
+            """Import entities and memories from the markdown directory into FalkorDB.
+
+            Two-phase operation:
+            - action='validate': Parse and validate the markdown directory, return report.
+            - action='execute': Parse, validate, and execute the full import.
+
+            Returns 409 if campaign health is DEGRADED (another import is in progress).
+            """
+            if self.campaign.health.status == HealthStatus.DEGRADED:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Campaign operation already in progress",
+                )
+
+            markdown_dir = self.campaign.campaign_dir / "markdown"
+            if not markdown_dir.exists():
+                return MigrationImportResponse(
+                    action=request.action,
+                    validation=MigrationValidationReport(
+                        valid=False,
+                        entities_found=0,
+                        memories_found=0,
+                        entity_counts={},
+                        errors=[
+                            MigrationValidationIssue(
+                                file_path=str(markdown_dir),
+                                severity="error",
+                                message="Markdown directory does not exist",
+                            )
+                        ],
+                        warnings=[],
+                    ),
+                )
+
+            parse_result = parse_directory(markdown_dir)
+            validation_report = validate_parse_result(parse_result)
+
+            if request.action == "validate":
+                return MigrationImportResponse(
+                    action="validate",
+                    validation=validation_report,
+                )
+
+            # action == "execute"
+            if not validation_report.valid and not request.force:
+                return MigrationImportResponse(
+                    action="execute",
+                    validation=validation_report,
+                )
+
+            result = await import_campaign(
+                campaign=self.campaign,
+                parse_result=parse_result,
+                sync_manager=self.sync_manager,
+                active_scenes=self.active_scenes,
+            )
+            return MigrationImportResponse(
+                action="execute",
+                validation=validation_report,
+                result=result,
+            )
+
+        @self.fastapi_app.post("/v1/campaign/backup")
+        async def backup_campaign_route() -> MigrationBackupResult:
+            """Backup all entities, memories, and chat logs to the markdown directory.
+
+            Returns 409 if campaign health is DEGRADED (import in progress).
+            """
+            if self.campaign.health.status == HealthStatus.DEGRADED:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Campaign operation already in progress",
+                )
+
+            result = await export_campaign(self.campaign)
+            if result.phase == "complete":
+                await self.sync_manager.broadcast({"type": "entities_updated"})
+            return result
 
         # Scenes
         @self.fastapi_app.get("/v1/scenes")

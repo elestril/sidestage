@@ -41,6 +41,10 @@
     "section-06-exporter": {
       "status": "complete",
       "commit_hash": "2f76567"
+    },
+    "section-07-importer": {
+      "status": "complete",
+      "commit_hash": "c1e3383"
     }
   },
   "pre_commit": {
