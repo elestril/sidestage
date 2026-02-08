@@ -10,7 +10,7 @@ from sidestage.migration.models import (
     MigrationValidationReport,
     ParseResult,
 )
-from sidestage.schemas import Character, Event, Location, Scene
+from sidestage.schemas import Character, Event, Item, Location, Scene
 
 
 def validate_parse_result(parse_result: ParseResult) -> MigrationValidationReport:
@@ -40,10 +40,8 @@ def validate_parse_result(parse_result: ParseResult) -> MigrationValidationRepor
             scene_ids.add(entity.id)
         elif isinstance(entity, Event):
             pass  # Events don't form a reference target set
-        else:
-            from sidestage.schemas import Item
-            if isinstance(entity, Item):
-                item_ids.add(entity.id)
+        elif isinstance(entity, Item):
+            item_ids.add(entity.id)
 
     # Step 2: Check entity ID uniqueness
     seen_ids: Counter[str] = Counter()

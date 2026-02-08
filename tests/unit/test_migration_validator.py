@@ -5,7 +5,8 @@ import pytest
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.migration.models import ParseResult
 from sidestage.migration.validator import validate_parse_result
-from sidestage.schemas import Character, Event, Item, Location, Scene
+from sidestage.migration.models import MigrationValidationIssue
+from sidestage.schemas import Character, ChatMessage, Event, Item, Location, Scene
 
 
 # --- Fixtures ---
@@ -152,6 +153,19 @@ def test_detects_event_scene_id_referencing_nonexistent_scene():
     assert any("scene_gone" in e.message for e in report.errors)
 
 
+def test_detects_chat_message_scene_id_referencing_nonexistent_scene():
+    """ChatMessage (Event subtype) with bad scene_id triggers an error via isinstance(Event) check."""
+    msg = ChatMessage(
+        id="msg_1", name="Message", body="Hello.", scene_id="scene_missing",
+        gametime=0, walltime="2026-01-01T00:00:00Z",
+        character_id="char_1", message="Hello.",
+    )
+    pr = ParseResult(entities=[msg], memories=[], chatlogs={}, errors=[])
+    report = validate_parse_result(pr)
+    assert report.valid is False
+    assert any("scene_missing" in e.message for e in report.errors)
+
+
 # --- Required field checks ---
 
 def test_detects_missing_required_entity_fields():
@@ -161,6 +175,15 @@ def test_detects_missing_required_entity_fields():
     report = validate_parse_result(pr)
     assert report.valid is False
     assert any("id" in e.message.lower() for e in report.errors)
+
+
+def test_detects_empty_entity_name():
+    """Entity with empty name produces an error."""
+    loc = Location(id="loc_1", name="", body="A place.")
+    pr = ParseResult(entities=[loc], memories=[], chatlogs={}, errors=[])
+    report = validate_parse_result(pr)
+    assert report.valid is False
+    assert any("name" in e.message.lower() for e in report.errors)
 
 
 # --- Memory reference checks ---
@@ -229,6 +252,30 @@ def test_detects_missing_required_memory_fields():
 
 
 # --- Warning checks ---
+
+def test_empty_parse_result_is_valid_with_zero_counts():
+    """Empty ParseResult returns valid=True with zero counts and only the data-loss warning."""
+    pr = ParseResult(entities=[], memories=[], chatlogs={}, errors=[])
+    report = validate_parse_result(pr)
+    assert report.valid is True
+    assert report.entities_found == 0
+    assert report.memories_found == 0
+    assert report.entity_counts == {}
+    assert len(report.errors) == 0
+    assert len(report.warnings) >= 1
+
+
+def test_parse_errors_carried_forward_make_report_invalid():
+    """Pre-existing errors in ParseResult.errors appear in the report and set valid=False."""
+    parse_error = MigrationValidationIssue(
+        entity_id=None, file_path="bad_file.md", severity="error",
+        message="Malformed YAML frontmatter",
+    )
+    pr = ParseResult(entities=[], memories=[], chatlogs={}, errors=[parse_error])
+    report = validate_parse_result(pr)
+    assert report.valid is False
+    assert any("Malformed YAML" in e.message for e in report.errors)
+
 
 def test_always_includes_data_loss_warning():
     """Every validation report includes a warning about data loss on import."""
