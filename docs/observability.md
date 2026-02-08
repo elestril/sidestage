@@ -13,6 +13,16 @@ Every campaign maintains its own dedicated log file.
     - WebSocket connection events.
     - API request/response metadata.
 
+## Campaign Health
+
+Runtime health tracking exposes system state and gates operations.
+
+- **States:**
+    - `HEALTHY` — Normal operation. Chat, embeddings, and all APIs available.
+    - `DEGRADED` — A non-fatal issue occurred (e.g., embedding failure, import/backup in progress). Chat still works; embedding generation paused; import/backup endpoints return `409 Conflict`.
+    - `UNHEALTHY` — Critical failure. System cannot serve requests.
+- **Transitions:** Health changes are logged and can trigger callbacks for downstream cleanup.
+
 ## OpenTelemetry (Planned)
 
 The core platform includes `opentelemetry-sdk` as a dependency. Future updates will include:
@@ -26,3 +36,4 @@ Observability allows Game Masters to:
 - Debug why an agent made a specific decision.
 - Verify that tools are being called with the correct parameters.
 - Audit performance (latency) of agent runs.
+- Monitor campaign health and diagnose embedding or database issues.

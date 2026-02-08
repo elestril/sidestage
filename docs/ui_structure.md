@@ -38,13 +38,17 @@ The database management interface for the campaign world.
     - **Left Pane (Browser):**
         - **Search Bar:** Real-time filtering by name and content.
         - **Sync Buttons:** Import/Export entities to disk.
-        - **Type Filters:** Toggle buttons for All, NPCs, Locations, Items, Scenes.
+        - **Campaign Buttons:**
+            - **Import Campaign:** Two-phase import from `markdown/` directory. First validates and shows a confirmation dialog with counts and warnings, then executes on user confirmation.
+            - **Backup Campaign:** Exports the full graph to `markdown/` directory. Shows success/failure feedback with counts.
+            - Both buttons are disabled when campaign health is DEGRADED (another operation is in progress).
+        - **Type Filters:** Toggle buttons for All, Characters, Locations, Items, Scenes.
         - **Entity List:** detailed list of matching entities.
     - **Right Pane (Editor):**
         - **Title Bar:** Entity Name input, Type display, ID display, Save button.
         - **Content Editor:** Rich-text (Markdown) editor for the entity's `body` text.
         - **Metadata Panel:** Form fields specific to the entity type:
-            - **NPC:** Location ID, Inventory list.
+            - **Character:** Location ID, Inventory list.
             - **Location:** Connected Locations list.
             - **Scene:** Current Gametime.
 

@@ -82,7 +82,7 @@ Returns a list of all entities in the campaign.
     "id": "npc_123",
     "name": "Gandalf",
     "body": "A wizard.",
-    "type": "NPC",
+    "type": "Character",
     "location_id": "loc_1",
     "inventory": []
   }
@@ -127,7 +127,7 @@ Updates specific fields of an entity. The `type` field is optional if it can be 
 ```json
 {
   "name": "Gandalf the White",
-  "type": "NPC" // Optional
+  "type": "Character" // Optional
 }
 ```
 
@@ -136,24 +136,110 @@ Updates specific fields of an entity. The `type` field is optional if it can be 
 { "status": "ok" }
 ```
 
-#### Export Entities
+#### Export Entities (Legacy)
 **POST** `/v1/entities/export`
 
-Exports all entities to markdown files in the campaign's `entities/` directory.
+Exports all entities to markdown files in the campaign's `entities/` directory. Deprecated — use `POST /v1/campaign/backup` instead.
 
 **Response:**
 ```json
 { "message": "Exported X entities to ..." }
 ```
 
-#### Import Entities
+#### Import Entities (Legacy)
 **POST** `/v1/entities/import`
 
-Imports entities from markdown files in the campaign's `entities/` directory.
+Imports entities from markdown files in the campaign's `entities/` directory. Deprecated — use `POST /v1/campaign/import` instead.
 
 **Response:**
 ```json
 { "message": "Successfully imported X entities." }
+```
+
+#### Reload Defaults
+**POST** `/v1/campaign/reload-defaults`
+
+Reloads default characters and prompts from the project's `data/` directory into the campaign.
+
+**Response:**
+```json
+{ "status": "ok" }
+```
+
+### Campaign Migration
+
+#### Import Campaign
+**POST** `/v1/campaign/import`
+
+Two-phase import from the campaign's `markdown/` directory tree. The import is destructive — it drops and recreates the graph.
+
+Returns `409 Conflict` if campaign health is DEGRADED (another operation is in progress).
+
+**Request:**
+```json
+{
+  "action": "validate",  // "validate" or "execute"
+  "force": false          // Skip validation on execute (default false)
+}
+```
+
+**Response (validate):**
+```json
+{
+  "action": "validate",
+  "validation": {
+    "valid": true,
+    "entities_found": 15,
+    "memories_found": 8,
+    "entity_counts": { "Character": 5, "Location": 4, "Item": 3, "Scene": 2, "Event": 1 },
+    "errors": [],
+    "warnings": [
+      {
+        "entity_id": "npc_1",
+        "file_path": "characters/gandalf.md",
+        "severity": "warning",
+        "message": "Referenced location 'loc_99' not found"
+      }
+    ]
+  },
+  "result": null
+}
+```
+
+**Response (execute):**
+```json
+{
+  "action": "execute",
+  "validation": null,
+  "result": {
+    "phase": "complete",
+    "total_entities": 15,
+    "total_memories": 8,
+    "processed_entities": 15,
+    "processed_memories": 8,
+    "errors": []
+  }
+}
+```
+
+#### Backup Campaign
+**POST** `/v1/campaign/backup`
+
+Exports all entities, relationships, memories, and chat logs to the `markdown/` directory tree with atomic swap. Writes a `status.json` with backup metadata.
+
+Returns `409 Conflict` if campaign health is DEGRADED.
+
+**Response:**
+```json
+{
+  "phase": "complete",
+  "total_entities": 15,
+  "total_memories": 8,
+  "written_entities": 15,
+  "written_memories": 8,
+  "written_chatlogs": 3,
+  "errors": []
+}
 ```
 
 ### Scenes
@@ -189,16 +275,16 @@ Returns the message history for a scene.
 **Response:** `List[ChatMessage]`
 ```json
 [
-  { 
+  {
     "id": "msg_1",
-    "actor": "user", 
+    "actor": "user",
     "message": "Hello",
     "gametime": 0,
     "walltime": "2026-02-02T..."
   },
-  { 
+  {
     "id": "msg_2",
-    "actor": "agent", 
+    "actor": "agent",
     "message": "Hi there",
     "gametime": 0,
     "walltime": "2026-02-02T..."
@@ -211,7 +297,7 @@ Returns the message history for a scene.
 #### Send Chat Message
 **POST** `/v1/chat`
 
-Sends a message to the AI agent within a specific scene context.
+Sends a message to the AI agent within a specific scene context. The agent's prompt is enriched with assembled memory context (scene recollections, character impressions, world facts) before responding.
 
 **Request:**
 ```json
@@ -237,9 +323,9 @@ Sends a message to the AI agent within a specific scene context.
 | `id` | string | Unique identifier |
 | `name` | string | Entity name |
 | `body` | string | Description/Content |
-| `type` | string | Discriminator (NPC, Location, Item, Scene, Event) |
+| `type` | string | Discriminator (Character, Location, Item, Scene, Event) |
 
-### NPC (extends Entity)
+### Character (extends Entity)
 | Field | Type | Description |
 |-------|------|-------------|
 | `location_id` | string? | ID of current location |
@@ -248,7 +334,7 @@ Sends a message to the AI agent within a specific scene context.
 ### Location (extends Entity)
 | Field | Type | Description |
 |-------|------|-------------|
-| `connected_locations` | string[] | IDs of connected locations |
+| `connected_locations` | string[] | IDs of connected locations (stored as `CONNECTS_TO` edges in graph) |
 
 ### Item (extends Entity)
 (No additional fields)
@@ -267,3 +353,114 @@ Sends a message to the AI agent within a specific scene context.
 | `scene_id` | string | Associated scene ID |
 | `gametime` | int | Gametime in seconds |
 | `walltime` | string | ISO timestamp of real world time |
+
+### ChatMessage (extends Event)
+| Field | Type | Description |
+|-------|------|-------------|
+| `character_id` | string | ID of the Character persona who sent the message |
+| `actor_id` | string? | ID of the Actor who originated the message |
+| `message` | string | The content of the chat message |
+| `widget` | object? | Optional interactive widget data |
+
+### JoinEvent (extends Event)
+| Field | Type | Description |
+|-------|------|-------------|
+| `actor_id` | string | ID of the Actor who joined |
+
+### LeaveEvent (extends Event)
+| Field | Type | Description |
+|-------|------|-------------|
+| `actor_id` | string | ID of the Actor who left |
+
+### FastForwardEvent (extends Event)
+| Field | Type | Description |
+|-------|------|-------------|
+| `duration_str` | string | A string describing the time jump (e.g., "2 hours") |
+
+### Memory
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | UUID |
+| `content` | string | The living document text |
+| `memory_type` | string | `scene`, `character`, or `world_fact` |
+| `visibility` | string | `common` or `private` |
+| `embedding` | float[]? | Vector embedding for similarity search |
+| `owner_id` | string? | Character who owns this memory |
+| `target_id` | string | Entity this memory is about |
+| `created_at` | float | Unix timestamp |
+| `updated_at` | float | Unix timestamp |
+| `gametime` | int? | In-game time of the memory |
+| `access_count` | int | Number of times accessed |
+| `last_accessed_at` | float? | Unix timestamp of last access |
+
+## Markdown Directory Layout
+
+The `POST /v1/campaign/backup` and `POST /v1/campaign/import` endpoints use a structured directory tree under `~/.sidestage/<campaign_name>/markdown/`:
+
+```
+markdown/
+├── status.json                    # Backup metadata (timestamp, counts, version)
+├── characters/
+│   ├── Character_Name.md          # Entity file (YAML frontmatter + markdown body)
+│   └── Character_Name.d/          # Companion directory (memories)
+│       └── mem_id.md
+├── locations/
+│   ├── Location_Name.md
+│   └── Location_Name.d/
+│       └── mem_id.md
+├── items/
+│   └── Item_Name.md
+├── scenes/
+│   ├── Scene_Name.md
+│   └── Scene_Name.d/
+│       ├── chatlog.log            # Chat log for this scene
+│       └── mem_id.md
+└── events/
+    └── Event_Name.md
+```
+
+### Entity File Format
+
+```markdown
+---
+name: "Eldric the Bold"
+id: "char_eldric"
+type: "Character"
+location_id: "loc_rusty_tavern"
+inventory:
+- "item_flame_tongue"
+---
+
+A brave warrior who frequents the Rusty Tavern.
+```
+
+The frontmatter contains all fields from the entity's Pydantic model plus a `type` discriminator. The `body` field becomes the markdown content below the frontmatter.
+
+### Memory File Format
+
+```markdown
+---
+id: "mem_abc123"
+memory_type: "scene"
+visibility: "common"
+owner_id: "char_eldric"
+target_id: "scene_tavern_brawl"
+gametime: 3600
+created_at: 1706000000.0
+updated_at: 1706000000.0
+access_count: 0
+---
+
+Eldric witnessed a fierce brawl break out in the tavern...
+```
+
+The `embedding` field is excluded from disk — embeddings are regenerated on import.
+
+### Chat Log Format
+
+```
+[2026-01-15T14:30:00Z] (char_eldric) Eldric the Bold: "I challenge you to a duel!"
+[2026-01-15T14:30:05Z] (char_alice) Alice the Merchant: "You'll regret that, Eldric."
+```
+
+Each line: `[walltime] (character_id) display_name: "message"`
