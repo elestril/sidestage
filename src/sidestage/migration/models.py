@@ -84,3 +84,4 @@ class ParseResult(BaseModel):
     memories: list[Any]
     chatlogs: dict[str, list[str]]
     errors: list[MigrationValidationIssue]
+    warnings: list[MigrationValidationIssue] = []
