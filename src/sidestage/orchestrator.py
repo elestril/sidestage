@@ -5,15 +5,23 @@ from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel as _BaseModel
 import json
 import asyncio
 
 from sidestage.campaign import Campaign
 from sidestage.sync import SyncManager
 from sidestage.health import HealthStatus
+from sidestage.tracing import (
+    toggle_tracing,
+    shutdown_tracing,
+    get_tracing_enabled,
+    get_in_memory_exporter,
+    get_sqlite_exporter,
+)
 from sidestage.migration.models import (
     MigrationImportRequest,
     MigrationImportResponse,
@@ -91,6 +99,10 @@ class SidestageOrchestrator:
         try:
             yield
         finally:
+            try:
+                shutdown_tracing()
+            except Exception:
+                logger.exception("Error during tracing shutdown")
             self._remove_pid_file()
 
     def _write_pid_file(self) -> None:
@@ -384,6 +396,66 @@ class SidestageOrchestrator:
             await scene.chat(user_msg)
             
             return ChatResponse(user_message=user_msg)
+
+        # --- Tracing endpoints ---
+
+        class _TracingToggleRequest(_BaseModel):
+            enabled: bool
+
+        @self.fastapi_app.get("/v1/traces")
+        async def list_traces(
+            scene_id: str | None = None,
+            event_id: str | None = None,
+            limit: int = Query(default=50, ge=1, le=1000),
+            offset: int = Query(default=0, ge=0),
+        ):
+            """List trace summaries, optionally filtered."""
+            sqlite_exp = get_sqlite_exporter()
+            if sqlite_exp is None:
+                return []
+            return sqlite_exp.query_traces(
+                scene_id=scene_id, event_id=event_id, limit=limit, offset=offset,
+            )
+
+        @self.fastapi_app.get("/v1/traces/{trace_id}")
+        async def get_trace_detail(trace_id: str):
+            """Return full trace with all spans."""
+            # Try in-memory first
+            mem_exp = get_in_memory_exporter()
+            if mem_exp is not None:
+                spans = mem_exp.get_trace(trace_id)
+                if spans is not None:
+                    return {"trace_id": trace_id, "spans": spans}
+
+            # Fall back to SQLite
+            sqlite_exp = get_sqlite_exporter()
+            if sqlite_exp is not None:
+                spans = sqlite_exp.query_spans(trace_id)
+                if spans:
+                    return {"trace_id": trace_id, "spans": spans}
+
+            raise HTTPException(status_code=404, detail="Trace not found")
+
+        @self.fastapi_app.post("/v1/tracing/toggle")
+        async def toggle_tracing_endpoint(body: _TracingToggleRequest):
+            """Toggle tracing on or off."""
+            result = toggle_tracing(body.enabled)
+            return {"tracing_enabled": result}
+
+        @self.fastapi_app.get("/v1/tracing/status")
+        async def tracing_status():
+            """Return current tracing status."""
+            from sidestage import config as sidestage_config
+            trace_config = sidestage_config.get().tracing
+
+            mem_exp = get_in_memory_exporter()
+            trace_count = len(mem_exp.get_traces()) if mem_exp is not None else 0
+
+            return {
+                "enabled": get_tracing_enabled(),
+                "config": trace_config.model_dump(),
+                "trace_count": trace_count,
+            }
 
         # Redirect root to /sidestage
         @self.fastapi_app.get("/")

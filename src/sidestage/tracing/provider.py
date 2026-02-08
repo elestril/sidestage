@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _provider: TracerProvider | None = None
 _filtering_processors: list["FilteringSpanProcessor"] = []
 _in_memory_exporter: SpanExporter | None = None
+_sqlite_exporter: SpanExporter | None = None
 
 
 class FilteringSpanProcessor(SpanProcessor):
@@ -69,7 +70,7 @@ def init_tracing(
     Returns:
         The configured TracerProvider
     """
-    global _provider, _filtering_processors, _in_memory_exporter
+    global _provider, _filtering_processors, _in_memory_exporter, _sqlite_exporter
 
     # Shutdown previous provider if re-initializing
     if _provider is not None:
@@ -83,6 +84,7 @@ def init_tracing(
     provider = TracerProvider(resource=resource)
     _filtering_processors = []
     _in_memory_exporter = in_memory_exporter
+    _sqlite_exporter = sqlite_exporter
 
     if in_memory_exporter is None and sqlite_exporter is None:
         logger.warning("No exporters provided -- all trace data will be lost")
@@ -114,6 +116,18 @@ def init_tracing(
 def get_in_memory_exporter() -> SpanExporter | None:
     """Return the in-memory exporter reference, or None if not initialized."""
     return _in_memory_exporter
+
+
+def get_sqlite_exporter() -> SpanExporter | None:
+    """Return the SQLite exporter reference, or None if not initialized."""
+    return _sqlite_exporter
+
+
+def get_tracing_enabled() -> bool:
+    """Return current tracing enabled state."""
+    if not _filtering_processors:
+        return False
+    return _filtering_processors[0].enabled
 
 
 def toggle_tracing(enabled: bool) -> bool:
