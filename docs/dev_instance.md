@@ -36,16 +36,19 @@ Alternatively, set the provider to `gemini` in `config.yml` and supply a `GEMINI
 # Install dependencies
 uv sync
 
-# Start the server with a campaign named "dev"
-uv run sidestage dev
+# Start the dev server
+scripts/run-dev.sh
 ```
 
-On first run this creates `~/.sidestage/dev/` with:
+The script runs from the `sidestage.dev/` working directory. On first run it copies seed data from `data/dev_campaign/` into `sidestage.dev/dev/`. The campaign data lives locally in the repo working directory (not `~/.sidestage/`), keeping dev state isolated.
+
+The directory contains:
 - `config.yml` — LLM and graph database settings
-- `sidestage.db` — SQLite database for chat logs
-- `server.log` — campaign log file
+- `dev/` — campaign data directory (SQLite DB, logs, markdown)
 
 The server starts on `http://localhost:8000` with hot-reload enabled.
+
+You can pass a campaign name as an argument: `scripts/run-dev.sh mycampaign`.
 
 ### config.yml
 
@@ -146,4 +149,28 @@ To export the current graph state back to markdown:
 curl -s -X POST http://localhost:8000/v1/campaign/backup | python -m json.tool
 ```
 
-This writes to `~/.sidestage/dev/markdown/` with an atomic swap. The resulting directory can be version-controlled, edited externally, and re-imported.
+This writes to the campaign's `markdown/` directory with an atomic swap. The resulting directory can be version-controlled, edited externally, and re-imported.
+
+## MCP Server for Agent Debugging
+
+The dev server exposes an MCP (Model Context Protocol) endpoint at `http://localhost:8000/v1/mcp`. This allows AI agents like Claude Code to interact with the running campaign directly — listing entities, updating markdown, sending chat messages, etc.
+
+The project includes a `.mcp.json` at the repo root that registers this endpoint:
+
+```json
+{
+  "mcpServers": {
+    "sidestage": {
+      "type": "http",
+      "url": "http://localhost:8000/v1/mcp"
+    }
+  }
+}
+```
+
+When the dev server is running, Claude Code automatically discovers and connects to the Sidestage MCP server. Use `/mcp` in Claude Code to verify the connection and list available tools.
+
+This is useful for:
+- Interactively testing tool implementations against a live campaign
+- Debugging agent behavior by calling campaign tools directly
+- Exploring campaign state without the browser UI

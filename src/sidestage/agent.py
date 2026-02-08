@@ -130,6 +130,7 @@ class LiteLLMAgent:
                             messages=messages,
                             tools=self.tool_schemas if self.tool_schemas else None,
                             tool_choice="auto" if self.tool_schemas else None,
+                            max_tokens=200,
                             stream=False,
                         )
 
@@ -213,7 +214,7 @@ class LiteLLMAgent:
                         span.set_attribute("agent.total_input_tokens", total_input_tokens)
                         span.set_attribute("agent.total_output_tokens", total_output_tokens)
 
-                        if "Connection error" in error_str or "Connection refused" in error_str:
+                        if "Connection error" in error_str or "Connection refused" in error_str or "Could not establish connection" in error_str:
                             friendly_msg = (
                                 f"Error: Could not connect to the LLM provider at {self.api_base or 'default location'}. "
                                 "Please ensure the service is running and accessible."

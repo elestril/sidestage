@@ -16,6 +16,7 @@
 | `src/sidestage/storage.py` | `docs/api/sidestage.storage.md` | SQLite storage for chat logs |
 | `src/sidestage/sync.py` | `docs/api/sidestage.sync.md` | WebSocket connection manager, broadcast |
 | `src/sidestage/health.py` | `docs/api/sidestage.health.md` | Campaign health states (HEALTHY/DEGRADED/UNHEALTHY) |
+| `src/sidestage/mcp_bridge.py` | `docs/api/sidestage.mcp_bridge.md` | MCP bridge: exposes campaign API as MCP tools |
 | `src/sidestage/character.py` | `docs/api/sidestage.character.md` | Character-specific logic |
 | `src/sidestage/time.py` | `docs/api/sidestage.time.md` | Gametime formatting and tracking |
 | `src/sidestage/tools.py` | `docs/api/sidestage.tools.md` | Agent tool definitions (entity queries, memory updates) |
@@ -71,6 +72,7 @@ server.py → orchestrator.py → campaign.py → agent.py
                                           → tools.py
                                           → health.py
 orchestrator.py → sync.py (WebSocket manager)
+orchestrator.py → mcp_bridge.py (MCP endpoint)
 server.py → tracing/* (middleware)
 campaign.py → config.py
 campaign.py → bus.py (EventQueue)

@@ -24,6 +24,20 @@ Configuration model for Sidestage settings.
 | `loglevel` | `str` | 'INFO' |
 | `llms` | `dict[str, LLMConfig]` | *factory* |
 | `graph` | `GraphConfig` | *factory* |
+| `tracing` | `TraceConfig` | *factory* |
+
+### `TraceConfig(BaseModel)`
+
+Configuration for the tracing subsystem.
+
+| Field | Type | Default |
+|-------|------|---------|
+| `enabled` | `bool` | False |
+| `otlp_endpoint` | `str` | 'http://localhost:4318' |
+| `capture_prompts` | `bool` | True |
+| `capture_tool_args` | `bool` | True |
+| `capture_memory_content` | `bool` | True |
+| `max_attribute_length` | `int` | 4096 |
 
 ## Functions
 

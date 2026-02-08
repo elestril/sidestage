@@ -16,6 +16,10 @@ class TestTraceConfigDefaults:
         tc = TraceConfig()
         assert tc.enabled is False
 
+    def test_otlp_endpoint_defaults(self):
+        tc = TraceConfig()
+        assert tc.otlp_endpoint == "http://localhost:4318"
+
     def test_capture_prompts_defaults_true(self):
         tc = TraceConfig()
         assert tc.capture_prompts is True
@@ -32,18 +36,6 @@ class TestTraceConfigDefaults:
         tc = TraceConfig()
         assert tc.max_attribute_length == 4096
 
-    def test_max_traces_in_memory_defaults_500(self):
-        tc = TraceConfig()
-        assert tc.max_traces_in_memory == 500
-
-    def test_max_traces_stored_defaults_5000(self):
-        tc = TraceConfig()
-        assert tc.max_traces_stored == 5000
-
-    def test_max_trace_age_hours_defaults_72(self):
-        tc = TraceConfig()
-        assert tc.max_trace_age_hours == 72
-
 
 class TestTraceConfigFromDict:
     """TraceConfig loads from a YAML-style dict with overrides."""
@@ -52,15 +44,14 @@ class TestTraceConfigFromDict:
         tc = TraceConfig(enabled=True)
         assert tc.enabled is True
 
+    def test_overrides_otlp_endpoint(self):
+        tc = TraceConfig(otlp_endpoint="http://custom:4318")
+        assert tc.otlp_endpoint == "http://custom:4318"
+
     def test_overrides_capture_flags(self):
         tc = TraceConfig(capture_prompts=False, capture_tool_args=False)
         assert tc.capture_prompts is False
         assert tc.capture_tool_args is False
-
-    def test_overrides_numeric_limits(self):
-        tc = TraceConfig(max_traces_in_memory=100, max_trace_age_hours=24)
-        assert tc.max_traces_in_memory == 100
-        assert tc.max_trace_age_hours == 24
 
     def test_partial_overrides_keep_other_defaults(self):
         tc = TraceConfig(enabled=True)
@@ -68,31 +59,11 @@ class TestTraceConfigFromDict:
         assert tc.capture_tool_args is True
         assert tc.capture_memory_content is True
         assert tc.max_attribute_length == 4096
-        assert tc.max_traces_in_memory == 500
-        assert tc.max_traces_stored == 5000
-        assert tc.max_trace_age_hours == 72
+        assert tc.otlp_endpoint == "http://localhost:4318"
 
 
 class TestTraceConfigValidation:
     """Validation constraints on TraceConfig fields."""
-
-    def test_max_traces_in_memory_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            TraceConfig(max_traces_in_memory=0)
-        with pytest.raises(ValidationError):
-            TraceConfig(max_traces_in_memory=-1)
-
-    def test_max_trace_age_hours_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            TraceConfig(max_trace_age_hours=0)
-        with pytest.raises(ValidationError):
-            TraceConfig(max_trace_age_hours=-1)
-
-    def test_max_traces_stored_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            TraceConfig(max_traces_stored=0)
-        with pytest.raises(ValidationError):
-            TraceConfig(max_traces_stored=-1)
 
     def test_max_attribute_length_must_be_positive(self):
         with pytest.raises(ValidationError):
@@ -113,7 +84,7 @@ class TestSidestageConfigTracingIntegration:
         sc = SidestageConfig()
         assert sc.tracing.enabled is False
         assert sc.tracing.capture_prompts is True
-        assert sc.tracing.max_traces_in_memory == 500
+        assert sc.tracing.otlp_endpoint == "http://localhost:4318"
 
     def test_sidestage_config_serializes_tracing(self):
         sc = SidestageConfig()
@@ -122,29 +93,30 @@ class TestSidestageConfigTracingIntegration:
         assert dumped["tracing"]["enabled"] is False
         assert dumped["tracing"]["capture_prompts"] is True
         assert dumped["tracing"]["max_attribute_length"] == 4096
+        assert dumped["tracing"]["otlp_endpoint"] == "http://localhost:4318"
 
     def test_sidestage_config_from_dict_with_tracing(self):
-        data = {"tracing": {"enabled": True, "max_traces_in_memory": 200}}
+        data = {"tracing": {"enabled": True, "otlp_endpoint": "http://viewer:4318"}}
         sc = SidestageConfig(**data)
         assert sc.tracing.enabled is True
-        assert sc.tracing.max_traces_in_memory == 200
+        assert sc.tracing.otlp_endpoint == "http://viewer:4318"
         assert sc.tracing.capture_prompts is True  # default preserved
 
     def test_backward_compat_no_tracing_section(self):
         data = {"loglevel": "DEBUG"}
         sc = SidestageConfig(**data)
         assert sc.tracing.enabled is False
-        assert sc.tracing.max_traces_in_memory == 500
+        assert sc.tracing.otlp_endpoint == "http://localhost:4318"
 
     def test_config_yml_roundtrip(self, tmp_path: Path):
         # Write config with tracing enabled
         config_path = tmp_path / "config.yml"
-        sc = SidestageConfig(tracing=TraceConfig(enabled=True, max_traces_in_memory=200))
+        sc = SidestageConfig(tracing=TraceConfig(enabled=True, otlp_endpoint="http://viewer:4318"))
         with open(config_path, "w") as f:
             yaml.dump(sc.model_dump(), f, default_flow_style=False)
 
         # Use init to read it back
         loaded = sidestage_config.init(tmp_path)
         assert loaded.tracing.enabled is True
-        assert loaded.tracing.max_traces_in_memory == 200
+        assert loaded.tracing.otlp_endpoint == "http://viewer:4318"
         assert loaded.tracing.capture_prompts is True

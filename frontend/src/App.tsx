@@ -4,7 +4,6 @@ import { AppProvider, useAppContext } from './AppContext';
 import { Layout } from './Layout';
 import { ChatWidget } from './ChatWidget';
 import { EntityBrowser } from './EntityBrowser';
-import { TraceViewerPage } from './TraceViewerPage';
 import { cn } from './lib/utils';
 import { marked } from 'marked';
 
@@ -121,8 +120,6 @@ const AppContent: React.FC = () => {
         <Route path="/scenes/:sceneId" element={<ScenesPage />} />
         <Route path="/entities" element={<EntitiesPage />} />
         <Route path="/entities/:entityId" element={<EntitiesPage />} />
-        <Route path="/traces" element={<TraceViewerPage />} />
-        <Route path="/traces/:sceneId/:traceId" element={<TraceViewerPage />} />
       </Routes>
     </Layout>
   );

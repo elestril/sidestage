@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "sidestage": {
+      "type": "http",
+      "url": "http://localhost:8000/v1/mcp"
+    },
+    "code-index": {
+      "command": "uvx",
+      "args": [
+        "code-index-mcp",
+        "--project-path",
+        "."
+      ]
+    }
+  }
+}

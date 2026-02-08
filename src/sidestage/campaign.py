@@ -253,6 +253,31 @@ class Campaign:
         except httpx.RequestError as e:
             raise RuntimeError(f"Failed to query models at {models_url}: {e}") from e
 
+        # 3. Completions probe — catches dead backend workers behind a proxy
+        completions_url = f"{base_url}/chat/completions"
+        try:
+            logger.info(f"Probing completions endpoint at {completions_url}...")
+            resp = httpx.post(
+                completions_url,
+                json={
+                    "model": target_model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+                headers={"Authorization": f"Bearer {llm.api_key}"},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            logger.info("Completions probe succeeded.")
+        except httpx.RequestError as e:
+            raise RuntimeError(
+                f"LLM completions probe failed at {completions_url} (server may have a dead worker): {e}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"LLM completions probe returned error at {completions_url}: {e}"
+            ) from e
+
     async def start_graph(self) -> None:
         """Initialize the FalkorDB graph connection.
 

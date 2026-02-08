@@ -17,10 +17,12 @@ dependencies = [
     "websockets (>=16.0,<17.0)",
     "opentelemetry-api (>=1.39.1,<2.0.0)",
     "opentelemetry-sdk (>=1.39.1,<2.0.0)",
+    "opentelemetry-exporter-otlp-proto-http (>=1.39.1,<2.0.0)",
     "sqlalchemy (>=2.0.46,<3.0.0)",
     "litellm (>=1.81.6,<2.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "falkordb (>=1.4.0,<2.0.0)",
+    "mcp (>=1.26.0,<2.0.0)",
 ]
 
 [project.scripts]

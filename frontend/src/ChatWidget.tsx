@@ -1,18 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from './AppContext';
 import { cn } from './lib/utils';
-import { Send, Bug, Activity } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Send } from 'lucide-react';
 import { marked } from 'marked';
 import { EntityModal } from './EntityBrowser';
 
 export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> = ({ className, placeholder = "Type your message..." }) => {
-  const { messages, sendMessage, activeScene, entities, debugMode, setDebugMode } = useAppContext();
-  const navigate = useNavigate();
+  const { messages, sendMessage, activeScene, entities } = useAppContext();
   const [input, setInput] = useState('');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const traceCache = useRef<Map<string, string | null>>(new Map());
 
   const getCharacter = (id: string) => entities.find(e => e.id === id);
 
@@ -36,30 +33,6 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
     const text = input;
     setInput('');
     await sendMessage(text);
-  };
-
-  const handleTraceClick = async (messageId: string, sceneId: string) => {
-    // Check cache first
-    const cached = traceCache.current.get(messageId);
-    if (cached !== undefined) {
-      if (cached) navigate(`/traces/${sceneId}/${cached}`);
-      return;
-    }
-    try {
-      const resp = await fetch(`/v1/traces?event_id=${encodeURIComponent(messageId)}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.length > 0) {
-          const traceId = data[0].trace_id;
-          traceCache.current.set(messageId, traceId);
-          navigate(`/traces/${sceneId}/${traceId}`);
-        } else {
-          traceCache.current.set(messageId, null);
-        }
-      }
-    } catch {
-      // Silently fail
-    }
   };
 
   const formatGametime = (totalSeconds: number | null) => {
@@ -86,7 +59,7 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
       <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#333]">
         <div className="flex items-center gap-4">
             <span className="font-bold text-[#bb86fc]">{activeScene?.name || 'Campaign Planning'}</span>
-            <button 
+            <button
                 onClick={handleReloadDefaults}
                 className="text-[10px] uppercase font-bold text-gray-500 hover:text-white transition-colors border border-gray-700 rounded px-1"
                 title="Reload Default Characters"
@@ -94,19 +67,7 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
                 Reload Defaults
             </button>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-xs text-[#03dac6]">{formatGametime(activeScene?.current_gametime || null)}</span>
-          <button
-            onClick={() => setDebugMode(!debugMode)}
-            className={cn(
-              "transition-colors",
-              debugMode ? "text-[#03dac6]" : "text-gray-600 hover:text-gray-400"
-            )}
-            title={debugMode ? "Disable debug mode" : "Enable debug mode"}
-          >
-            <Bug size={14} />
-          </button>
-        </div>
+        <span className="font-mono text-xs text-[#03dac6]">{formatGametime(activeScene?.current_gametime || null)}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto mb-4 pr-2 flex flex-col gap-4 scrollbar-thin scrollbar-thumb-[#333]">
@@ -156,20 +117,6 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
                   </div>
                 )}
               </div>
-              {debugMode && (
-                <button
-                  onClick={() => handleTraceClick(msg.id, msg.scene_id)}
-                  className={cn(
-                    "mt-2 shrink-0 transition-colors",
-                    traceCache.current.get(msg.id) === null
-                      ? "text-gray-700 cursor-default"
-                      : "text-gray-500 hover:text-[#bb86fc]"
-                  )}
-                  title="View trace"
-                >
-                  <Activity size={12} />
-                </button>
-              )}
             </div>
           );
         })}
@@ -184,7 +131,7 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
           placeholder={placeholder}
           className="flex-1 bg-[#2c2c2c] border border-[#333] text-[#e0e0e0] p-3 rounded-lg outline-none focus:border-[#bb86fc] transition-colors"
         />
-        <button 
+        <button
           type="submit"
           disabled={!input.trim()}
           className="bg-[#bb86fc] text-black px-6 rounded-lg font-bold hover:opacity-90 disabled:opacity-50 transition-all flex items-center gap-2"

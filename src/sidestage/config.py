@@ -22,13 +22,11 @@ class LLMConfig(BaseModel):
 class TraceConfig(BaseModel):
     """Configuration for the tracing subsystem."""
     enabled: bool = False
+    otlp_endpoint: str = Field(default="http://localhost:4318", description="OTLP HTTP endpoint (e.g. otel-desktop-viewer)")
     capture_prompts: bool = True
     capture_tool_args: bool = True
     capture_memory_content: bool = True
     max_attribute_length: int = Field(default=4096, ge=1)
-    max_traces_in_memory: int = Field(default=500, ge=1)
-    max_traces_stored: int = Field(default=5000, ge=1)
-    max_trace_age_hours: int = Field(default=72, ge=1)
 
 
 class SidestageConfig(BaseModel):

@@ -99,3 +99,10 @@ Token budgeting splits the context window between memory sections and chat histo
 ### Gametime Tracking
 - **Granular Time:** Time is tracked in seconds and displayed as `Day D, HH:MM:SS`.
 - **Per-Scene Clocks:** Different scenes can exist at different times (enabling split parties or flashbacks).
+
+## Integrations
+
+### MCP (Model Context Protocol)
+- **Streamable HTTP Transport:** The server exposes an MCP endpoint at `/v1/mcp` that AI clients (Claude Code, Claude Desktop, etc.) can connect to directly.
+- **Full API Coverage:** All campaign operations (entity CRUD, scene management, chat, import/backup) are available as MCP tools.
+- **In-Process:** The MCP endpoint runs inside the same FastAPI server — no separate process or proxy needed.

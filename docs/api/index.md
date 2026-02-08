@@ -18,6 +18,7 @@ Auto-generated from source. Run `python scripts/generate_api_docs.py` to regener
 - [sidestage.graph.relationships](sidestage.graph.relationships.md)
 - [sidestage.graph.schema](sidestage.graph.schema.md)
 - [sidestage.health](sidestage.health.md)
+- [sidestage.mcp_bridge](sidestage.mcp_bridge.md)
 - [sidestage.memory](sidestage.memory.md)
 - [sidestage.memory.context](sidestage.memory.context.md)
 - [sidestage.memory.embeddings](sidestage.memory.embeddings.md)

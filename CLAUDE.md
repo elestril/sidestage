@@ -2,14 +2,28 @@
 
 Sidestage is a real-time, AI-enhanced tabletop RPG campaign manager. Python/FastAPI backend, React SPA frontend, FalkorDB graph database, SQLite for chat logs.
 
-## Mandatory: Documentation Workflow
+## CRITICAL: Research Workflow
 
-**Before reading source code**, read the relevant documentation first:
+**DO NOT explore or read source code until you have consulted docs and the code index.** This applies to every task, including when using Explore agents or planning.
 
-1. Start with `docs/architecture.md` for the source-to-doc map
-2. Read the relevant `docs/*.md` file for domain context
-3. Read the relevant `docs/api/<module>.md` for function signatures
-4. Then read the actual source code
+Follow this order strictly:
+
+1. **Read `docs/architecture.md`** — source-to-doc map, module overview
+2. **Read the relevant `docs/*.md`** — domain context for the area you're working in
+3. **Read `docs/api/<module>.md`** — function signatures for modules you'll touch
+4. **Use the code-index MCP** to locate symbols, files, and call sites before reading source
+5. **Only then** read actual source code
+
+### Code Index MCP
+
+A `code-index` MCP server is configured in `.mcp.json`. Use it to navigate the codebase efficiently:
+
+- **`find_files(pattern)`** — find files by glob (e.g. `"*.py"`, `"test_*.py"`, `"provider.py"`)
+- **`search_code_advanced(pattern)`** — regex search across files (like grep but indexed)
+- **`get_file_summary(file_path)`** — line count, functions, classes, imports for a file
+- **`get_symbol_body(file_path, symbol_name)`** — get the source of a specific function/class without reading the whole file
+
+Prefer these over `Glob`/`Grep`/`Read` when possible — they are faster and keep context small.
 
 **After changing any code**, update documentation to reflect the new behavior:
 
@@ -57,9 +71,15 @@ See `docs/architecture.md` for the complete source file to documentation file ma
 
 ## Dev Instance
 
-While working, you can run a dev server against `./sidestage.dev/`
+See `docs/dev_instance.md` for full setup and usage. Quick reference:
 
 ```
-cd sidestage.dev && ./run.sh
-
+scripts/run-dev.sh
 ```
+
+This starts Sidestage on `http://localhost:8000` with hot-reload from the `sidestage.dev/` working directory. The MCP endpoint at `/v1/mcp` is registered in `.mcp.json` for agent debugging.
+
+- **Server log**: `sidestage.dev/dev/server.log` — check here first for any server errors
+- **Working directory**: `sidestage.dev/` — campaign data, config, and logs live here
+- **Config**: `sidestage.dev/config.yml` — LLM and graph database settings
+- **IMPORTANT**: When interacting with the running dev server, always use the Sidestage MCP tools (list_entities, send_chat_message, etc.) instead of curl or direct HTTP calls.
