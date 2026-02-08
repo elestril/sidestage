@@ -14,6 +14,9 @@ The application features a persistent layout consisting of:
 
 ## Routes
 
+### Navigation
+The header contains navigation links to Scenes, Entities, and Traces (uses React Router `NavLink` for SPA navigation with active highlighting).
+
 ### 1. Scenes View (`/scenes/:sceneId`)
 The primary interface for running a game session or planning.
 
@@ -52,12 +55,28 @@ The database management interface for the campaign world.
             - **Location:** Connected Locations list.
             - **Scene:** Current Gametime.
 
+### 3. Trace Viewer (`/traces`, `/traces/:sceneId/:traceId`)
+The trace inspection interface for debugging agent behavior.
+
+- **URL:** `/traces` or `/traces/<scene_id>/<trace_id>`
+- **Structure:**
+    - **Left Pane (Trace List):**
+        - **Scene Selector:** Dropdown to filter traces by scene, or "All scenes".
+        - **Tracing Status:** Shows whether tracing is enabled, trace count.
+        - **Trace List:** Scrollable list of trace summaries. Running traces show a pulsing green dot and "In progress..." instead of duration.
+    - **Right Pane (Trace Detail):**
+        - **Waterfall Timeline:** Tree-structured span timeline with collapsible nodes, color-coded duration bars (blue=LLM, green=tool, orange=memory, purple=scene, red=error).
+        - **Span Detail Panel:** Shows span attributes, prompt/completion events, error details.
+- **Real-time Updates:** Subscribes to WebSocket `trace_started`, `span_completed`, and `trace_completed` messages to show live trace data as spans arrive.
+
 ## Components
 
 ### Chat Widget
 - Handles sending/receiving messages via WebSocket.
 - Renders Markdown content.
 - Supports interactive "Widgets" (e.g., clicking an Entity card opens the Entity Modal).
+- **Debug Mode Toggle:** A Bug icon button in the header toggles debug mode on/off (stored in AppContext).
+- **Trace Link Icons:** When debug mode is enabled, each message shows a small Activity icon. Clicking it resolves the message's trace via `GET /v1/traces?event_id=<message.id>` (with per-session caching) and navigates to the Trace Viewer.
 
 ### Entity Editor
 - Uses `tiptap` for Markdown editing.

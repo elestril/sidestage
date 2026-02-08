@@ -50,7 +50,26 @@ export interface EntityContentSyncBroadcast {
   body: string;
 }
 
-export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast;
+export interface TraceStartedBroadcast {
+  type: 'trace_started';
+  trace_id: string;
+  scene_id: string | null;
+  event_type: string | null;
+  start_time_ms: number;
+}
+
+export type SpanCompletedBroadcast = { type: 'span_completed' } & TraceSpan;
+
+export interface TraceCompletedBroadcast {
+  type: 'trace_completed';
+  trace_id: string;
+  scene_id: string | null;
+  duration_ms: number;
+}
+
+export type TraceWebSocketMessage = TraceStartedBroadcast | SpanCompletedBroadcast | TraceCompletedBroadcast;
+
+export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast | TraceStartedBroadcast | SpanCompletedBroadcast | TraceCompletedBroadcast;
 
 // --- Tracing types ---
 

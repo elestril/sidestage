@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { Scene, Entity, ChatMessage, WebSocketMessage } from './types';
+import type { Scene, Entity, ChatMessage, WebSocketMessage, TraceWebSocketMessage } from './types';
 
 interface AppContextType {
   scenes: Scene[];
@@ -15,6 +15,9 @@ interface AppContextType {
   onSync: (callback: (data: any) => void) => () => void;
   messages: ChatMessage[];
   activeScene: Scene | undefined;
+  debugMode: boolean;
+  setDebugMode: (enabled: boolean) => void;
+  onTraceMessage: (callback: (data: TraceWebSocketMessage) => void) => () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -102,12 +105,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [debugMode, setDebugMode] = useState(false);
+
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const syncListeners = useRef<Set<(data: any) => void>>(new Set());
+  const traceListeners = useRef<Set<(data: TraceWebSocketMessage) => void>>(new Set());
 
   const onSync = useCallback((callback: (data: any) => void) => {
     syncListeners.current.add(callback);
     return () => syncListeners.current.delete(callback);
+  }, []);
+
+  const onTraceMessage = useCallback((callback: (data: TraceWebSocketMessage) => void) => {
+    traceListeners.current.add(callback);
+    return () => { traceListeners.current.delete(callback); };
   }, []);
 
   const syncSocketMessage = useCallback((data: any) => {
@@ -147,6 +158,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           loadScenes();
         } else if (data.type === 'entity_content_sync') {
           syncListeners.current.forEach((listener: (data: any) => void) => listener(data));
+        } else if (data.type === 'trace_started' || data.type === 'span_completed' || data.type === 'trace_completed') {
+          traceListeners.current.forEach(listener => listener(data as TraceWebSocketMessage));
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error, event.data);
@@ -179,7 +192,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncSocketMessage,
       onSync,
       messages,
-      activeScene
+      activeScene,
+      debugMode,
+      setDebugMode,
+      onTraceMessage,
     }}>
       {children}
     </AppContext.Provider>
