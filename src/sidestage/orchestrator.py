@@ -131,7 +131,7 @@ class SidestageOrchestrator:
         Retrieve or activate a scene by ID.
         
         If the scene is not already active in memory, it loads it from the campaign
-        and activates it (starting its message bus and agents).
+        and activates it (starting its event queue and agents).
 
         Args:
             scene_id (str): The ID of the scene.
@@ -144,27 +144,19 @@ class SidestageOrchestrator:
         
         scene_logic = self.campaign.get_scene_object(scene_id)
         if scene_logic:
+            scene_logic.set_broadcast(self._broadcast_chat_event)
             await scene_logic.activate()
-            # Subscribe for broadcasting
-            scene_logic.bus.subscribe(self._on_scene_event)
             self.active_scenes[scene_id] = scene_logic
             return scene_logic
         return None
 
-    async def _on_scene_event(self, event: Any) -> None:
-        """
-        Callback for scene events. Broadcasts chat messages to all connected WebSocket clients.
-
-        Args:
-            event (Any): The event received from a scene bus.
-        """
-        from sidestage.schemas import ChatMessage
-        if isinstance(event, ChatMessage):
-            await self.sync_manager.broadcast({
-                "type": "chat_message",
-                "message": event.model_dump(),
-                "scene_id": event.scene_id
-            })
+    async def _broadcast_chat_event(self, event: Any) -> None:
+        """Broadcast a chat message to all connected WebSocket clients."""
+        await self.sync_manager.broadcast({
+            "type": "chat_message",
+            "message": event.model_dump(),
+            "scene_id": event.scene_id
+        })
 
     async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
         """

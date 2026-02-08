@@ -1,11 +1,11 @@
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any, List, cast
+from typing import AsyncGenerator, Optional, Dict, Any, List, Callable, Awaitable, cast
 from datetime import datetime
 import uuid
 
 from sidestage.schemas import Character, Scene, ChatRequest, ChatMessage, Event
 from sidestage.entities import entity_to_markdown
-from sidestage.bus import SceneMessageBus
+from sidestage.bus import EventQueue
 from sidestage.character import CharacterLogic
 from sidestage.storage import Storage
 from sidestage.agent import LiteLLMAgent
@@ -18,12 +18,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Callback type for broadcasting events to websocket clients
+BroadcastFn = Callable[[ChatMessage], Awaitable[None]]
+
 class SceneLogic:
     """
     Manages the runtime state and logic of a specific Scene.
-    
+
     This class orchestrates:
-    - The SceneMessageBus for event distribution.
+    - An EventQueue whose worker persists, broadcasts, and dispatches events.
     - Active CharacterLogic instances (agents).
     - Persistence of scene data via Storage.
     - Creation and routing of chat messages.
@@ -45,56 +48,68 @@ class SceneLogic:
         self.embed_config = embed_config
         self.health = health
         self.context_limit = context_limit
-        self.bus = SceneMessageBus()
+        self.queue = EventQueue()
         self.characters: Dict[str, CharacterLogic] = {}
         self._active = False
-        
-        # Setup insert hook for persistence
-        self.bus.set_insert_hook(self._on_publish_hook)
+        self._broadcast_fn: Optional[BroadcastFn] = None
 
-    async def _on_publish_hook(self, event: Event) -> Optional[Event]:
-        """
-        Hook called before an event is published to the bus.
-        
-        This hook is responsible for persisting relevant events (like ChatMessage)
-        to the scene's history in the database.
-        
-        Args:
-            event (Event): The event being published.
-            
-        Returns:
-            Optional[Event]: The event to proceed with (usually unchanged).
-        """
-        if isinstance(event, ChatMessage):
-            # 1. Persist to scene data (Storage for backward compat)
-            self.data.messages.append(event)
-            self.storage.update_scene(self.data)
+    def set_broadcast(self, fn: BroadcastFn) -> None:
+        """Set the callback used to broadcast events to websocket clients."""
+        self._broadcast_fn = fn
 
-            # 2. Persist to graph when available
-            if self.graph_client is not None:
-                from sidestage.graph import create_entity, link
+    async def _process_event(self, event: Event) -> None:
+        """
+        Queue worker handler. For each event:
+        (a) Persist to storage and graph.
+        (b) Broadcast to websocket clients.
+        (c) For user-originated ChatMessages: dispatch to all NPCs.
+        """
+        if not isinstance(event, ChatMessage):
+            return
+
+        # (a) Persist
+        self.data.messages.append(event)
+        self.storage.update_scene(self.data)
+
+        if self.graph_client is not None:
+            from sidestage.graph import create_entity, link
+            try:
+                await create_entity(self.graph_client, event)
+                await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
+                if event.character_id:
+                    await link(self.graph_client, event.id, "INVOLVES", event.character_id)
+            except Exception:
+                logger.exception("Failed to persist event %s to graph", event.id)
+
+        # (b) Broadcast to websockets
+        if self._broadcast_fn:
+            await self._broadcast_fn(event)
+
+        # (c) For user-originated events: send to all NPCs
+        if event.actor_id == "user":
+            await self._dispatch_to_npcs(event)
+
+    async def _dispatch_to_npcs(self, event: ChatMessage) -> None:
+        """Send an event to all active NPC agents."""
+        for char_logic in self.characters.values():
+            if char_logic.actor is not None:
                 try:
-                    await create_entity(self.graph_client, event)
-                    await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
-                    if event.character_id:
-                        await link(self.graph_client, event.id, "INVOLVES", event.character_id)
+                    await char_logic.actor.on_event(event)
                 except Exception:
-                    logger.exception("Failed to persist event %s to graph", event.id)
-
-        return event
+                    logger.exception(
+                        "Error dispatching to NPC %s", char_logic.data.name
+                    )
 
     async def activate(self) -> None:
         """
         Activate the scene.
-        
-        Starts the message bus and activates all characters present in the campaign/scene.
-        This prepares the scene for interactive events.
+
+        Starts the event queue and activates all characters present in the campaign/scene.
         """
         if self._active:
             return
-        
-        # Start the bus
-        await self.bus.start()
+
+        await self.queue.start(self._process_event)
 
         # Load characters: prefer graph when available, fall back to Storage
         if self.graph_client is not None:
@@ -118,24 +133,24 @@ class SceneLogic:
             )
             self.characters[char_data.id] = char_logic
             await char_logic.activate()
-            
+
         self._active = True
         logger.info(f"Scene {self.id} activated with {len(self.characters)} characters.")
 
     async def deactivate(self) -> None:
         """
         Deactivate the scene.
-        
-        Stops the message bus and deactivates all characters.
+
+        Stops the event queue and deactivates all characters.
         """
         if not self._active:
             return
-        
+
         for char_logic in self.characters.values():
             await char_logic.deactivate()
         self.characters = {}
-        
-        await self.bus.stop()
+
+        await self.queue.stop()
         self._active = False
         logger.info(f"Scene {self.id} deactivated.")
 
@@ -152,9 +167,9 @@ class SceneLogic:
     def create_message(self, actor_id: str, text: str, character_id: Optional[str] = None) -> ChatMessage:
         """
         Factory method to create a ChatMessage associated with this scene.
-        
-        This creates the object but does NOT publish or persist it. 
-        Use `bus.publish(message)` to send it.
+
+        This creates the object but does NOT publish or persist it.
+        Use `queue.put(message)` to send it.
 
         Args:
             actor_id (str): The ID of the actor (e.g., 'user', 'agent').
@@ -166,10 +181,10 @@ class SceneLogic:
         """
         import uuid
         from datetime import datetime
-        
+
         # Fallback for now until Actor system is fully integrated
         final_character_id = character_id or actor_id
-        
+
         return ChatMessage(
             id=f"msg_{str(uuid.uuid4())[:8]}",
             name=f"{actor_id.capitalize()} Message",
@@ -182,21 +197,12 @@ class SceneLogic:
             message=text
         )
 
-    def add_message(self, message: ChatMessage) -> None:
-        """
-        Legacy method to add a message directly.
-        
-        Deprecated: Use `bus.publish(message)` instead to ensure event distribution.
-        """
-        self.data.messages.append(message)
-        self.storage.update_scene(self.data)
-
     async def chat(self, user_message: ChatMessage) -> None:
         """
         Entry point for user chat interaction.
 
-        Publishes the user message to the bus, which will trigger any listening
-        AgentActors to generate responses asynchronously.
+        Puts the user message on the event queue. The queue worker will
+        persist it, broadcast it, and dispatch it to NPCs.
 
         Args:
             user_message (ChatMessage): The message from the user.
@@ -204,4 +210,4 @@ class SceneLogic:
         if self.health is not None and not self.health.is_accepting_chat:
             logger.warning("Chat rejected: campaign health is UNHEALTHY")
             return
-        await self.bus.publish(user_message)
+        await self.queue.put(user_message)

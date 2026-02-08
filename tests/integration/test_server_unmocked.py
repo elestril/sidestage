@@ -93,9 +93,7 @@ class TestServerUnmocked:
         )
         assert resp1.status_code == 200
 
-        # Wait for agent responses to stabilize (agents reply to each other
-        # so the exact count is unpredictable; we just need the bus to be
-        # idle before sending the next user message).
+        # Wait for agent response to the first user message.
         count_after_first = self._wait_stable("campaign_planning", min_messages=2, timeout=60)
         assert count_after_first >= 2  # User1 + at least one agent
 

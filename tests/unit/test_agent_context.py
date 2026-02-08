@@ -25,7 +25,7 @@ def _make_scene_logic(**overrides: Any) -> MagicMock:
     sl.agent.tools = []
     sl.agent.debug_mode = False
     sl.messages = []
-    sl.bus.publish = AsyncMock()
+    sl.queue.put = AsyncMock()
     sl.create_message = lambda actor_id, text, character_id: ChatMessage(
         id="reply_1", name="Reply", body=text,
         actor_id=actor_id, character_id=character_id, message=text,

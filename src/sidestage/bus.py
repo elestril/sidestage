@@ -1,51 +1,35 @@
 import asyncio
 import logging
-from typing import Callable, Awaitable, List, Dict, Type, Any, Optional, Coroutine
+from typing import Callable, Awaitable, Optional
 from sidestage.schemas import Event
 
 logger = logging.getLogger(__name__)
 
-# Type for a listener callback: async function that takes an Event
-EventListener = Callable[[Event], Coroutine[Any, Any, None]]
-# Type for the insert hook: async function that takes an Event and returns a (possibly modified) Event or None to drop it
-InsertHook = Callable[[Event], Awaitable[Optional[Event]]]
+# Type for the event handler callback
+EventHandler = Callable[[Event], Awaitable[None]]
 
-class SceneMessageBus:
+class EventQueue:
     """
-    An asynchronous message bus dedicated to a single Scene.
-    
-    The SceneMessageBus facilitates decoupled communication between components 
-    within a scene (e.g., Characters, Orchestrator, UI Sync). It supports:
-    - Multiple async subscribers (listeners).
-    - A single 'insert hook' for pre-processing or persistence before dispatch.
-    - Asynchronous publishing and processing via an asyncio Queue.
+    A simple async event queue for a Scene.
+
+    Events are processed sequentially by a single handler callback.
+    No subscriptions, no hooks — the handler does all the work.
     """
     def __init__(self):
-        """Initialize the SceneMessageBus with an empty listener list and queue."""
-        self.listeners: List[EventListener] = []
-        self.insert_hook: Optional[InsertHook] = None
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self) -> None:
-        """
-        Start the background worker task to process events from the queue.
-        
-        This method is idempotent; calling it on an already running bus does nothing.
-        """
+    async def start(self, handler: EventHandler) -> None:
+        """Start the background worker with the given handler."""
         if self._running:
             return
         self._running = True
-        self._task = asyncio.create_task(self._worker())
-        logger.info("SceneMessageBus started.")
+        self._task = asyncio.create_task(self._worker(handler))
+        logger.info("EventQueue started.")
 
     async def stop(self) -> None:
-        """
-        Stop the background worker task and cancel any pending processing.
-        
-        This ensures the worker loop exits cleanly.
-        """
+        """Stop the background worker."""
         self._running = False
         if self._task:
             self._task.cancel()
@@ -53,81 +37,20 @@ class SceneMessageBus:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("SceneMessageBus stopped.")
+        logger.info("EventQueue stopped.")
 
-    def subscribe(self, listener: EventListener) -> None:
-        """
-        Add a listener to the bus.
-        
-        Args:
-            listener (EventListener): An async function to be called when an event is processed.
-        """
-        if listener not in self.listeners:
-            self.listeners.append(listener)
+    async def put(self, event: Event) -> None:
+        """Add an event to the queue."""
+        await self.queue.put(event)
 
-    def unsubscribe(self, listener: EventListener) -> None:
-        """
-        Remove a listener from the bus.
-        
-        Args:
-            listener (EventListener): The listener function to remove.
-        """
-        if listener in self.listeners:
-            self.listeners.remove(listener)
-
-    def set_insert_hook(self, hook: InsertHook) -> None:
-        """
-        Set the insert hook for the bus.
-        
-        The insert hook is called immediately upon `publish()`, BEFORE the event 
-        is added to the queue. It is useful for persistence, validation, or modification.
-        
-        Args:
-            hook (InsertHook): An async function that takes an Event and returns an Event (or None).
-        """
-        self.insert_hook = hook
-
-    async def publish(self, event: Event) -> None:
-        """
-        Publish an event to the bus.
-        
-        The event first passes through the insert hook (if configured). 
-        If the hook returns an event, it is added to the processing queue.
-        
-        Args:
-            event (Event): The event to publish.
-        """
-        processed_event: Optional[Event] = event
-        if self.insert_hook:
-            try:
-                processed_event = await self.insert_hook(event)
-            except Exception as e:
-                logger.error(f"Error in SceneMessageBus insert hook: {e}")
-                # We continue with the original event if the hook fails, 
-                # or should we drop it? Plan doesn't specify. 
-                # Let's keep the original for now but log error.
-        
-        if processed_event:
-            await self.queue.put(processed_event)
-
-    async def _worker(self) -> None:
-        """
-        Background worker loop that pulls events from the queue and dispatches them to listeners.
-        
-        Listeners are invoked concurrently using `asyncio.wait`.
-        """
+    async def _worker(self, handler: EventHandler) -> None:
+        """Background loop: pull events and pass to handler."""
         while self._running:
             try:
                 event = await self.queue.get()
-                
-                # Dispatch to all listeners in parallel
-                tasks = [asyncio.create_task(listener(event)) for listener in self.listeners]
-                if tasks:
-                    await asyncio.wait(tasks)
-                
+                await handler(event)
                 self.queue.task_done()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Error in SceneMessageBus worker loop: {e}")
-                await asyncio.sleep(1) # Prevent tight loop on error
+            except Exception:
+                logger.exception("EventQueue worker error")

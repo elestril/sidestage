@@ -114,8 +114,8 @@ class TestSceneLogicActivation:
             health=mock_health,
             context_limit=8192,
         )
-        sl.bus = MagicMock()
-        sl.bus.start = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.start = AsyncMock()
         await sl.activate()
 
         for char_logic in sl.characters.values():
@@ -136,8 +136,8 @@ class TestSceneLogicActivation:
             storage, _make_agent(), _make_scene(id="scene_tavern"),
             health=MagicMock(),
         )
-        sl.bus = MagicMock()
-        sl.bus.start = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.start = AsyncMock()
         await sl.activate()
 
         for char_logic in sl.characters.values():
@@ -159,8 +159,8 @@ class TestSceneLogicActivation:
             graph_client=mock_client,
             health=MagicMock(),
         )
-        sl.bus = MagicMock()
-        sl.bus.start = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.start = AsyncMock()
         await sl.activate()
 
         mock_list.assert_awaited_once_with(mock_client, entity_type="Character")
@@ -192,8 +192,8 @@ class TestFullWiringChain:
             health=mock_health,
             context_limit=8192,
         )
-        sl.bus = MagicMock()
-        sl.bus.start = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.start = AsyncMock()
         await sl.activate()
 
         char_logic = sl.characters["char_alice"]
@@ -222,8 +222,8 @@ class TestFullWiringChain:
             health=mock_health,
             context_limit=4096,
         )
-        sl.bus = MagicMock()
-        sl.bus.start = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.start = AsyncMock()
         # Need to mock graph list_entities since graph_client is set
         with patch("sidestage.graph.list_entities", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = [_make_character(id="char_alice")]
@@ -255,8 +255,8 @@ class TestSceneLogicHealthCheck:
             _make_storage(), _make_agent(), _make_scene(),
             health=mock_health,
         )
-        sl.bus = MagicMock()
-        sl.bus.publish = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.put = AsyncMock()
 
         msg = ChatMessage(
             id="m1", name="Msg", body="Hello",
@@ -264,7 +264,7 @@ class TestSceneLogicHealthCheck:
             scene_id="scene_test", gametime=0, walltime="now",
         )
         await sl.chat(msg)
-        sl.bus.publish.assert_awaited_once()
+        sl.queue.put.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_chat_blocked_when_unhealthy(self) -> None:
@@ -276,8 +276,8 @@ class TestSceneLogicHealthCheck:
             _make_storage(), _make_agent(), _make_scene(),
             health=mock_health,
         )
-        sl.bus = MagicMock()
-        sl.bus.publish = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.put = AsyncMock()
 
         msg = ChatMessage(
             id="m1", name="Msg", body="Hello",
@@ -285,7 +285,7 @@ class TestSceneLogicHealthCheck:
             scene_id="scene_test", gametime=0, walltime="now",
         )
         await sl.chat(msg)
-        sl.bus.publish.assert_not_awaited()
+        sl.queue.put.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_chat_proceeds_without_health(self) -> None:
@@ -293,8 +293,8 @@ class TestSceneLogicHealthCheck:
         sl = SceneLogic(
             _make_storage(), _make_agent(), _make_scene(),
         )
-        sl.bus = MagicMock()
-        sl.bus.publish = AsyncMock()
+        sl.queue = MagicMock()
+        sl.queue.put = AsyncMock()
 
         msg = ChatMessage(
             id="m1", name="Msg", body="Hello",
@@ -302,7 +302,7 @@ class TestSceneLogicHealthCheck:
             scene_id="scene_test", gametime=0, walltime="now",
         )
         await sl.chat(msg)
-        sl.bus.publish.assert_awaited_once()
+        sl.queue.put.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

@@ -198,9 +198,9 @@ async def test_scene_logic_activate_uses_graph_for_characters():
     client = MagicMock(spec=GraphClient)
 
     sl = SceneLogic(storage, agent, scene_data, graph_client=client)
-    # Mock the bus to avoid needing a real event loop for asyncio.create_task
-    sl.bus = MagicMock()
-    sl.bus.start = AsyncMock()
+    # Mock the queue to avoid needing a real event loop for asyncio.create_task
+    sl.queue = MagicMock()
+    sl.queue.start = AsyncMock()
 
     mock_char = Character(id="char_1", name="Alice", body="A warrior")
     with patch("sidestage.graph.list_entities", new_callable=AsyncMock) as mock_list:
@@ -222,9 +222,9 @@ async def test_scene_logic_activate_falls_back_to_storage():
     scene_data = Scene(id="s1", name="Test", body="desc", current_gametime=0)
 
     sl = SceneLogic(storage, agent, scene_data)
-    # Mock the bus to avoid needing a real event loop for asyncio.create_task
-    sl.bus = MagicMock()
-    sl.bus.start = AsyncMock()
+    # Mock the queue to avoid needing a real event loop for asyncio.create_task
+    sl.queue = MagicMock()
+    sl.queue.start = AsyncMock()
     await sl.activate()
 
     storage.list_characters.assert_called_once()

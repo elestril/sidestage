@@ -30,7 +30,7 @@ Helper to access the currently active campaign.
 Retrieve or activate a scene by ID.
 
 If the scene is not already active in memory, it loads it from the campaign
-and activates it (starting its message bus and agents).
+and activates it (starting its event queue and agents).
 
 Args:
     scene_id (str): The ID of the scene.

@@ -78,7 +78,7 @@ List all scenes in the campaign.
 
 #### `reload_defaults() -> None`
 
-Load default entities from `data/campaign_defaults/markdown/`.
+Load default entities from data/campaign_defaults/markdown/.
 
 Uses the migration parser to read all entity types (characters, scenes,
 locations, items, events) and upserts them into the database.

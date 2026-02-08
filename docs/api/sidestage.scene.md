@@ -7,7 +7,7 @@
 Manages the runtime state and logic of a specific Scene.
 
 This class orchestrates:
-- The SceneMessageBus for event distribution.
+- An EventQueue whose worker persists, broadcasts, and dispatches events.
 - Active CharacterLogic instances (agents).
 - Persistence of scene data via Storage.
 - Creation and routing of chat messages.
@@ -18,21 +18,14 @@ This class orchestrates:
 
 Activate the scene.
 
-Starts the message bus and activates all characters present in the campaign/scene.
-This prepares the scene for interactive events.
-
-#### `add_message(message: ChatMessage) -> None`
-
-Legacy method to add a message directly.
-
-Deprecated: Use `bus.publish(message)` instead to ensure event distribution.
+Starts the event queue and activates all characters present in the campaign/scene.
 
 #### `chat(user_message: ChatMessage) -> None` *async*
 
 Entry point for user chat interaction.
 
-Publishes the user message to the bus, which will trigger any listening
-AgentActors to generate responses asynchronously.
+Puts the user message on the event queue. The queue worker will
+persist it, broadcast it, and dispatch it to NPCs.
 
 Args:
     user_message (ChatMessage): The message from the user.
@@ -41,8 +34,8 @@ Args:
 
 Factory method to create a ChatMessage associated with this scene.
 
-This creates the object but does NOT publish or persist it. 
-Use `bus.publish(message)` to send it.
+This creates the object but does NOT publish or persist it.
+Use `queue.put(message)` to send it.
 
 Args:
     actor_id (str): The ID of the actor (e.g., 'user', 'agent').
@@ -56,7 +49,7 @@ Returns:
 
 Deactivate the scene.
 
-Stops the message bus and deactivates all characters.
+Stops the event queue and deactivates all characters.
 
 #### `id -> str` *property*
 
@@ -65,3 +58,7 @@ Get the unique identifier of the scene.
 #### `messages -> list[ChatMessage]` *property*
 
 Get the list of messages in this scene.
+
+#### `set_broadcast(fn: Callable[ChatMessage, Awaitable[NoneType]]) -> None`
+
+Set the callback used to broadcast events to websocket clients.

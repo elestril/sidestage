@@ -3,47 +3,6 @@ import asyncio
 from unittest.mock import MagicMock, AsyncMock
 from sidestage.character import AgentActor, CharacterLogic
 from sidestage.schemas import Character, ChatMessage, Scene
-from sidestage.bus import SceneMessageBus
-
-@pytest.mark.anyio
-async def test_agent_ignores_own_messages():
-    """
-    Test that agents never respond to their own messages.
-    This is the only loop prevention mechanism needed.
-    """
-    scene_logic = MagicMock()
-    scene_logic.agent.model = "mock-model"
-    scene_logic.messages = []
-    scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
-        id=f"reply_{len(scene_logic.messages)}",
-        name="Reply",
-        body=text,
-        actor_id=actor_id,
-        character_id=character_id,
-        message=text,
-        scene_id="s1",
-        gametime=0,
-        walltime="now"
-    )
-    scene_logic.bus.publish = AsyncMock()
-
-    char = Character(id="c1", name="Alice", body="I am Alice")
-    actor = AgentActor(char, scene_logic)
-    actor.agent = MagicMock()
-    actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hello"))
-
-    # Message from self (same actor_id) - should be ignored
-    own_msg = ChatMessage(
-        id="m1", name="Self Msg", body="My own message",
-        actor_id="agent:c1",  # Same as actor.actor_id
-        character_id="c1",
-        message="My own message",
-        scene_id="s1", gametime=0, walltime="now"
-    )
-
-    await actor.on_event(own_msg)
-    assert not actor.agent.arun.called
-
 
 @pytest.mark.anyio
 async def test_agent_responds_to_user():
@@ -62,7 +21,7 @@ async def test_agent_responds_to_user():
         gametime=0,
         walltime="now"
     )
-    scene_logic.bus.publish = AsyncMock()
+    scene_logic.queue.put = AsyncMock()
 
     char = Character(id="c1", name="Alice", body="I am Alice")
     actor = AgentActor(char, scene_logic)
@@ -79,16 +38,17 @@ async def test_agent_responds_to_user():
 
     await actor.on_event(user_msg)
     assert actor.agent.arun.called
+    scene_logic.queue.put.assert_awaited_once()
 
 
 @pytest.mark.anyio
-async def test_agent_responds_to_other_agents():
-    """Test that agents respond to messages from other agents."""
+async def test_agent_puts_reply_on_queue():
+    """Test that agent replies are put back on the event queue."""
     scene_logic = MagicMock()
     scene_logic.agent.model = "mock-model"
     scene_logic.messages = []
     scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
-        id=f"reply_{len(scene_logic.messages)}",
+        id="reply_1",
         name="Reply",
         body=text,
         actor_id=actor_id,
@@ -98,37 +58,39 @@ async def test_agent_responds_to_other_agents():
         gametime=0,
         walltime="now"
     )
-    scene_logic.bus.publish = AsyncMock()
+    scene_logic.queue.put = AsyncMock()
 
-    char1 = Character(id="c1", name="Alice", body="I am Alice")
-    actor1 = AgentActor(char1, scene_logic)
-    actor1.agent = MagicMock()
-    actor1.agent.arun = AsyncMock(return_value=MagicMock(content="Hello from Alice"))
+    char = Character(id="c1", name="Alice", body="I am Alice")
+    actor = AgentActor(char, scene_logic)
+    actor.agent = MagicMock()
+    actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hello from Alice"))
 
-    # Message from a different agent
-    bob_msg = ChatMessage(
-        id="m1", name="Bob Msg", body="Hi",
-        actor_id="agent:c2",  # Different actor
-        character_id="c2",
-        message="Hi",
+    user_msg = ChatMessage(
+        id="m1", name="User Msg", body="Hi",
+        actor_id="user", character_id="user", message="Hi",
         scene_id="s1", gametime=0, walltime="now"
     )
 
-    await actor1.on_event(bob_msg)
-    assert actor1.agent.arun.called
+    await actor.on_event(user_msg)
+
+    # Verify the reply was put on the queue with the agent's actor_id
+    scene_logic.queue.put.assert_awaited_once()
+    reply = scene_logic.queue.put.call_args[0][0]
+    assert reply.actor_id == "agent:c1"
+    assert reply.character_id == "c1"
 
 
 @pytest.mark.anyio
-async def test_multiple_agents_dont_self_loop():
+async def test_multiple_agents_unique_actor_ids():
     """
-    Test that with proper origin tagging, agents only respond to others' messages.
-    Each agent has a unique actor_id (agent:{character_id}).
+    Test that each agent has a unique actor_id based on character ID,
+    and both respond when dispatched a user message.
     """
     scene_logic = MagicMock()
     scene_logic.agent.model = "mock-model"
     scene_logic.messages = []
     scene_logic.create_message = lambda actor_id, text, character_id: ChatMessage(
-        id=f"reply_{len(scene_logic.messages)}",
+        id=f"reply_{actor_id}",
         name="Reply",
         body=text,
         actor_id=actor_id,
@@ -138,7 +100,7 @@ async def test_multiple_agents_dont_self_loop():
         gametime=0,
         walltime="now"
     )
-    scene_logic.bus.publish = AsyncMock()
+    scene_logic.queue.put = AsyncMock()
 
     char1 = Character(id="c1", name="Alice", body="I am Alice")
     char2 = Character(id="c2", name="Bob", body="I am Bob")
@@ -167,20 +129,3 @@ async def test_multiple_agents_dont_self_loop():
 
     assert actor1.agent.arun.called
     assert actor2.agent.arun.called
-
-    # Reset
-    actor1.agent.arun.reset_mock()
-    actor2.agent.arun.reset_mock()
-
-    # Alice speaks - Bob should reply, Alice should not
-    alice_msg = ChatMessage(
-        id="m2", name="Alice Msg", body="Hi Bob",
-        actor_id="agent:c1", character_id="c1", message="Hi Bob",
-        scene_id="s1", gametime=0, walltime="now"
-    )
-
-    await actor1.on_event(alice_msg)  # Alice receives her own message
-    await actor2.on_event(alice_msg)  # Bob receives Alice's message
-
-    assert not actor1.agent.arun.called  # Alice ignores her own message
-    assert actor2.agent.arun.called  # Bob responds

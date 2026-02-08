@@ -2,62 +2,21 @@
 
 ## Classes
 
-### `SceneMessageBus`
+### `EventQueue`
 
-An asynchronous message bus dedicated to a single Scene.
+A simple async event queue for a Scene.
 
-The SceneMessageBus facilitates decoupled communication between components 
-within a scene (e.g., Characters, Orchestrator, UI Sync). It supports:
-- Multiple async subscribers (listeners).
-- A single 'insert hook' for pre-processing or persistence before dispatch.
-- Asynchronous publishing and processing via an asyncio Queue.
+Events are processed sequentially by a single handler callback.
+No subscriptions, no hooks — the handler does all the work.
 
-#### `__init__()`
+#### `put(event: Event) -> None` *async*
 
-Initialize the SceneMessageBus with an empty listener list and queue.
+Add an event to the queue.
 
-#### `publish(event: Event) -> None` *async*
+#### `start(handler: Callable[Event, Awaitable[NoneType]]) -> None` *async*
 
-Publish an event to the bus.
-
-The event first passes through the insert hook (if configured). 
-If the hook returns an event, it is added to the processing queue.
-
-Args:
-    event (Event): The event to publish.
-
-#### `set_insert_hook(hook: Callable[Event, Awaitable[Event | None]]) -> None`
-
-Set the insert hook for the bus.
-
-The insert hook is called immediately upon `publish()`, BEFORE the event 
-is added to the queue. It is useful for persistence, validation, or modification.
-
-Args:
-    hook (InsertHook): An async function that takes an Event and returns an Event (or None).
-
-#### `start() -> None` *async*
-
-Start the background worker task to process events from the queue.
-
-This method is idempotent; calling it on an already running bus does nothing.
+Start the background worker with the given handler.
 
 #### `stop() -> None` *async*
 
-Stop the background worker task and cancel any pending processing.
-
-This ensures the worker loop exits cleanly.
-
-#### `subscribe(listener: Callable[Event, Coroutine[Any, Any, NoneType]]) -> None`
-
-Add a listener to the bus.
-
-Args:
-    listener (EventListener): An async function to be called when an event is processed.
-
-#### `unsubscribe(listener: Callable[Event, Coroutine[Any, Any, NoneType]]) -> None`
-
-Remove a listener from the bus.
-
-Args:
-    listener (EventListener): The listener function to remove.
+Stop the background worker.

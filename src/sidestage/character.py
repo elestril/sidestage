@@ -4,7 +4,6 @@ from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
 from sidestage.schemas import Character, Event, ChatMessage
-from sidestage.bus import SceneMessageBus
 from sidestage.agent import LiteLLMAgent
 
 if TYPE_CHECKING:
@@ -20,9 +19,8 @@ class AgentActor:
 
     The AgentActor is responsible for:
     1. Managing the LLM agent instance associated with the character.
-    2. Listening to the SceneMessageBus for relevant events.
-    3. Deciding when to respond to events (filtering logic).
-    4. Generating responses via the LLM and publishing them back to the bus.
+    2. Processing events dispatched by the scene's EventQueue worker.
+    3. Generating responses via the LLM and putting them back on the queue.
     """
     def __init__(
         self,
@@ -102,20 +100,15 @@ class AgentActor:
 
     async def on_event(self, event: Event) -> None:
         """
-        Callback handler for events published to the SceneMessageBus.
+        Handle an event dispatched by the scene's queue worker.
 
-        Responds to all ChatMessages except those originated by this actor.
-        Loop detection relies solely on origin tagging - agents never respond
-        to their own messages.
+        Called directly by SceneLogic._dispatch_to_npcs for user-originated
+        messages. Generates a response and puts it back on the queue.
 
         Args:
             event (Event): The event to process.
         """
         if not isinstance(event, ChatMessage):
-            return
-
-        # Never respond to our own messages - this is the only loop protection needed
-        if event.actor_id == self.actor_id:
             return
 
         logger.info(f"AgentActor ({self.character.name}) reacting to message from {event.actor_id}")
@@ -148,7 +141,7 @@ class AgentActor:
                 text=response.content,
                 character_id=self.character.id
             )
-            await self.scene_logic.bus.publish(reply)
+            await self.scene_logic.queue.put(reply)
 
 class CharacterLogic:
     """
@@ -181,12 +174,10 @@ class CharacterLogic:
     async def activate(self) -> None:
         """
         Activate the character in the scene.
-        
-        If the character is autonomous (not explicitly user-controlled, though currently all are agents),
-        this instantiates the AgentActor and subscribes it to the message bus.
+
+        Instantiates the AgentActor so the scene's queue worker can dispatch
+        events to it.
         """
-        # For now, we assume all characters are agents unless specified
-        # In the future, we might have UserActor vs AgentActor
         if self.actor is None:
             self.actor = AgentActor(
                 self.data, self.scene_logic,
@@ -197,16 +188,10 @@ class CharacterLogic:
                 present_character_ids=self.present_character_ids,
                 context_limit=self.context_limit,
             )
-            self.scene_logic.bus.subscribe(self.actor.on_event)
             logger.info(f"Character {self.data.name} ({self.data.id}) activated with AgentActor.")
 
     async def deactivate(self) -> None:
-        """
-        Deactivate the character.
-        
-        Unsubscribes the AgentActor from the bus and cleans up resources.
-        """
+        """Deactivate the character."""
         if self.actor:
-            self.scene_logic.bus.unsubscribe(self.actor.on_event)
             self.actor = None
             logger.info(f"Character {self.data.id} deactivated.")
