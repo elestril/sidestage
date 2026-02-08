@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from opentelemetry import trace
+
 from sidestage.memory.models import ContextResult, ContextMemories
 from sidestage.memory.store import get_memories_for_context, touch_memory
 
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("sidestage.memory.context")
 
 AVG_TOKENS_PER_WORD = 1.3
 DEFAULT_CHAT_HISTORY_RATIO = 0.20
@@ -98,41 +101,47 @@ async def assemble_context(
     Fetches all applicable memories, formats them, trims chat history,
     and returns a ContextResult ready for injection into the LLM prompt.
     """
-    # 1. Fetch memories
-    memories = await get_memories_for_context(
-        client, owner_id, scene_id, present_character_ids,
-    )
+    with tracer.start_as_current_span("memory.assemble_context") as span:
+        span.set_attribute("sidestage.owner_id", owner_id)
+        span.set_attribute("sidestage.scene.id", scene_id)
 
-    # 2. Touch accessed memories (non-blocking, best-effort)
-    memory_ids = []
-    if memories.common_scene_memory:
-        memory_ids.append(memories.common_scene_memory.id)
-    if memories.private_scene_memory:
-        memory_ids.append(memories.private_scene_memory.id)
-    for mem in memories.character_memories.values():
-        memory_ids.append(mem.id)
-    for mem in memories.world_facts:
-        memory_ids.append(mem.id)
+        # 1. Fetch memories
+        memories = await get_memories_for_context(
+            client, owner_id, scene_id, present_character_ids,
+        )
 
-    for mid in memory_ids:
-        try:
-            await touch_memory(client, mid)
-        except Exception:
-            logger.warning("Failed to touch memory %s", mid)
+        # 2. Touch accessed memories (non-blocking, best-effort)
+        memory_ids = []
+        if memories.common_scene_memory:
+            memory_ids.append(memories.common_scene_memory.id)
+        if memories.private_scene_memory:
+            memory_ids.append(memories.private_scene_memory.id)
+        for mem in memories.character_memories.values():
+            memory_ids.append(mem.id)
+        for mem in memories.world_facts:
+            memory_ids.append(mem.id)
 
-    # 3. Format memories
-    memory_text = _format_memories(memories, character_names=character_names)
+        for mid in memory_ids:
+            try:
+                await touch_memory(client, mid)
+            except Exception:
+                logger.warning("Failed to touch memory %s", mid)
 
-    # 4. Trim chat history
-    word_budget = int(context_limit * chat_history_ratio / AVG_TOKENS_PER_WORD)
-    chat_text = _trim_chat_history(recent_messages, word_budget)
+        # 3. Format memories
+        memory_text = _format_memories(memories, character_names=character_names)
 
-    # 5. Estimate tokens
-    total_text = memory_text + chat_text
-    token_estimate = _estimate_tokens(total_text)
+        # 4. Trim chat history
+        word_budget = int(context_limit * chat_history_ratio / AVG_TOKENS_PER_WORD)
+        chat_text = _trim_chat_history(recent_messages, word_budget)
 
-    return ContextResult(
-        memory_text=memory_text,
-        chat_text=chat_text,
-        token_estimate=token_estimate,
-    )
+        # 5. Estimate tokens
+        total_text = memory_text + chat_text
+        token_estimate = _estimate_tokens(total_text)
+
+        span.set_attribute("memory.token_estimate", token_estimate)
+
+        return ContextResult(
+            memory_text=memory_text,
+            chat_text=chat_text,
+            token_estimate=token_estimate,
+        )

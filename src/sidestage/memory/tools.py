@@ -7,6 +7,8 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from opentelemetry import trace, context
+
 from sidestage.memory.store import (
     upsert_scene_memory,
     upsert_common_scene_memory,
@@ -14,6 +16,7 @@ from sidestage.memory.store import (
     upsert_world_fact,
 )
 from sidestage.memory.embeddings import embed_and_update
+from sidestage.tracing.middleware import add_trace_event, record_error
 
 if TYPE_CHECKING:
     from sidestage.config import LLMConfig
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("sidestage.memory.tools")
 
 
 class MemoryTools:
@@ -45,12 +49,29 @@ class MemoryTools:
         self.scene_id = scene_id
 
     def _fire_embed(self, memory_id: str, content: str) -> None:
-        """Fire background embedding task if embed_config is available."""
+        """Fire background embedding task with trace context propagation."""
         if self.embed_config is not None:
+            ctx = context.get_current()
+
+            async def _embed_with_context():
+                token = context.attach(ctx)
+                try:
+                    with tracer.start_as_current_span("memory.embed") as span:
+                        span.set_attribute("memory.id", memory_id)
+                        try:
+                            await embed_and_update(
+                                self.client, self.embed_config, memory_id, content, self.health
+                            )
+                        except Exception as exc:
+                            record_error(span, exc)
+                            logger.debug("Background embed failed: %s", exc)
+                except Exception as exc:
+                    logger.debug("Background embed tracing error: %s", exc)
+                finally:
+                    context.detach(token)
+
             try:
-                asyncio.create_task(
-                    embed_and_update(self.client, self.embed_config, memory_id, content, self.health)
-                )
+                asyncio.create_task(_embed_with_context())
             except RuntimeError:
                 logger.debug("No event loop for background embed task")
 
@@ -68,15 +89,20 @@ class MemoryTools:
         Returns:
             JSON confirmation with memory ID.
         """
-        try:
-            memory = await upsert_scene_memory(
-                self.client, self.owner_id, self.scene_id, content, gametime=gametime,
-            )
-            self._fire_embed(memory.id, content)
-            return json.dumps({"status": "ok", "memory_id": memory.id})
-        except Exception as exc:
-            logger.warning("update_scene_memory failed: %s", exc)
-            return json.dumps({"status": "error", "message": str(exc)})
+        with tracer.start_as_current_span("memory.update_scene_memory") as span:
+            span.set_attribute("sidestage.owner_id", self.owner_id)
+            span.set_attribute("sidestage.scene.id", self.scene_id)
+            add_trace_event("memory.content", {"content": content})
+            try:
+                memory = await upsert_scene_memory(
+                    self.client, self.owner_id, self.scene_id, content, gametime=gametime,
+                )
+                self._fire_embed(memory.id, content)
+                return json.dumps({"status": "ok", "memory_id": memory.id})
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning("update_scene_memory failed: %s", exc)
+                return json.dumps({"status": "error", "message": str(exc)})
 
     async def update_character_memory(self, about_character_id: str, content: str, gametime: int | None = None) -> str:
         """Update your memory about another character.
@@ -91,15 +117,20 @@ class MemoryTools:
         Returns:
             JSON confirmation with memory ID.
         """
-        try:
-            memory = await upsert_character_memory(
-                self.client, self.owner_id, about_character_id, content, gametime=gametime,
-            )
-            self._fire_embed(memory.id, content)
-            return json.dumps({"status": "ok", "memory_id": memory.id})
-        except Exception as exc:
-            logger.warning("update_character_memory failed: %s", exc)
-            return json.dumps({"status": "error", "message": str(exc)})
+        with tracer.start_as_current_span("memory.update_character_memory") as span:
+            span.set_attribute("sidestage.owner_id", self.owner_id)
+            span.set_attribute("sidestage.character.about_id", about_character_id)
+            add_trace_event("memory.content", {"content": content})
+            try:
+                memory = await upsert_character_memory(
+                    self.client, self.owner_id, about_character_id, content, gametime=gametime,
+                )
+                self._fire_embed(memory.id, content)
+                return json.dumps({"status": "ok", "memory_id": memory.id})
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning("update_character_memory failed: %s", exc)
+                return json.dumps({"status": "error", "message": str(exc)})
 
 
 class DmMemoryTools:
@@ -122,12 +153,29 @@ class DmMemoryTools:
         self.dm_actor_id = dm_actor_id
 
     def _fire_embed(self, memory_id: str, content: str) -> None:
-        """Fire background embedding task if embed_config is available."""
+        """Fire background embedding task with trace context propagation."""
         if self.embed_config is not None:
+            ctx = context.get_current()
+
+            async def _embed_with_context():
+                token = context.attach(ctx)
+                try:
+                    with tracer.start_as_current_span("memory.embed") as span:
+                        span.set_attribute("memory.id", memory_id)
+                        try:
+                            await embed_and_update(
+                                self.client, self.embed_config, memory_id, content, self.health
+                            )
+                        except Exception as exc:
+                            record_error(span, exc)
+                            logger.debug("Background embed failed: %s", exc)
+                except Exception as exc:
+                    logger.debug("Background embed tracing error: %s", exc)
+                finally:
+                    context.detach(token)
+
             try:
-                asyncio.create_task(
-                    embed_and_update(self.client, self.embed_config, memory_id, content, self.health)
-                )
+                asyncio.create_task(_embed_with_context())
             except RuntimeError:
                 logger.debug("No event loop for background embed task")
 
@@ -144,15 +192,20 @@ class DmMemoryTools:
         Returns:
             JSON confirmation with memory ID.
         """
-        try:
-            memory = await upsert_common_scene_memory(
-                self.client, scene_id, content, gametime=gametime,
-            )
-            self._fire_embed(memory.id, content)
-            return json.dumps({"status": "ok", "memory_id": memory.id})
-        except Exception as exc:
-            logger.warning("update_common_memory failed: %s", exc)
-            return json.dumps({"status": "error", "message": str(exc)})
+        with tracer.start_as_current_span("memory.update_common_memory") as span:
+            span.set_attribute("sidestage.dm_actor_id", self.dm_actor_id)
+            span.set_attribute("sidestage.scene.id", scene_id)
+            add_trace_event("memory.content", {"content": content})
+            try:
+                memory = await upsert_common_scene_memory(
+                    self.client, scene_id, content, gametime=gametime,
+                )
+                self._fire_embed(memory.id, content)
+                return json.dumps({"status": "ok", "memory_id": memory.id})
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning("update_common_memory failed: %s", exc)
+                return json.dumps({"status": "error", "message": str(exc)})
 
     async def update_canonical_memory(self, scene_id: str, content: str, gametime: int | None = None) -> str:
         """Update the canonical (DM truth) scene memory.
@@ -167,15 +220,20 @@ class DmMemoryTools:
         Returns:
             JSON confirmation with memory ID.
         """
-        try:
-            memory = await upsert_scene_memory(
-                self.client, self.dm_actor_id, scene_id, content, gametime=gametime,
-            )
-            self._fire_embed(memory.id, content)
-            return json.dumps({"status": "ok", "memory_id": memory.id})
-        except Exception as exc:
-            logger.warning("update_canonical_memory failed: %s", exc)
-            return json.dumps({"status": "error", "message": str(exc)})
+        with tracer.start_as_current_span("memory.update_canonical_memory") as span:
+            span.set_attribute("sidestage.dm_actor_id", self.dm_actor_id)
+            span.set_attribute("sidestage.scene.id", scene_id)
+            add_trace_event("memory.content", {"content": content})
+            try:
+                memory = await upsert_scene_memory(
+                    self.client, self.dm_actor_id, scene_id, content, gametime=gametime,
+                )
+                self._fire_embed(memory.id, content)
+                return json.dumps({"status": "ok", "memory_id": memory.id})
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning("update_canonical_memory failed: %s", exc)
+                return json.dumps({"status": "error", "message": str(exc)})
 
     async def add_world_fact(self, about_entity_id: str, content: str, visibility: str = "common") -> str:
         """Add or update a world fact about an entity.
@@ -192,12 +250,16 @@ class DmMemoryTools:
         Returns:
             JSON confirmation with memory ID.
         """
-        try:
-            memory = await upsert_world_fact(
-                self.client, about_entity_id, content, visibility=visibility, owner_id=None,
-            )
-            self._fire_embed(memory.id, content)
-            return json.dumps({"status": "ok", "memory_id": memory.id})
-        except Exception as exc:
-            logger.warning("add_world_fact failed: %s", exc)
-            return json.dumps({"status": "error", "message": str(exc)})
+        with tracer.start_as_current_span("memory.add_world_fact") as span:
+            span.set_attribute("sidestage.entity_id", about_entity_id)
+            add_trace_event("memory.content", {"content": content})
+            try:
+                memory = await upsert_world_fact(
+                    self.client, about_entity_id, content, visibility=visibility, owner_id=None,
+                )
+                self._fire_embed(memory.id, content)
+                return json.dumps({"status": "ok", "memory_id": memory.id})
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning("add_world_fact failed: %s", exc)
+                return json.dumps({"status": "error", "message": str(exc)})

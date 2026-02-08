@@ -3,12 +3,15 @@ from typing import AsyncGenerator, Optional, Dict, Any, List, Callable, Awaitabl
 from datetime import datetime
 import uuid
 
+from opentelemetry import trace
+
 from sidestage.schemas import Character, Scene, ChatRequest, ChatMessage, Event
 from sidestage.entities import entity_to_markdown
 from sidestage.bus import EventQueue
 from sidestage.character import CharacterLogic
 from sidestage.storage import Storage
 from sidestage.agent import LiteLLMAgent
+from sidestage.tracing.middleware import record_error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -17,6 +20,7 @@ if TYPE_CHECKING:
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("sidestage.scene")
 
 # Callback type for broadcasting events to websocket clients
 BroadcastFn = Callable[[ChatMessage], Awaitable[None]]
@@ -67,38 +71,49 @@ class SceneLogic:
         if not isinstance(event, ChatMessage):
             return
 
-        # (a) Persist
-        self.data.messages.append(event)
-        self.storage.update_scene(self.data)
-
-        if self.graph_client is not None:
-            from sidestage.graph import create_entity, link
+        with tracer.start_as_current_span("scene.process_event") as span:
+            span.set_attribute("sidestage.scene.id", self.id)
+            span.set_attribute("sidestage.event.id", event.id)
+            span.set_attribute("sidestage.event.type", type(event).__name__)
+            span.set_attribute("sidestage.actor.id", event.actor_id or "unknown")
             try:
-                await create_entity(self.graph_client, event)
-                await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
-                if event.character_id:
-                    await link(self.graph_client, event.id, "INVOLVES", event.character_id)
-            except Exception:
-                logger.exception("Failed to persist event %s to graph", event.id)
+                # (a) Persist
+                self.data.messages.append(event)
+                self.storage.update_scene(self.data)
 
-        # (b) Broadcast to websockets
-        if self._broadcast_fn:
-            await self._broadcast_fn(event)
+                if self.graph_client is not None:
+                    from sidestage.graph import create_entity, link
+                    try:
+                        await create_entity(self.graph_client, event)
+                        await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
+                        if event.character_id:
+                            await link(self.graph_client, event.id, "INVOLVES", event.character_id)
+                    except Exception:
+                        logger.exception("Failed to persist event %s to graph", event.id)
 
-        # (c) For user-originated events: send to all NPCs
-        if event.actor_id == "user":
-            await self._dispatch_to_npcs(event)
+                # (b) Broadcast to websockets
+                if self._broadcast_fn:
+                    await self._broadcast_fn(event)
+
+                # (c) For user-originated events: send to all NPCs
+                if event.actor_id == "user":
+                    await self._dispatch_to_npcs(event)
+            except Exception as exc:
+                record_error(span, exc)
+                raise
 
     async def _dispatch_to_npcs(self, event: ChatMessage) -> None:
         """Send an event to all active NPC agents."""
-        for char_logic in self.characters.values():
-            if char_logic.actor is not None:
-                try:
-                    await char_logic.actor.on_event(event)
-                except Exception:
-                    logger.exception(
-                        "Error dispatching to NPC %s", char_logic.data.name
-                    )
+        with tracer.start_as_current_span("scene.dispatch_to_npcs") as span:
+            span.set_attribute("sidestage.npc_count", len(self.characters))
+            for char_logic in self.characters.values():
+                if char_logic.actor is not None:
+                    try:
+                        await char_logic.actor.on_event(event)
+                    except Exception:
+                        logger.exception(
+                            "Error dispatching to NPC %s", char_logic.data.name
+                        )
 
     async def activate(self) -> None:
         """

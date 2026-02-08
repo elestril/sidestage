@@ -3,8 +3,11 @@ import asyncio
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
+from opentelemetry import trace
+
 from sidestage.schemas import Character, Event, ChatMessage
 from sidestage.agent import LiteLLMAgent
+from sidestage.tracing.middleware import record_error
 
 if TYPE_CHECKING:
     from sidestage.graph.client import GraphClient
@@ -12,6 +15,7 @@ if TYPE_CHECKING:
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("sidestage.character")
 
 class AgentActor:
     """
@@ -111,37 +115,45 @@ class AgentActor:
         if not isinstance(event, ChatMessage):
             return
 
-        logger.info(f"AgentActor ({self.character.name}) reacting to message from {event.actor_id}")
-
-        if not self.agent:
-            return
-
-        context_text = None
-        if self.graph_client is not None and self.scene_id is not None:
+        with tracer.start_as_current_span("agent.on_event") as span:
+            span.set_attribute("sidestage.character.id", self.character.id)
+            span.set_attribute("sidestage.character.name", self.character.name)
             try:
-                from sidestage.memory.context import assemble_context
-                result = await assemble_context(
-                    client=self.graph_client,
-                    owner_id=self.character.id,
-                    scene_id=self.scene_id,
-                    present_character_ids=self.present_character_ids or [],
-                    recent_messages=self.scene_logic.messages,
-                    context_limit=self.context_limit,
-                )
-                parts = [p for p in (result.memory_text, result.chat_text) if p]
-                context_text = "\n\n".join(parts) or None
-            except Exception:
-                logger.exception("Failed to assemble context for %s", self.character.name)
+                logger.info(f"AgentActor ({self.character.name}) reacting to message from {event.actor_id}")
 
-        response = await self.agent.arun(event.message, context=context_text)
+                if not self.agent:
+                    return
 
-        if response.content:
-            reply = self.scene_logic.create_message(
-                actor_id=self.actor_id,
-                text=response.content,
-                character_id=self.character.id
-            )
-            await self.scene_logic.queue.put(reply)
+                context_text = None
+                if self.graph_client is not None and self.scene_id is not None:
+                    try:
+                        from sidestage.memory.context import assemble_context
+                        result = await assemble_context(
+                            client=self.graph_client,
+                            owner_id=self.character.id,
+                            scene_id=self.scene_id,
+                            present_character_ids=self.present_character_ids or [],
+                            recent_messages=self.scene_logic.messages,
+                            context_limit=self.context_limit,
+                        )
+                        parts = [p for p in (result.memory_text, result.chat_text) if p]
+                        context_text = "\n\n".join(parts) or None
+                    except Exception:
+                        logger.exception("Failed to assemble context for %s", self.character.name)
+
+                response = await self.agent.arun(event.message, context=context_text)
+
+                if response.content:
+                    reply = self.scene_logic.create_message(
+                        actor_id=self.actor_id,
+                        text=response.content,
+                        character_id=self.character.id
+                    )
+                    await self.scene_logic.queue.put(reply)
+            except Exception as exc:
+                record_error(span, exc)
+                logger.exception("Error in on_event for %s", self.character.name)
+                raise
 
 class CharacterLogic:
     """

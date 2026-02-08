@@ -4,6 +4,8 @@ import httpx
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator
 
+from opentelemetry import trace
+
 from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
@@ -21,6 +23,7 @@ from sidestage.config import LLMConfig, SidestageConfig
 from sidestage import config
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("sidestage.campaign")
 
 class Campaign:
     """
@@ -157,37 +160,45 @@ class Campaign:
         Uses the migration parser to read all entity types (characters, scenes,
         locations, items, events) and upserts them into the database.
         """
-        logger.info("Reloading default content from data directory...")
+        with tracer.start_as_current_span("campaign.reload_defaults") as span:
+            span.set_attribute("sidestage.scene.id", "campaign_planning")
 
-        project_root = Path(__file__).parent.parent.parent
-        defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
+            logger.info("Reloading default content from data directory...")
 
-        if not defaults_dir.exists():
-            logger.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
-            return
+            project_root = Path(__file__).parent.parent.parent
+            defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
 
-        result = parse_directory(defaults_dir)
+            if not defaults_dir.exists():
+                logger.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
+                span.set_attribute("entities.loaded_count", 0)
+                return
 
-        for issue in result.errors:
-            logger.error(f"Error loading default: {issue.message} ({issue.file_path})")
-        for issue in result.warnings:
-            logger.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
+            result = parse_directory(defaults_dir)
 
-        for entity in result.entities:
-            try:
-                if isinstance(entity, Character):
-                    self.storage.add_character(entity)
-                elif isinstance(entity, Location):
-                    self.storage.add_location(entity)
-                elif isinstance(entity, Item):
-                    self.storage.add_item(entity)
-                elif isinstance(entity, Scene):
-                    self.storage.add_scene(entity)
-                elif isinstance(entity, Event):
-                    self.storage.add_event(entity)
-                logger.info(f"Loaded default {type(entity).__name__}: {entity.name} ({entity.id})")
-            except Exception as e:
-                logger.error(f"Error loading default entity {entity.id}: {e}")
+            for issue in result.errors:
+                logger.error(f"Error loading default: {issue.message} ({issue.file_path})")
+            for issue in result.warnings:
+                logger.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
+
+            count = 0
+            for entity in result.entities:
+                try:
+                    if isinstance(entity, Character):
+                        self.storage.add_character(entity)
+                    elif isinstance(entity, Location):
+                        self.storage.add_location(entity)
+                    elif isinstance(entity, Item):
+                        self.storage.add_item(entity)
+                    elif isinstance(entity, Scene):
+                        self.storage.add_scene(entity)
+                    elif isinstance(entity, Event):
+                        self.storage.add_event(entity)
+                    count += 1
+                    logger.info(f"Loaded default {type(entity).__name__}: {entity.name} ({entity.id})")
+                except Exception as e:
+                    logger.error(f"Error loading default entity {entity.id}: {e}")
+
+            span.set_attribute("entities.loaded_count", count)
 
     def _ensure_llm_availability(self) -> None:
         """
