@@ -53,7 +53,7 @@ Get all events for a specific scene.
 
 #### `get_scene_messages(scene_id: str) -> list[EventModel] | None`
 
-Get chat message events for a specific scene.
+Get all events for a specific scene (chat messages, errors, etc.).
 
 #### `get_scene_object(scene_id: str) -> Scene | None`
 

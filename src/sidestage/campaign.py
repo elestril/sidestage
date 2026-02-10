@@ -445,12 +445,11 @@ class Campaign:
         return scene
 
     def get_scene_messages(self, scene_id: str) -> Optional[List[EventModel]]:
-        """Get chat message events for a specific scene."""
+        """Get all events for a specific scene (chat messages, errors, etc.)."""
         scene_schema = self.storage.get_scene(scene_id)
         if not scene_schema:
             return None
-        from sidestage.models import EventType
-        return self.storage.list_events_by_scene(scene_id, event_type=EventType.CHAT_MESSAGE)
+        return self.storage.list_events_by_scene(scene_id)
 
     def get_scene_events(self, scene_id: str) -> Optional[List[EventModel]]:
         """Get all events for a specific scene."""
