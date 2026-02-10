@@ -16,24 +16,35 @@ export interface Scene {
   body: string;
   current_gametime: number | null;
   events: string[];
-  messages: ChatMessage[];
 }
 
-export interface ChatMessage {
+export type EventType = 'ChatMessage' | 'JoinEvent' | 'LeaveEvent' | 'AdjustGametime' | 'Error';
+
+export interface EventModel {
   id: string;
-  actor_id: string;
-  character_id: string;
-  message: string;
+  event_type: EventType;
   scene_id: string;
   gametime: number;
   walltime: string;
-  widget?: any;
+  character_id?: string;
+  actor_id?: string;
+  body: string;
+  metadata: Record<string, any>;
+  visibility: 'public' | 'gm_only' | 'private';
+  name: string;
 }
 
-export interface ChatMessageBroadcast {
-  type: 'chat_message';
-  message: ChatMessage;
+export interface EventBroadcast {
+  type: 'event';
+  event: EventModel;
   scene_id: string;
+}
+
+export interface ActorStatusMessage {
+  type: 'actor_status';
+  character_id: string;
+  scene_id: string;
+  status: 'thinking' | 'idle';
 }
 
 export interface EntitiesUpdatedBroadcast {
@@ -50,4 +61,4 @@ export interface EntityContentSyncBroadcast {
   body: string;
 }
 
-export type WebSocketMessage = ChatMessageBroadcast | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast;
+export type WebSocketMessage = EventBroadcast | ActorStatusMessage | EntitiesUpdatedBroadcast | SceneUpdatedBroadcast | EntityContentSyncBroadcast;

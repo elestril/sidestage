@@ -64,20 +64,36 @@ Triggered when a scene is created or updated.
 }
 ```
 
-**Chat Message**
-Broadcasted during chat interactions.
+**Event**
+Broadcasted when an event is created in a scene (chat messages, joins, errors, etc.).
 ```json
 {
-  "type": "chat_message",
+  "type": "event",
   "scene_id": "scene_id",
-  "message": {
-    "id": "msg_123",
-    "actor": "user" | "agent" | "npc_id",
-    "message": "Hello world",
+  "event": {
+    "id": "evt_abc12345",
+    "event_type": "ChatMessage",
+    "scene_id": "scene_id",
     "gametime": 12345,
     "walltime": "2026-02-02T...",
-    "widget": { ... } // Optional entity widget data if the agent mentions an entity
+    "actor_id": "user",
+    "character_id": "char_co_author",
+    "body": "Hello world",
+    "metadata": {},
+    "visibility": "public",
+    "name": "Co-Author Message"
   }
+}
+```
+
+**Actor Status**
+Sent when an NPC actor starts or finishes processing an event.
+```json
+{
+  "type": "actor_status",
+  "character_id": "char_co_author",
+  "scene_id": "scene_id",
+  "status": "thinking"
 }
 ```
 
@@ -307,22 +323,21 @@ Creates a new scene.
 
 Returns the message history for a scene.
 
-**Response:** `List[ChatMessageModel]`
+**Response:** `List[EventModel]`
 ```json
 [
   {
-    "id": "msg_1",
-    "actor": "user",
-    "message": "Hello",
+    "id": "evt_abc12345",
+    "event_type": "ChatMessage",
+    "scene_id": "scene_id",
     "gametime": 0,
-    "walltime": "2026-02-02T..."
-  },
-  {
-    "id": "msg_2",
-    "actor": "agent",
-    "message": "Hi there",
-    "gametime": 0,
-    "walltime": "2026-02-02T..."
+    "walltime": "2026-02-02T...",
+    "actor_id": "user",
+    "character_id": "user",
+    "body": "Hello",
+    "metadata": {},
+    "visibility": "public",
+    "name": "Message"
   }
 ]
 ```
@@ -345,8 +360,19 @@ Sends a message to the AI agent within a specific scene context. The agent's pro
 **Response:** `ChatResponse`
 ```json
 {
-  "user_message": { ...ChatMessage... },
-  "agent_message": { ...ChatMessage... }
+  "event": {
+    "id": "evt_abc12345",
+    "event_type": "ChatMessage",
+    "scene_id": "scene_123",
+    "gametime": 0,
+    "walltime": "2026-02-02T...",
+    "actor_id": "user",
+    "character_id": "user",
+    "body": "Describe the room.",
+    "metadata": {},
+    "visibility": "public",
+    "name": "Message"
+  }
 }
 ```
 
@@ -423,37 +449,22 @@ Enable or disable tracing at runtime. Validates the OTLP endpoint is reachable b
 | `current_gametime` | int? | Gametime in seconds |
 | `location_id` | string? | Primary location ID |
 | `events` | string[] | List of event IDs |
-| `messages` | object[] | Chat history |
+### EventModel
+All events use a single flattened model with an `event_type` discriminator.
 
-### Event (extends Entity)
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | Event ID (e.g., `evt_abc12345`) |
+| `event_type` | string | `ChatMessage`, `JoinEvent`, `LeaveEvent`, `AdjustGametime`, or `Error` |
 | `scene_id` | string | Associated scene ID |
 | `gametime` | int | Gametime in seconds |
 | `walltime` | string | ISO timestamp of real world time |
-
-### ChatMessage (extends Event)
-| Field | Type | Description |
-|-------|------|-------------|
-| `character_id` | string | ID of the Character persona who sent the message |
-| `actor_id` | string? | ID of the Actor who originated the message |
-| `message` | string | The content of the chat message |
-| `widget` | object? | Optional interactive widget data |
-
-### JoinEvent (extends Event)
-| Field | Type | Description |
-|-------|------|-------------|
-| `actor_id` | string | ID of the Actor who joined |
-
-### LeaveEvent (extends Event)
-| Field | Type | Description |
-|-------|------|-------------|
-| `actor_id` | string | ID of the Actor who left |
-
-### FastForwardEvent (extends Event)
-| Field | Type | Description |
-|-------|------|-------------|
-| `duration_str` | string | A string describing the time jump (e.g., "2 hours") |
+| `actor_id` | string? | ID of the Actor who originated the event |
+| `character_id` | string? | ID of the Character persona involved |
+| `body` | string | Event content (message text, error description, etc.) |
+| `metadata` | object | Arbitrary metadata (e.g., `widget` for entity previews) |
+| `visibility` | string | `public`, `gm_only`, or `private` |
+| `name` | string | Human-readable event name |
 
 ### Memory
 | Field | Type | Description |

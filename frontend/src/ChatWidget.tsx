@@ -6,7 +6,7 @@ import { marked } from 'marked';
 import { EntityModal } from './EntityBrowser';
 
 export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> = ({ className, placeholder = "Type your message..." }) => {
-  const { messages, sendMessage, activeScene, entities } = useAppContext();
+  const { messages, sendMessage, activeScene, entities, thinkingActors } = useAppContext();
   const [input, setInput] = useState('');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -72,7 +72,28 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
 
       <div className="flex-1 overflow-y-auto mb-4 pr-2 flex flex-col gap-4 scrollbar-thin scrollbar-thumb-[#333]">
         {messages.map((msg, i) => {
-          const character = getCharacter(msg.character_id);
+          if (msg.event_type === 'JoinEvent' || msg.event_type === 'LeaveEvent' || msg.event_type === 'AdjustGametime') {
+            return (
+              <div key={i} className="text-center text-xs text-gray-500 italic py-1">
+                {msg.body || msg.name}
+              </div>
+            );
+          }
+          if (msg.event_type === 'Error') {
+            return (
+              <div key={i} className="flex items-start gap-1 self-start w-full">
+                <div className="w-full p-3 rounded-xl bg-red-900/30 border border-red-700 text-red-200">
+                  <div className="text-[10px] font-bold uppercase mb-1 text-red-400">Error</div>
+                  <div
+                    className="prose prose-invert prose-sm max-w-none text-red-200"
+                    dangerouslySetInnerHTML={{ __html: renderContent(msg.body) }}
+                  />
+                </div>
+              </div>
+            );
+          }
+
+          const character = getCharacter(msg.character_id || '');
           const isUser = msg.actor_id === 'user';
           const isUnseen = character?.unseen;
 
@@ -104,18 +125,35 @@ export const ChatWidget: React.FC<{ className?: string, placeholder?: string }> 
                 )}
                 <div
                   className="prose prose-invert prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: renderContent(msg.message) }}
+                  dangerouslySetInnerHTML={{ __html: renderContent(msg.body) }}
                 />
-                {msg.widget && msg.widget.type === 'entity' && (
+                {msg.metadata?.widget && msg.metadata.widget.type === 'entity' && (
                   <div
-                    onClick={() => setSelectedEntityId(msg.widget.id)}
+                    onClick={() => setSelectedEntityId(msg.metadata.widget.id)}
                     className="bg-[#1a1a1a] border border-[#bb86fc] rounded p-2 mt-2 cursor-pointer hover:bg-[#222] transition-colors"
                   >
-                    <div className="text-[10px] uppercase font-bold text-[#03dac6]">{msg.widget.entity_type}</div>
-                    <div className="text-sm font-bold text-[#bb86fc]">{msg.widget.name}</div>
-                    <div className="text-xs text-gray-400 italic line-clamp-2">{msg.widget.description}</div>
+                    <div className="text-[10px] uppercase font-bold text-[#03dac6]">{msg.metadata.widget.entity_type}</div>
+                    <div className="text-sm font-bold text-[#bb86fc]">{msg.metadata.widget.name}</div>
+                    <div className="text-xs text-gray-400 italic line-clamp-2">{msg.metadata.widget.description}</div>
                   </div>
                 )}
+              </div>
+            </div>
+          );
+        })}
+        {Array.from(thinkingActors).map(characterId => {
+          const character = getCharacter(characterId);
+          return (
+            <div key={`thinking-${characterId}`} className="flex items-start gap-1 self-start">
+              <div className="max-w-[85%] p-3 rounded-xl bg-[#2c2c2c] text-[#e0e0e0] border border-[#333]">
+                <div className="text-[10px] font-bold uppercase mb-1 text-[#bb86fc]">
+                  {character?.name || characterId}
+                </div>
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-[#bb86fc] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-[#bb86fc] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-[#bb86fc] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
               </div>
             </div>
           );

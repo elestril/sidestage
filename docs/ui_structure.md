@@ -58,9 +58,12 @@ The database management interface for the campaign world.
 ## Components
 
 ### Chat Widget
-- Handles sending/receiving messages via WebSocket.
-- Renders Markdown content.
-- Supports interactive "Widgets" (e.g., clicking an Entity card opens the Entity Modal).
+- Renders events from the `EventModel[]` messages state.
+- **Chat messages** (`ChatMessage` event type): rendered as user/NPC chat bubbles with Markdown content.
+- **System events** (`JoinEvent`, `LeaveEvent`, `AdjustGametime`): rendered as centered, italic system notices.
+- **Error events** (`Error` event type): rendered with distinct red/amber styling.
+- **Thinking indicator**: animated bouncing dots shown for each NPC character in the `thinkingActors` set (tracked via `actor_status` WebSocket messages).
+- Supports interactive "Widgets" embedded in event metadata (`metadata.widget`), e.g., clicking an Entity card opens the Entity Modal.
 
 ### Entity Editor
 - Uses `tiptap` for Markdown editing.

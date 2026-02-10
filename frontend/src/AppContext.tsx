@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { Scene, Entity, ChatMessage, WebSocketMessage } from './types';
+import type { Scene, Entity, EventModel, WebSocketMessage } from './types';
 
 interface AppContextType {
   scenes: Scene[];
@@ -13,7 +13,8 @@ interface AppContextType {
   saveEntity: (id: string, data: any) => Promise<void>;
   syncSocketMessage: (data: any) => void;
   onSync: (callback: (data: any) => void) => () => void;
-  messages: ChatMessage[];
+  messages: EventModel[];
+  thinkingActors: Set<string>;
   activeScene: Scene | undefined;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
@@ -26,7 +27,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [currentSceneId, setCurrentSceneId] = useState('campaign_planning');
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<EventModel[]>([]);
+  const [thinkingActors, setThinkingActors] = useState<Set<string>>(new Set());
 
   const loadScenes = useCallback(async () => {
     try {
@@ -149,9 +151,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const data: WebSocketMessage = JSON.parse(event.data);
         if (data.type === 'entities_updated') {
           loadEntities();
-        } else if (data.type === 'chat_message') {
+        } else if (data.type === 'event') {
           if (data.scene_id === currentSceneId) {
-            setMessages(prev => [...prev, data.message]);
+            setMessages(prev => [...prev, data.event]);
+          }
+          if (data.event.character_id) {
+            setThinkingActors(prev => {
+              const next = new Set(prev);
+              next.delete(data.event.character_id!);
+              return next;
+            });
+          }
+        } else if (data.type === 'actor_status') {
+          if (data.scene_id === currentSceneId) {
+            setThinkingActors(prev => {
+              const next = new Set(prev);
+              if (data.status === 'thinking') {
+                next.add(data.character_id);
+              } else {
+                next.delete(data.character_id);
+              }
+              return next;
+            });
           }
         } else if (data.type === 'scene_updated') {
           loadScenes();
@@ -188,6 +209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncSocketMessage,
       onSync,
       messages,
+      thinkingActors,
       activeScene,
       debugMode,
       setDebugMode,
