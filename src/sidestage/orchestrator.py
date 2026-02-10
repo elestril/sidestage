@@ -367,7 +367,6 @@ class SidestageOrchestrator:
             result = await import_campaign(
                 campaign=self.campaign,
                 parse_result=parse_result,
-                sync_manager=self.sync_manager,
                 active_scenes=self.active_scenes,
             )
             return MigrationImportResponse(

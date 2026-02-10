@@ -46,10 +46,35 @@ def test_item_markdown_roundtrip():
         name="Sword",
         body="Sharp blade."
     )
-    
+
     md = entity_to_markdown(item)
     assert "type: Item" in md
-    
+
     parsed = markdown_to_entity(md)
     assert isinstance(parsed, ItemModel)
     assert parsed.name == item.name
+
+
+def test_event_model_markdown_roundtrip():
+    """EventModel with event_type survives markdown serialization round-trip."""
+    from sidestage.models import EventModel, EventType
+
+    event = EventModel(
+        id="evt_abc123",
+        name="Alice Message",
+        body="Hello world",
+        scene_id="scene_1",
+        gametime=3600,
+        walltime="2024-06-15T10:30:00Z",
+        event_type=EventType.CHAT_MESSAGE,
+        character_id="char_alice",
+    )
+    md = entity_to_markdown(event)
+    assert "event_type: ChatMessage" in md
+    assert "type: Event" in md
+
+    restored = markdown_to_entity(md)
+    assert isinstance(restored, EventModel)
+    assert restored.event_type == EventType.CHAT_MESSAGE
+    assert restored.character_id == "char_alice"
+    assert restored.body == "Hello world"

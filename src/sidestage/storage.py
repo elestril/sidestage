@@ -2,7 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import Type, List, Optional, cast, Union
-from sidestage.models import CharacterModel, LocationModel, ItemModel, EntityModel, SceneModel, EventModel
+from sidestage.models import CharacterModel, LocationModel, ItemModel, EntityModel, SceneModel, EventModel, EventType
 
 class Storage:
     def __init__(self, db_path: Union[str, Path]):
@@ -112,6 +112,22 @@ class Storage:
                 "INSERT OR REPLACE INTO events (id, data) VALUES (?, ?)",
                 (event.id, event.model_dump_json())
             )
+
+    def list_events_by_scene(
+        self, scene_id: str, event_type: Optional[EventType] = None
+    ) -> List[EventModel]:
+        """List events for a scene, optionally filtered by event_type."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT data FROM events")
+            events = []
+            for row in cursor.fetchall():
+                event = EventModel.model_validate_json(row[0])
+                if event.scene_id != scene_id:
+                    continue
+                if event_type is not None and event.event_type != event_type:
+                    continue
+                events.append(event)
+            return events
 
     def list_all_entities(self) -> List[EntityModel]:
         all_entities: List[EntityModel] = []

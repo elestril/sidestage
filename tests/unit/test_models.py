@@ -191,13 +191,14 @@ def test_event_model_each_event_type():
 
 # --- Deleted Subclasses ---
 
-def test_deleted_subclasses_not_importable():
-    """ChatMessageModel, JoinEventModel, LeaveEventModel, FastForwardEventModel are removed."""
+def test_deleted_subclasses_are_aliases():
+    """ChatMessageModel, JoinEventModel, etc. are backward-compat aliases for EventModel."""
     import sidestage.models as m
-    assert not hasattr(m, "ChatMessageModel")
-    assert not hasattr(m, "JoinEventModel")
-    assert not hasattr(m, "LeaveEventModel")
-    assert not hasattr(m, "FastForwardEventModel")
+    # Aliases exist but point to EventModel (not separate classes)
+    assert m.ChatMessageModel is EventModel
+    assert m.JoinEventModel is EventModel
+    assert m.LeaveEventModel is EventModel
+    assert m.FastForwardEventModel is EventModel
 
 
 # --- SceneModel Changes ---

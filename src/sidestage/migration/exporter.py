@@ -22,7 +22,7 @@ from sidestage.migration.serialization import (
     resolve_filename,
     sanitize_filename,
 )
-from sidestage.models import CharacterModel, ChatMessageModel, EntityModel, LocationModel, SceneModel
+from sidestage.models import CharacterModel, EntityModel, EventModel, EventType, LocationModel, SceneModel
 
 if TYPE_CHECKING:
     from sidestage.campaign import Campaign
@@ -91,14 +91,15 @@ async def export_campaign(campaign: Campaign) -> MigrationBackupResult:
             logger.warning("Failed to enrich entity %s: %s", entity.id, exc)
             errors.append(f"Failed to enrich entity {entity.id}: {exc}")
 
-    # Step 4: Retrieve chat logs from SQLite
+    # Step 4: Retrieve chat logs from storage (events, not SceneModel.messages)
     chatlogs: dict[str, str] = {}
     for entity in entities:
         if isinstance(entity, SceneModel):
             try:
-                scene_data = campaign.storage.get_scene(entity.id)
-                if scene_data and scene_data.messages:
-                    chatlogs[entity.id] = _format_chatlog(scene_data.messages)
+                events = campaign.storage.list_events_by_scene(entity.id)
+                chat_events = [e for e in events if e.event_type == EventType.CHAT_MESSAGE]
+                if chat_events:
+                    chatlogs[entity.id] = _format_chatlog(chat_events)
             except Exception as exc:
                 logger.warning("Failed to get chatlog for scene %s: %s", entity.id, exc)
                 errors.append(f"Failed to get chatlog for scene {entity.id}: {exc}")
@@ -244,11 +245,12 @@ async def _enrich_entity_relationships(client: GraphClient, entity: EntityModel)
             entity.location_id = related[0].id
 
 
-def _format_chatlog(messages: list[ChatMessageModel]) -> str:
-    """Format chat messages into chatlog.log content."""
+def _format_chatlog(events: list[EventModel]) -> str:
+    """Format chat events into chatlog.log content."""
     lines = []
-    for msg in messages:
-        lines.append(f'[{msg.walltime}] ({msg.character_id}) {msg.name}: "{msg.message}"')
+    for evt in events:
+        char_id = evt.character_id or "unknown"
+        lines.append(f'[{evt.walltime}] ({char_id}) {evt.name}: "{evt.body}"')
     return "\n".join(lines)
 
 

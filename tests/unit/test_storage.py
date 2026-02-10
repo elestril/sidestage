@@ -46,7 +46,57 @@ def test_item_crud(storage: Storage):
 def test_list_entities(storage: Storage):
     storage.add_character(CharacterModel(id="n1", name="A", body=""))
     storage.add_character(CharacterModel(id="n2", name="B", body=""))
-    
+
     chars = storage.list_characters()
     assert len(chars) == 2
     assert {c.id for c in chars} == {"n1", "n2"}
+
+
+def test_event_crud(storage: Storage):
+    """Events can be stored and retrieved by scene_id."""
+    from sidestage.models import EventModel, EventType
+    event = EventModel(
+        id="evt_1", name="Alice Message", body="Hello",
+        scene_id="scene_1", gametime=100, walltime="2024-01-01T00:00:00",
+        event_type=EventType.CHAT_MESSAGE, character_id="char_alice",
+    )
+    storage.add_event(event)
+    events = storage.list_events_by_scene("scene_1")
+    assert len(events) == 1
+    assert events[0].id == "evt_1"
+    assert events[0].event_type == EventType.CHAT_MESSAGE
+
+
+def test_list_events_by_scene_and_type(storage: Storage):
+    """list_events_by_scene filters by event_type when provided."""
+    from sidestage.models import EventModel, EventType
+    chat = EventModel(
+        id="evt_1", name="msg", body="hi", scene_id="s1",
+        gametime=100, walltime="2024-01-01T00:00:00",
+        event_type=EventType.CHAT_MESSAGE,
+    )
+    join = EventModel(
+        id="evt_2", name="join", body="", scene_id="s1",
+        gametime=100, walltime="2024-01-01T00:00:00",
+        event_type=EventType.JOIN,
+    )
+    storage.add_event(chat)
+    storage.add_event(join)
+    chat_only = storage.list_events_by_scene("s1", event_type=EventType.CHAT_MESSAGE)
+    assert len(chat_only) == 1
+    assert chat_only[0].event_type == EventType.CHAT_MESSAGE
+
+
+def test_event_model_extra_ignore(storage: Storage):
+    """EventModel with extra='ignore' gracefully handles unknown fields from storage."""
+    from sidestage.models import EventModel
+    import json
+    stale_data = {
+        "id": "evt_stale", "name": "old", "body": "", "scene_id": "s1",
+        "gametime": 0, "walltime": "2024-01-01T00:00:00",
+        "event_type": "ChatMessage", "message": "stale field",
+        "metadata": {}, "visibility": "public",
+    }
+    # Should not raise even with the unknown 'message' field
+    event = EventModel.model_validate(stale_data)
+    assert event.id == "evt_stale"

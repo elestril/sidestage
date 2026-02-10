@@ -11,7 +11,7 @@ from sidestage.graph.queries import (
     scene_events,
     entity_graph,
 )
-from sidestage.models import CharacterModel, ChatMessageModel, EventModel, LocationModel
+from sidestage.models import CharacterModel, EventModel, EventType, LocationModel
 
 
 # --- Fixtures ---
@@ -130,10 +130,11 @@ async def test_connected_locations_query_error(mock_client: MagicMock) -> None:
 async def test_scene_events_returns_events(mock_client: MagicMock) -> None:
     """scene_events returns all events in a scene via HAS_EVENT."""
     node = _make_node_mock(
-        ["Entity", "Event"],
+        ["Entity", "Event", "JoinEvent"],
         {
             "id": "evt_1", "name": "event1", "body": "Something happened",
             "scene_id": "scene_01", "gametime": 100, "walltime": "2024-01-01T00:00:00",
+            "event_type": "JoinEvent", "metadata": "{}", "visibility": "public",
         },
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
@@ -152,10 +153,11 @@ async def test_scene_events_returns_events(mock_client: MagicMock) -> None:
 async def test_scene_events_with_since_gametime(mock_client: MagicMock) -> None:
     """scene_events with since_gametime filters by gametime."""
     node = _make_node_mock(
-        ["Entity", "Event"],
+        ["Entity", "Event", "JoinEvent"],
         {
             "id": "evt_2", "name": "event2", "body": "Later event",
             "scene_id": "scene_01", "gametime": 3700, "walltime": "2024-01-01T01:01:40",
+            "event_type": "JoinEvent", "metadata": "{}", "visibility": "public",
         },
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
@@ -171,13 +173,14 @@ async def test_scene_events_with_since_gametime(mock_client: MagicMock) -> None:
 
 @pytest.mark.anyio
 async def test_scene_events_returns_chat_messages(mock_client: MagicMock) -> None:
-    """scene_events correctly deserializes ChatMessageModel subtypes."""
+    """scene_events correctly deserializes ChatMessage events."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
         {
-            "id": "msg_1", "name": "msg", "body": "desc", "scene_id": "scene_01",
+            "id": "msg_1", "name": "msg", "body": "Hello!", "scene_id": "scene_01",
             "gametime": 200, "walltime": "2024-01-01T00:03:20",
-            "character_id": "char_1", "message": "Hello!",
+            "event_type": "ChatMessage", "character_id": "char_1",
+            "metadata": "{}", "visibility": "public",
         },
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
@@ -185,7 +188,8 @@ async def test_scene_events_returns_chat_messages(mock_client: MagicMock) -> Non
     result = await scene_events(mock_client, "scene_01")
 
     assert len(result) == 1
-    assert isinstance(result[0], ChatMessageModel)
+    assert isinstance(result[0], EventModel)
+    assert result[0].event_type == EventType.CHAT_MESSAGE
 
 
 @pytest.mark.anyio

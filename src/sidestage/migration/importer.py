@@ -13,12 +13,11 @@ from sidestage.health import HealthStatus
 from sidestage.memory.models import Memory, MemoryType
 from sidestage.memory.store import _TYPE_TO_SUBLABEL
 from sidestage.migration.models import MigrationImportResult, ParseResult
-from sidestage.models import CharacterModel, ChatMessageModel, EntityModel, EventModel, LocationModel, SceneModel
+from sidestage.models import CharacterModel, EntityModel, EventModel, EventType, LocationModel, SceneModel
 
 if TYPE_CHECKING:
     from sidestage.campaign import Campaign
     from sidestage.graph.client import GraphClient
-    from sidestage.sync import SyncManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,6 @@ _CHATLOG_RE = re.compile(
 async def import_campaign(
     campaign: Campaign,
     parse_result: ParseResult,
-    sync_manager: SyncManager | None = None,
     active_scenes: dict[str, Any] | None = None,
 ) -> MigrationImportResult:
     """Import parsed entities and memories into FalkorDB, replacing the existing graph.
@@ -40,7 +38,6 @@ async def import_campaign(
     Args:
         campaign: The Campaign object (provides graph_client, storage, health, config).
         parse_result: The parsed directory tree (entities, memories, chatlogs, errors).
-        sync_manager: Optional SyncManager for broadcasting entities_updated.
         active_scenes: Optional dict of active scenes to clear after import.
 
     Returns:
@@ -127,9 +124,6 @@ async def import_campaign(
         # Step 9: Post-import cleanup
         if active_scenes is not None:
             active_scenes.clear()
-
-        if sync_manager is not None:
-            await sync_manager.broadcast({"type": "entities_updated"})
 
         phase = "failed" if processed_entities == 0 and len(parse_result.entities) > 0 else "complete"
 
@@ -279,23 +273,16 @@ async def _insert_memory(client: GraphClient, memory: Memory) -> None:
 def _restore_chatlogs(
     campaign: Campaign, chatlogs: dict[str, list[str]],
 ) -> list[str]:
-    """Restore chat logs to SQLite storage. Returns list of error messages."""
+    """Restore chat logs to SQLite storage as individual events."""
     errors: list[str] = []
 
     for scene_id, lines in chatlogs.items():
         if not lines:
             continue
         try:
-            messages = _parse_chatlog_lines(scene_id, lines)
-            existing = campaign.storage.get_scene(scene_id)
-            if existing is not None:
-                existing.messages = messages
-                campaign.storage.update_scene(existing)
-            else:
-                scene = SceneModel(
-                    name=scene_id, body="", id=scene_id, messages=messages,
-                )
-                campaign.storage.add_scene(scene)
+            events = _parse_chatlog_lines(scene_id, lines)
+            for event in events:
+                campaign.storage.add_event(event)
         except Exception as exc:
             errors.append(f"Failed to restore chatlog for scene '{scene_id}': {exc}")
             logger.warning("Failed to restore chatlog for %s: %s", scene_id, exc)
@@ -303,27 +290,27 @@ def _restore_chatlogs(
     return errors
 
 
-def _parse_chatlog_lines(scene_id: str, lines: list[str]) -> list[ChatMessageModel]:
-    """Parse raw chatlog lines into ChatMessage objects.
+def _parse_chatlog_lines(scene_id: str, lines: list[str]) -> list[EventModel]:
+    """Parse raw chatlog lines into EventModel objects with event_type=CHAT_MESSAGE.
 
     Format: [{walltime}] ({character_id}) {name}: "{message}"
     """
-    messages: list[ChatMessageModel] = []
+    events: list[EventModel] = []
     for line in lines:
         match = _CHATLOG_RE.match(line.strip())
         if not match:
             logger.warning("Unparseable chatlog line: %s", line)
             continue
         walltime, character_id, name, message = match.groups()
-        msg = ChatMessageModel(
-            name=name.strip(),
-            body="",
-            id=f"{scene_id}_msg_{len(messages)}",
+        evt = EventModel(
+            name=f"{name.strip()} Message",
+            body=message,
+            id=f"evt_{scene_id}_{len(events)}",
             scene_id=scene_id,
             gametime=0,
             walltime=walltime,
             character_id=character_id,
-            message=message,
+            event_type=EventType.CHAT_MESSAGE,
         )
-        messages.append(msg)
-    return messages
+        events.append(evt)
+    return events

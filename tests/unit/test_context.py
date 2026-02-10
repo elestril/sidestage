@@ -13,7 +13,7 @@ from sidestage.memory.context import (
     _estimate_tokens,
     AVG_TOKENS_PER_WORD,
 )
-from sidestage.models import ChatMessageModel
+from sidestage.models import EventModel, EventType
 
 
 # --- Helpers ---
@@ -28,14 +28,14 @@ def _make_memory(**overrides: Any) -> Memory:
     return Memory(**defaults)  # type: ignore[arg-type]
 
 
-def _make_chat_message(character_id: str, message: str, **overrides: Any) -> ChatMessageModel:
+def _make_chat_message(character_id: str, message: str, **overrides: Any) -> EventModel:
     defaults = dict(
-        id="msg-1", name="msg", body="", scene_id="scene-1",
+        id="msg-1", name="msg", body=message, scene_id="scene-1",
         gametime=100, walltime="2024-01-01T00:00:00",
-        character_id=character_id, message=message,
+        event_type=EventType.CHAT_MESSAGE, character_id=character_id,
     )
     defaults.update(overrides)
-    return ChatMessageModel(**defaults)  # type: ignore[arg-type]
+    return EventModel(**defaults)  # type: ignore[arg-type]
 
 
 @pytest.fixture

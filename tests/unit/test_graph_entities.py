@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from sidestage.models import CharacterModel, LocationModel, ItemModel, SceneModel, EventModel, ChatMessageModel
+from sidestage.models import CharacterModel, LocationModel, ItemModel, SceneModel, EventModel, EventType
 from sidestage.graph.errors import DuplicateEntityError, EntityNotFoundError, QueryError
 from sidestage.graph.entities import (
     create_entity,
@@ -82,11 +82,11 @@ async def test_create_entity_location_excludes_connected_locations(mock_client: 
 
 @pytest.mark.anyio
 async def test_create_entity_chat_message_labels(mock_client: MagicMock) -> None:
-    """create_entity with ChatMessageModel generates Cypher with :Entity:Event:ChatMessage labels."""
-    msg = ChatMessageModel(
+    """create_entity with EventModel CHAT_MESSAGE generates Cypher with :Entity:Event:ChatMessage labels."""
+    msg = EventModel(
         id="m1", name="msg", body="desc", scene_id="s1",
         gametime=100, walltime="2024-01-01T00:00:00",
-        character_id="c1", message="Hello",
+        event_type=EventType.CHAT_MESSAGE, character_id="c1",
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])
 
@@ -146,20 +146,22 @@ async def test_get_entity_returns_none_when_not_found(mock_client: MagicMock) ->
 
 @pytest.mark.anyio
 async def test_get_entity_chat_message_reconstructs_correctly(mock_client: MagicMock) -> None:
-    """get_entity for ChatMessageModel node reconstructs as ChatMessageModel, not EventModel."""
+    """get_entity for ChatMessage node reconstructs as EventModel with event_type=CHAT_MESSAGE."""
     node = _make_node_mock(
         ["Entity", "Event", "ChatMessage"],
         {
             "id": "m1", "name": "msg", "body": "desc", "scene_id": "s1",
             "gametime": 100, "walltime": "2024-01-01T00:00:00",
-            "character_id": "c1", "message": "Hello",
+            "event_type": "ChatMessage", "character_id": "c1",
+            "metadata": "{}", "visibility": "public",
         },
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
 
     entity = await get_entity(mock_client, "m1")
 
-    assert isinstance(entity, ChatMessageModel)
+    assert isinstance(entity, EventModel)
+    assert entity.event_type == EventType.CHAT_MESSAGE
 
 
 @pytest.mark.anyio

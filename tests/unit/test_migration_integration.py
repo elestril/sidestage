@@ -26,7 +26,7 @@ from sidestage.migration.serialization import (
     entity_to_frontmatter_dict,
     frontmatter_dict_to_entity,
 )
-from sidestage.models import CharacterModel, EntityModel, EventModel, JoinEventModel, LocationModel, SceneModel
+from sidestage.models import CharacterModel, EntityModel, EventModel, EventType, LocationModel, SceneModel
 
 
 # --- Constants ---
@@ -38,7 +38,7 @@ EXPECTED_ENTITY_COUNTS = {
     "Location": 3,
     "Item": 2,
     "Scene": 2,
-    "JoinEvent": 1,
+    "Event": 1,
 }
 EXPECTED_TOTAL_ENTITIES = 10
 EXPECTED_TOTAL_MEMORIES = 6
@@ -130,6 +130,7 @@ def mock_campaign(tmp_path: Path):
     campaign.storage.get_scene = MagicMock(return_value=None)
     campaign.storage.update_scene = MagicMock()
     campaign.storage.add_scene = MagicMock()
+    campaign.storage.add_event = MagicMock()
     # Graph client with async-compatible mocks
     campaign.graph_client = MagicMock()
     campaign.graph_client.graph = AsyncMock()
@@ -215,13 +216,12 @@ class TestFullRoundtrip:
 
     @pytest.mark.anyio
     async def test_import_completes_successfully(
-        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult
     ):
         """import_campaign returns a result with phase='complete' and correct counts."""
         result = await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
         assert result.phase == "complete"
         assert result.errors == []
@@ -232,32 +232,25 @@ class TestFullRoundtrip:
 
     @pytest.mark.anyio
     async def test_health_transitions_during_import(
-        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult
     ):
         """After import_campaign returns, campaign.health.status should be HEALTHY."""
         await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
         assert mock_campaign.health.status == HealthStatus.HEALTHY
 
     @pytest.mark.anyio
-    async def test_broadcast_sent_after_import(
-        self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock
+    async def test_import_completes_without_broadcast(
+        self, mock_campaign: MagicMock, parsed_campaign: ParseResult
     ):
-        """After a successful import, sync_manager.broadcast is called with entities_updated."""
-        await import_campaign(
+        """import_campaign completes successfully (broadcast removed in section-03)."""
+        result = await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
-        mock_sync_manager.broadcast.assert_called()
-        calls = mock_sync_manager.broadcast.call_args_list
-        assert any(
-            call.args[0].get("type") == "entities_updated"
-            for call in calls
-        )
+        assert result.phase == "complete"
 
 
 # =============================================================================
@@ -324,18 +317,17 @@ class TestEntityFidelity:
         assert tavern.location_id == "loc_rusty_tavern"
         assert tavern.current_gametime == 7200
         assert tavern.events == ["event_eldric_joins"]
-        assert tavern.messages == []
 
         castle = _find_entity_by_id(parsed_campaign.entities, "scene_castle_audience")
         assert isinstance(castle, SceneModel)
         assert castle.location_id == "loc_castle_blackmoor"
         assert castle.current_gametime is None
-        assert castle.messages == []
 
-    def test_event_subtype_preserved(self, parsed_campaign: ParseResult):
-        """JoinEventModel subtype and its fields survive roundtrip."""
+    def test_event_type_preserved(self, parsed_campaign: ParseResult):
+        """EventModel with event_type=JOIN and its fields survive roundtrip."""
         event = _find_entity_by_id(parsed_campaign.entities, "event_eldric_joins")
-        assert isinstance(event, JoinEventModel)
+        assert isinstance(event, EventModel)
+        assert event.event_type == EventType.JOIN
         assert event.actor_id == "char_eldric"
         assert event.scene_id == "scene_tavern_brawl"
 
@@ -581,7 +573,7 @@ class TestConcurrencyGuard:
     """Verify health status transitions and concurrency protection during import."""
 
     @pytest.mark.anyio
-    async def test_health_degraded_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
+    async def test_health_degraded_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult):
         """During import execution, campaign.health.status is set to DEGRADED."""
         observed_statuses = []
 
@@ -596,28 +588,26 @@ class TestConcurrencyGuard:
         await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
 
         assert HealthStatus.DEGRADED in observed_statuses
         assert mock_campaign.health.status == HealthStatus.HEALTHY
 
     @pytest.mark.anyio
-    async def test_health_restored_on_import_failure(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
+    async def test_health_restored_on_import_failure(self, mock_campaign: MagicMock, parsed_campaign: ParseResult):
         """Even if import fails, health is restored to HEALTHY."""
         mock_campaign.graph_client.graph.delete = AsyncMock(side_effect=Exception("Graph drop failed"))
 
         result = await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
 
         assert result.phase == "failed"
         assert mock_campaign.health.status == HealthStatus.HEALTHY
 
     @pytest.mark.anyio
-    async def test_is_embedding_available_false_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
+    async def test_is_embedding_available_false_during_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult):
         """While health is DEGRADED, is_embedding_available returns False."""
         observed_embedding = []
 
@@ -632,19 +622,17 @@ class TestConcurrencyGuard:
         await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
         )
 
         assert False in observed_embedding
 
     @pytest.mark.anyio
-    async def test_active_scenes_cleared_after_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult, mock_sync_manager: MagicMock):
+    async def test_active_scenes_cleared_after_import(self, mock_campaign: MagicMock, parsed_campaign: ParseResult):
         """The active_scenes dict is cleared after import completes."""
         active_scenes = {"scene_1": MagicMock()}
         await import_campaign(
             campaign=mock_campaign,
             parse_result=parsed_campaign,
-            sync_manager=mock_sync_manager,
             active_scenes=active_scenes,
         )
         assert len(active_scenes) == 0

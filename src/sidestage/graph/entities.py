@@ -7,6 +7,7 @@ and FalkorDB graph node properties.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, TYPE_CHECKING
@@ -16,6 +17,7 @@ from sidestage.models import (
     EntityModel,
     CharacterModel,
     EventModel,
+    EventType,
     ItemModel,
     LocationModel,
     SceneModel,
@@ -30,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 # Ordered most-specific first so deserialization picks the right model.
 LABEL_TO_MODEL: dict[str, type[EntityModel]] = {
+    "ChatMessage": EventModel,
+    "JoinEvent": EventModel,
+    "LeaveEvent": EventModel,
+    "AdjustGametime": EventModel,
+    "Error": EventModel,
     "Character": CharacterModel,
     "Location": LocationModel,
     "Item": ItemModel,
@@ -48,7 +55,6 @@ MODEL_TO_LABELS: dict[type[EntityModel], list[str]] = {
 # Fields that should NOT be stored as graph node properties.
 EXCLUDED_FIELDS: dict[type[EntityModel], set[str]] = {
     LocationModel: {"connected_locations"},
-    EventModel: {"metadata"},
 }
 
 # Valid property key pattern for Cypher safety.
@@ -79,7 +85,10 @@ def _validate_property_keys(keys: dict[str, Any] | set[str]) -> None:
 
 def entity_to_labels(entity: EntityModel) -> list[str]:
     """Return the FalkorDB labels for an entity instance."""
-    return MODEL_TO_LABELS.get(type(entity), ["Entity"])
+    labels = MODEL_TO_LABELS.get(type(entity), ["Entity"])
+    if isinstance(entity, EventModel):
+        return labels + [entity.event_type.value]
+    return labels
 
 
 def entity_to_properties(entity: EntityModel) -> dict[str, Any]:
@@ -90,12 +99,13 @@ def entity_to_properties(entity: EntityModel) -> dict[str, Any]:
     """
     excluded = EXCLUDED_FIELDS.get(type(entity), set())
     props = {}
-    for key, value in entity.model_dump().items():
-        if key in excluded:
-            continue
-        if value is None:
+    for key, value in entity.model_dump(mode="json").items():
+        if key in excluded or value is None:
             continue
         props[key] = value
+    # Serialize EventModel metadata dict as JSON string for graph storage
+    if isinstance(entity, EventModel):
+        props["metadata"] = json.dumps(entity.metadata)
     return props
 
 
@@ -110,7 +120,11 @@ def node_to_entity(labels: list[str], properties: dict[str, Any]) -> EntityModel
     label_set = set(labels)
     for label, model_cls in LABEL_TO_MODEL.items():
         if label in label_set:
-            return model_cls(**properties)
+            props = dict(properties)
+            # Deserialize metadata JSON string for EventModel
+            if model_cls is EventModel and "metadata" in props and isinstance(props["metadata"], str):
+                props["metadata"] = json.loads(props["metadata"])
+            return model_cls(**props)
     raise QueryError(f"Cannot deserialize node with labels {labels}: no matching model")
 
 

@@ -70,7 +70,7 @@ def _trim_chat_history(messages: list[ChatMessageModel], word_budget: int) -> st
     words_used = 0
 
     for msg in reversed(messages):
-        formatted = f"[{msg.character_id}]: {msg.message}"
+        formatted = f"[{msg.character_id}]: {msg.body}"
         msg_words = len(formatted.split())
         if words_used + msg_words > word_budget and selected:
             break

@@ -13,13 +13,10 @@ from typing import Any
 from sidestage.memory.models import Memory
 from sidestage.models import (
     CharacterModel,
-    ChatMessageModel,
     EntityModel,
     EventModel,
-    FastForwardEventModel,
+    EventType,
     ItemModel,
-    JoinEventModel,
-    LeaveEventModel,
     LocationModel,
     SceneModel,
 )
@@ -30,10 +27,11 @@ TYPE_MAP: dict[str, type[EntityModel]] = {
     "Item": ItemModel,
     "Scene": SceneModel,
     "Event": EventModel,
-    "ChatMessage": ChatMessageModel,
-    "JoinEvent": JoinEventModel,
-    "LeaveEvent": LeaveEventModel,
-    "FastForwardEvent": FastForwardEventModel,
+    "ChatMessage": EventModel,
+    "JoinEvent": EventModel,
+    "LeaveEvent": EventModel,
+    "AdjustGametime": EventModel,
+    "Error": EventModel,
 }
 
 TYPE_TO_SUBDIR: dict[str, str] = {
@@ -45,7 +43,8 @@ TYPE_TO_SUBDIR: dict[str, str] = {
     "ChatMessage": "events",
     "JoinEvent": "events",
     "LeaveEvent": "events",
-    "FastForwardEvent": "events",
+    "AdjustGametime": "events",
+    "Error": "events",
 }
 
 SUBDIR_TO_DEFAULT_TYPE: dict[str, str] = {
@@ -61,7 +60,7 @@ _PRIORITY_KEYS = ["name", "id", "type"]
 
 def entity_to_frontmatter_dict(entity: EntityModel) -> tuple[dict[str, Any], str]:
     """Convert entity to (frontmatter_dict, body_markdown)."""
-    data = entity.model_dump()
+    data = entity.model_dump(mode="json")
     body = data.pop("body", "")
     data["type"] = entity.entity_type
 
@@ -98,6 +97,12 @@ def frontmatter_dict_to_entity(
     model_cls = TYPE_MAP.get(type_name)
     if model_cls is None:
         raise ValueError(f"Unknown entity type: {type_name!r}")
+
+    # If type_name is an EventType value, ensure event_type is set
+    if model_cls is EventModel and "event_type" not in data:
+        event_type_values = {et.value for et in EventType}
+        if type_name in event_type_values:
+            data["event_type"] = type_name
 
     data["body"] = body
     return model_cls(**data)

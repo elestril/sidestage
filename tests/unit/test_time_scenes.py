@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from sidestage.time import Gametime
-from sidestage.models import SceneModel, EventModel
+from sidestage.models import SceneModel, EventModel, EventType
 from sidestage.storage import Storage
 
 def test_gametime_conversion():
@@ -41,7 +41,8 @@ def test_event_storage(tmp_path: Path):
         scene_id="scene_1",
         gametime=3600,
         walltime="2026-01-30T22:30:00",
-        body="Something happened"
+        body="Something happened",
+        event_type=EventType.CHAT_MESSAGE,
     )
     
     storage.add_event(event)

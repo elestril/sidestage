@@ -102,7 +102,7 @@ def test_parse_directory_reads_all_entity_types(populated_dir: Path) -> None:
     assert "Location" in entity_types
     assert "Item" in entity_types
     assert "Scene" in entity_types
-    assert "JoinEvent" in entity_types
+    assert "Event" in entity_types
 
 
 def test_parse_directory_reads_memories_from_dot_d(populated_dir: Path) -> None:
@@ -209,7 +209,7 @@ def test_parse_directory_warns_duplicate_entity_ids(markdown_dir: Path) -> None:
 
 
 def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir: Path) -> None:
-    """SceneModel.messages in frontmatter is ignored; messages come from chatlog.log."""
+    """SceneModel.messages in frontmatter is ignored; messages field no longer exists."""
     _write_md(
         markdown_dir / "scenes" / "Scene_With_Messages.md",
         {"name": "SceneModel With Messages", "id": "scene_msg", "type": "Scene",
@@ -220,8 +220,8 @@ def test_parse_directory_ignores_scene_messages_in_frontmatter(markdown_dir: Pat
     )
     result = parse_directory(markdown_dir)
     scene = next(e for e in result.entities if e.id == "scene_msg")
-    # messages should be empty (stripped from frontmatter before entity construction)
-    assert len(scene.messages) == 0
+    # messages field was removed from SceneModel; extra fields are ignored
+    assert not hasattr(scene, "messages") or "messages" not in scene.model_fields
 
 
 def test_parse_directory_handles_empty_directory(markdown_dir: Path) -> None:

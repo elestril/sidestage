@@ -8,6 +8,7 @@ from sidestage.models import (
     ItemModel,
     SceneModel,
     EventModel,
+    EventType,
 )
 
 
@@ -15,7 +16,7 @@ def entity_to_markdown(entity: EntityModel) -> str:
     """
     Serializes an Entity to a standardized Markdown format with YAML frontmatter.
     """
-    data = entity.model_dump()
+    data = entity.model_dump(mode="json")
     body = data.pop("body", "")
 
     # Ensure type is explicitly in the frontmatter for easier identification
@@ -62,11 +63,22 @@ def markdown_to_entity(content: str, override_id: Optional[str] = None) -> Entit
         "Scene": SceneModel,
         "Event": EventModel,
         "Entity": EntityModel,
+        "ChatMessage": EventModel,
+        "JoinEvent": EventModel,
+        "LeaveEvent": EventModel,
+        "AdjustGametime": EventModel,
+        "Error": EventModel,
     }
 
     model_cls = type_map.get(entity_type, EntityModel)
     # Remove 'type' from data as it's not a field in the models
     if "type" in data:
         del data["type"]
+
+    # If type was an EventType value, ensure event_type is set
+    if model_cls is EventModel and "event_type" not in data:
+        event_type_values = {et.value for et in EventType}
+        if entity_type in event_type_values:
+            data["event_type"] = entity_type
 
     return model_cls(**data)

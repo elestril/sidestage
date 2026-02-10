@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sidestage.memory.models import Memory, MemoryType
-from sidestage.models import CharacterModel, EntityModel, EventModel, ItemModel, LocationModel, SceneModel
+from sidestage.models import CharacterModel, EntityModel, EventModel, EventType, ItemModel, LocationModel, SceneModel
 
 
 # --- Fixtures ---
@@ -31,6 +31,7 @@ def mock_campaign(mock_graph_client: MagicMock, tmp_path: Path) -> MagicMock:
     campaign.campaign_dir = tmp_path
     campaign.storage = MagicMock()
     campaign.storage.get_scene = MagicMock(return_value=None)
+    campaign.storage.list_events_by_scene = MagicMock(return_value=[])
     campaign.health = MagicMock()
     return campaign
 
@@ -80,6 +81,7 @@ def sample_entities() -> list[EntityModel]:
             scene_id="scene_01",
             gametime=50,
             walltime="2024-01-01T12:00:00",
+            event_type=EventType.CHAT_MESSAGE,
         ),
     ]
 
@@ -191,37 +193,33 @@ async def test_queries_all_memories(mock_campaign: MagicMock, sample_memories: l
 
 @pytest.mark.anyio
 async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_entities: list[EntityModel]) -> None:
-    """For each SceneModel entity, export_campaign reads messages from storage."""
+    """For each SceneModel entity, export_campaign reads events from storage."""
     from sidestage.migration.exporter import export_campaign
-    from sidestage.models import ChatMessageModel as CM
 
     scene = SceneModel(
         id="scene_chat",
         name="Chat SceneModel",
         body="A scene with chat.",
         current_gametime=200,
-        messages=[
-            CM(
-                id="msg_01",
-                name="Eldric says hi",
-                body="",
-                scene_id="scene_chat",
-                gametime=10,
-                walltime="2024-01-01T12:00:00",
-                character_id="char_eldric",
-                message="Hello there!",
-            ),
-        ],
     )
-    # storage.get_scene returns the scene with messages populated
-    mock_campaign.storage.get_scene = MagicMock(return_value=scene)
+    chat_event = EventModel(
+        id="msg_01",
+        name="Eldric says hi",
+        body="Hello there!",
+        scene_id="scene_chat",
+        gametime=10,
+        walltime="2024-01-01T12:00:00",
+        character_id="char_eldric",
+        event_type=EventType.CHAT_MESSAGE,
+    )
+    mock_campaign.storage.list_events_by_scene = MagicMock(return_value=[chat_event])
 
     with _setup_list_entities(mock_campaign, [scene]), \
          _setup_get_related():
         _setup_memories_query(mock_campaign, [])
         result = await export_campaign(mock_campaign)
 
-    mock_campaign.storage.get_scene.assert_called_with("scene_chat")
+    mock_campaign.storage.list_events_by_scene.assert_called_with("scene_chat")
     assert result.written_chatlogs == 1
 
 
@@ -283,7 +281,6 @@ async def test_writes_memories_to_dot_d_dirs(
 async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path: Path) -> None:
     """SceneModel chat logs written as chatlog.log inside scene_name.d/."""
     from sidestage.migration.exporter import export_campaign
-    from sidestage.models import ChatMessageModel as CM
 
     scene = SceneModel(
         id="scene_chat",
@@ -291,25 +288,17 @@ async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path:
         body="A scene.",
         current_gametime=100,
     )
-    scene_with_msgs = SceneModel(
-        id="scene_chat",
-        name="Chat SceneModel",
-        body="A scene.",
-        current_gametime=100,
-        messages=[
-            CM(
-                id="msg_01",
-                name="Greeting",
-                body="",
-                scene_id="scene_chat",
-                gametime=10,
-                walltime="2024-01-01T12:00:00",
-                character_id="char_eldric",
-                message="Hello!",
-            ),
-        ],
+    chat_event = EventModel(
+        id="msg_01",
+        name="Greeting",
+        body="Hello!",
+        scene_id="scene_chat",
+        gametime=10,
+        walltime="2024-01-01T12:00:00",
+        character_id="char_eldric",
+        event_type=EventType.CHAT_MESSAGE,
     )
-    mock_campaign.storage.get_scene = MagicMock(return_value=scene_with_msgs)
+    mock_campaign.storage.list_events_by_scene = MagicMock(return_value=[chat_event])
 
     with _setup_list_entities(mock_campaign, [scene]), \
          _setup_get_related():

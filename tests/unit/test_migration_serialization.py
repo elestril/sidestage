@@ -4,12 +4,9 @@ import pytest
 
 from sidestage.models import (
     CharacterModel,
-    ChatMessageModel,
     EventModel,
-    FastForwardEventModel,
+    EventType,
     ItemModel,
-    JoinEventModel,
-    LeaveEventModel,
     LocationModel,
     SceneModel,
 )
@@ -71,49 +68,28 @@ def test_entity_to_frontmatter_dict_item_minimal():
     assert body == "Sharp."
 
 
-def test_entity_to_frontmatter_dict_scene_excludes_messages():
-    """entity_to_frontmatter_dict excludes messages list from SceneModel frontmatter."""
+def test_entity_to_frontmatter_dict_scene():
+    """entity_to_frontmatter_dict handles SceneModel correctly."""
     scene = SceneModel(
         id="scene_brawl",
         name="Tavern Brawl",
         body="A brawl breaks out.",
         location_id="loc_tavern",
-        messages=[],
     )
     fm, body = entity_to_frontmatter_dict(scene)
     assert fm["type"] == "Scene"
-    assert "messages" not in fm
 
 
-def test_entity_to_frontmatter_dict_event_subtypes():
-    """entity_to_frontmatter_dict handles ChatMessageModel and JoinEventModel subtypes."""
-    chat = ChatMessageModel(
-        id="evt_chat_1",
-        name="Chat",
-        body="",
-        scene_id="scene_brawl",
-        gametime=100,
-        walltime="2026-01-15T14:30:00Z",
-        character_id="char_eldric",
-        message="Hello!",
+def test_entity_to_frontmatter_dict_event_includes_event_type():
+    """entity_to_frontmatter_dict for EventModel includes event_type in frontmatter."""
+    event = EventModel(
+        id="evt_1", name="Chat", body="hi", scene_id="s1",
+        gametime=100, walltime="2026-01-15T14:30:00Z",
+        event_type=EventType.CHAT_MESSAGE, character_id="c1",
     )
-    fm, body = entity_to_frontmatter_dict(chat)
-    assert fm["type"] == "ChatMessage"
-    assert fm["character_id"] == "char_eldric"
-    assert fm["message"] == "Hello!"
-
-    join = JoinEventModel(
-        id="evt_join_1",
-        name="Join",
-        body="",
-        scene_id="scene_brawl",
-        gametime=50,
-        walltime="2026-01-15T14:29:00Z",
-        actor_id="actor_1",
-    )
-    fm_j, body_j = entity_to_frontmatter_dict(join)
-    assert fm_j["type"] == "JoinEvent"
-    assert fm_j["actor_id"] == "actor_1"
+    fm, body = entity_to_frontmatter_dict(event)
+    assert fm["type"] == "Event"
+    assert fm["event_type"] == "ChatMessage"
 
 
 def test_entity_to_frontmatter_dict_matches_model_dump_plus_type():
@@ -202,6 +178,48 @@ def test_frontmatter_dict_to_entity_raises_on_missing_required():
     data = {"type": "Character"}  # missing name and id
     with pytest.raises(Exception):
         frontmatter_dict_to_entity(data, "body")
+
+
+def test_frontmatter_dict_to_entity_event_with_event_type():
+    """frontmatter_dict_to_entity handles type='Event' with event_type field."""
+    data = {
+        "name": "Chat", "id": "evt_1", "type": "Event",
+        "event_type": "ChatMessage", "scene_id": "s1",
+        "gametime": 100, "walltime": "2026-01-15T14:30:00Z",
+        "character_id": "c1", "visibility": "public",
+        "metadata": {},
+    }
+    entity = frontmatter_dict_to_entity(data, "hi")
+    assert isinstance(entity, EventModel)
+    assert entity.event_type == EventType.CHAT_MESSAGE
+
+
+def test_type_map_maps_event_type_values_to_event_model():
+    """TYPE_MAP maps EventType value strings to EventModel."""
+    from sidestage.migration.serialization import TYPE_MAP
+    for val in ["ChatMessage", "JoinEvent", "LeaveEvent", "AdjustGametime", "Error"]:
+        assert TYPE_MAP[val] is EventModel
+
+
+def test_type_to_subdir_maps_event_types_to_events():
+    """TYPE_TO_SUBDIR maps all event type strings to 'events'."""
+    from sidestage.migration.serialization import TYPE_TO_SUBDIR
+    for val in ["Event", "ChatMessage", "JoinEvent", "LeaveEvent", "AdjustGametime", "Error"]:
+        assert TYPE_TO_SUBDIR[val] == "events"
+
+
+def test_entity_roundtrip_flattened_event():
+    """Full roundtrip: EventModel -> frontmatter_dict -> EventModel preserves event_type."""
+    original = EventModel(
+        id="evt_rt", name="Roundtrip", body="Content",
+        scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z",
+        event_type=EventType.JOIN, actor_id="a1",
+    )
+    fm, body = entity_to_frontmatter_dict(original)
+    restored = frontmatter_dict_to_entity(fm, body)
+    assert type(restored) is EventModel
+    assert restored.event_type == EventType.JOIN
+    assert restored.actor_id == "a1"
 
 
 # --- memory_to_frontmatter_dict tests ---
@@ -303,11 +321,11 @@ def test_entity_roundtrip_all_types():
         LocationModel(id="l1", name="L", body="B", connected_locations=["l2"]),
         ItemModel(id="i1", name="I", body="B"),
         SceneModel(id="s1", name="S", body="B", location_id="l1"),
-        EventModel(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z"),
-        JoinEventModel(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
-        LeaveEventModel(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1"),
-        FastForwardEventModel(id="ff1", name="FF", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", duration_str="2 hours"),
-        ChatMessageModel(id="cm1", name="Chat", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", character_id="c1", message="Hello"),
+        EventModel(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.CHAT_MESSAGE),
+        EventModel(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.JOIN, actor_id="a1"),
+        EventModel(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.LEAVE, actor_id="a1"),
+        EventModel(id="ag1", name="Adjust", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.ADJUST_GAMETIME),
+        EventModel(id="er1", name="Error", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.ERROR),
     ]
     for original in entities:
         fm, body = entity_to_frontmatter_dict(original)
@@ -355,11 +373,12 @@ def test_entity_type_to_subdir_mapping():
 
 
 def test_entity_type_to_subdir_event_subtypes():
-    """EventModel subtypes all map to events/."""
+    """EventType value strings all map to events/."""
     assert entity_type_to_subdir("ChatMessage") == "events"
     assert entity_type_to_subdir("JoinEvent") == "events"
     assert entity_type_to_subdir("LeaveEvent") == "events"
-    assert entity_type_to_subdir("FastForwardEvent") == "events"
+    assert entity_type_to_subdir("AdjustGametime") == "events"
+    assert entity_type_to_subdir("Error") == "events"
 
 
 # --- resolve_filename tests ---
