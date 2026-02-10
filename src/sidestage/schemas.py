@@ -7,7 +7,7 @@ from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel
 
-from sidestage.models import ChatMessageModel
+from sidestage.models import EventModel
 
 
 # --- API Request/Response Models ---
@@ -60,5 +60,4 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    user_message: ChatMessageModel
-    agent_message: Optional[ChatMessageModel] = None
+    event: EventModel

@@ -15,12 +15,8 @@ from sidestage.graph.errors import DuplicateEntityError, EntityNotFoundError, Qu
 from sidestage.models import (
     EntityModel,
     CharacterModel,
-    ChatMessageModel,
     EventModel,
-    FastForwardEventModel,
     ItemModel,
-    JoinEventModel,
-    LeaveEventModel,
     LocationModel,
     SceneModel,
 )
@@ -34,10 +30,6 @@ logger = logging.getLogger(__name__)
 
 # Ordered most-specific first so deserialization picks the right model.
 LABEL_TO_MODEL: dict[str, type[EntityModel]] = {
-    "ChatMessage": ChatMessageModel,
-    "JoinEvent": JoinEventModel,
-    "LeaveEvent": LeaveEventModel,
-    "FastForwardEvent": FastForwardEventModel,
     "Character": CharacterModel,
     "Location": LocationModel,
     "Item": ItemModel,
@@ -51,17 +43,12 @@ MODEL_TO_LABELS: dict[type[EntityModel], list[str]] = {
     ItemModel: ["Entity", "Item"],
     SceneModel: ["Entity", "Scene"],
     EventModel: ["Entity", "Event"],
-    ChatMessageModel: ["Entity", "Event", "ChatMessage"],
-    JoinEventModel: ["Entity", "Event", "JoinEvent"],
-    LeaveEventModel: ["Entity", "Event", "LeaveEvent"],
-    FastForwardEventModel: ["Entity", "Event", "FastForwardEvent"],
 }
 
 # Fields that should NOT be stored as graph node properties.
 EXCLUDED_FIELDS: dict[type[EntityModel], set[str]] = {
     LocationModel: {"connected_locations"},
-    SceneModel: {"messages"},
-    ChatMessageModel: {"widget"},
+    EventModel: {"metadata"},
 }
 
 # Valid property key pattern for Cypher safety.
