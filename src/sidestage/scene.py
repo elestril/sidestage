@@ -1,53 +1,54 @@
+"""Scene event loop.
+
+Manages the runtime state of a Scene: event queue, character dispatch,
+event persistence, and event creation factory.
+"""
+
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any, List, Callable, Awaitable, cast
-from datetime import datetime
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional, cast
 
 from opentelemetry import trace
 
-from sidestage.models import CharacterModel, SceneModel, ChatMessageModel, EventModel
-from sidestage.entities import entity_to_markdown
-from sidestage.bus import EventQueue
+from sidestage.actors import NPCActor, User
 from sidestage.character import Character
+from sidestage.event import Event, EventQueue
+from sidestage.models import CharacterModel, EventModel, EventType, SceneModel
 from sidestage.storage import Storage
-from sidestage.agent import LiteLLMAgent
 from sidestage.tracing.middleware import record_error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from sidestage.graph.client import GraphClient
+    from sidestage.campaign import Campaign
     from sidestage.config import LLMConfig
+    from sidestage.graph.client import GraphClient
     from sidestage.health import CampaignHealth
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("sidestage.scene")
 
-# Callback type for broadcasting events to websocket clients
-BroadcastFn = Callable[[ChatMessageModel], Awaitable[None]]
 
 class Scene:
-    """
-    Manages the runtime state and logic of a specific Scene.
+    """Manages the runtime state and event loop of a specific Scene.
 
-    This class orchestrates:
-    - An EventQueue whose worker persists, broadcasts, and dispatches events.
-    - Active Character instances (agents).
-    - Persistence of scene data via Storage.
-    - Creation and routing of chat messages.
+    Orchestrates an EventQueue whose worker persists events, handles
+    event-type-specific logic, and dispatches to all present Actors.
     """
+
     def __init__(
         self,
         storage: Storage,
-        agent: LiteLLMAgent,
         data: SceneModel,
+        campaign: "Campaign",
         graph_client: "GraphClient | None" = None,
         embed_config: "LLMConfig | None" = None,
         health: "CampaignHealth | None" = None,
         context_limit: int = 4096,
     ):
         self.storage = storage
-        self.agent = agent
         self.data = data
+        self.campaign = campaign
         self.graph_client = graph_client
         self.embed_config = embed_config
         self.health = health
@@ -55,72 +56,64 @@ class Scene:
         self.queue = EventQueue()
         self.characters: Dict[str, Character] = {}
         self._active = False
-        self._broadcast_fn: Optional[BroadcastFn] = None
 
-    def set_broadcast(self, fn: BroadcastFn) -> None:
-        """Set the callback used to broadcast events to websocket clients."""
-        self._broadcast_fn = fn
+    @property
+    def id(self) -> str:
+        """Get the unique identifier of the scene."""
+        return self.data.id
 
-    async def _process_event(self, event: EventModel) -> None:
-        """
-        Queue worker handler. For each event:
-        (a) Persist to storage and graph.
-        (b) Broadcast to websocket clients.
-        (c) For user-originated ChatMessages: dispatch to all NPCs.
-        """
-        if not isinstance(event, ChatMessageModel):
+    # --- Public API ---
+
+    async def process(self, event: Event) -> None:
+        """Enqueue an event into this scene's event loop."""
+        event.scene = self
+        await self.queue.put(event)
+
+    async def chat(self, actor_id: str, text: str, character_id: str | None = None) -> None:
+        """Entry point for user chat. Creates event and enqueues it."""
+        if self.health is not None and not self.health.is_accepting_chat:
+            logger.warning("Chat rejected: campaign health is UNHEALTHY")
             return
 
-        with tracer.start_as_current_span("scene.process_event") as span:
-            span.set_attribute("sidestage.scene.id", self.id)
-            span.set_attribute("sidestage.event.id", event.id)
-            span.set_attribute("sidestage.event.type", event.entity_type)
-            span.set_attribute("sidestage.actor.id", event.actor_id or "unknown")
-            try:
-                # (a) Persist
-                self.data.messages.append(event)
-                self.storage.update_scene(self.data)
+        event = self.create_event(
+            event_type=EventType.CHAT_MESSAGE,
+            actor_id=actor_id,
+            body=text,
+            character_id=character_id,
+        )
+        await self.process(event)
 
-                if self.graph_client is not None:
-                    from sidestage.graph import create_entity, link
-                    try:
-                        await create_entity(self.graph_client, event)
-                        await link(self.graph_client, self.data.id, "HAS_EVENT", event.id)
-                        if event.character_id:
-                            await link(self.graph_client, event.id, "INVOLVES", event.character_id)
-                    except Exception:
-                        logger.exception("Failed to persist event %s to graph", event.id)
+    def create_event(
+        self,
+        event_type: EventType,
+        actor_id: str,
+        body: str = "",
+        character_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
+    ) -> Event:
+        """Factory to create an Event associated with this scene."""
+        if name is None:
+            name = self._default_event_name(event_type, character_id)
 
-                # (b) Broadcast to websockets
-                if self._broadcast_fn:
-                    await self._broadcast_fn(event)
+        model = EventModel(
+            id=f"evt_{str(uuid.uuid4())[:8]}",
+            name=name,
+            body=body,
+            event_type=event_type,
+            scene_id=self.id,
+            gametime=self.data.current_gametime or 0,
+            walltime=datetime.now(timezone.utc),
+            actor_id=actor_id,
+            character_id=character_id,
+            metadata=metadata or {},
+        )
+        return Event.from_model(model)
 
-                # (c) For user-originated events: send to all NPCs
-                if event.actor_id == "user":
-                    await self._dispatch_to_npcs(event)
-            except Exception as exc:
-                record_error(span, exc)
-                raise
-
-    async def _dispatch_to_npcs(self, event: ChatMessageModel) -> None:
-        """Send an event to all active NPC agents."""
-        with tracer.start_as_current_span("scene.dispatch_to_npcs") as span:
-            span.set_attribute("sidestage.npc_count", len(self.characters))
-            for char_logic in self.characters.values():
-                if char_logic.actor is not None:
-                    try:
-                        await char_logic.actor.on_event(event)
-                    except Exception:
-                        logger.exception(
-                            "Error dispatching to NPC %s", char_logic.data.name
-                        )
+    # --- Lifecycle ---
 
     async def activate(self) -> None:
-        """
-        Activate the scene.
-
-        Starts the event queue and activates all characters present in the campaign/scene.
-        """
+        """Activate the scene: start event queue, load and activate characters."""
         if self._active:
             return
 
@@ -133,96 +126,133 @@ class Scene:
         else:
             all_chars = self.storage.list_characters()
 
-        # Compute present character IDs for context assembly
         present_character_ids = [c.id for c in all_chars]
 
         for char_data in all_chars:
-            char_logic = Character(
-                cast(CharacterModel, char_data), self,
-                graph_client=self.graph_client,
-                embed_config=self.embed_config,
-                health=self.health,
-                scene_id=self.data.id,
-                present_character_ids=present_character_ids,
-                context_limit=self.context_limit,
-            )
-            self.characters[char_data.id] = char_logic
-            await char_logic.activate()
+            character = self.campaign.get_character(cast(CharacterModel, char_data))
+
+            # Wire NPCActor scene-specific dependencies
+            if isinstance(character.actor, NPCActor):
+                character.actor.character = char_data
+                character.actor.scene_logic = self.campaign
+                character.actor.graph_client = self.graph_client
+                character.actor.embed_config = self.embed_config
+                character.actor.health = self.health
+                character.actor.scene_id = self.data.id
+                character.actor.present_character_ids = present_character_ids
+                character.actor.context_limit = self.context_limit
+
+            self.characters[char_data.id] = character
+            await character.activate()
 
         self._active = True
-        logger.info(f"Scene {self.id} activated with {len(self.characters)} characters.")
+        logger.info("Scene %s activated with %d characters.", self.id, len(self.characters))
 
     async def deactivate(self) -> None:
-        """
-        Deactivate the scene.
-
-        Stops the event queue and deactivates all characters.
-        """
+        """Deactivate the scene: stop queue and deactivate characters."""
         if not self._active:
             return
 
-        for char_logic in self.characters.values():
-            await char_logic.deactivate()
+        for character in self.characters.values():
+            await character.deactivate()
         self.characters = {}
 
         await self.queue.stop()
         self._active = False
-        logger.info(f"Scene {self.id} deactivated.")
+        logger.info("Scene %s deactivated.", self.id)
 
-    @property
-    def id(self) -> str:
-        """Get the unique identifier of the scene."""
-        return self.data.id
+    # --- Queue handler ---
 
-    @property
-    def messages(self) -> List[ChatMessageModel]:
-        """Get the list of messages in this scene."""
-        return self.data.messages
+    async def _process_event(self, event: Event) -> None:
+        """Queue worker handler. Persist, handle event-type-specific logic, dispatch."""
+        with tracer.start_as_current_span("scene.process_event") as span:
+            span.set_attribute("sidestage.scene.id", self.id)
+            span.set_attribute("sidestage.event.id", event.model.id)
+            span.set_attribute("sidestage.event.type", event.model.event_type.value)
+            span.set_attribute("sidestage.actor.id", event.model.actor_id or "unknown")
+            try:
+                # 1. Persist EventModel to storage and graph
+                self.storage.add_event(event.model)
 
-    def create_message(self, actor_id: str, text: str, character_id: Optional[str] = None) -> ChatMessageModel:
-        """
-        Factory method to create a ChatMessage associated with this scene.
+                if self.graph_client is not None:
+                    from sidestage.graph import create_entity, link
+                    try:
+                        await create_entity(self.graph_client, event.model)
+                        await link(self.graph_client, self.data.id, "HAS_EVENT", event.model.id)
+                        if event.model.character_id:
+                            await link(self.graph_client, event.model.id, "INVOLVES", event.model.character_id)
+                    except Exception:
+                        logger.exception("Failed to persist event %s to graph", event.model.id)
 
-        This creates the object but does NOT publish or persist it.
-        Use `queue.put(message)` to send it.
+                # 2. Event-type-specific processing
+                if event.model.event_type == EventType.ADJUST_GAMETIME:
+                    self.data.current_gametime = event.model.gametime
+                    self.storage.update_scene(self.data)
 
-        Args:
-            actor_id (str): The ID of the actor (e.g., 'user', 'agent').
-            text (str): The content of the message.
-            character_id (Optional[str]): The ID of the character persona. Defaults to actor_id if None.
+                # 3. Dispatch to all present actors
+                await self._dispatch(event)
+            except Exception as exc:
+                record_error(span, exc)
+                raise
 
-        Returns:
-            ChatMessageModel: The constructed message object.
-        """
-        import uuid
-        from datetime import datetime
+    # --- Dispatch ---
 
-        # Fallback for now until Actor system is fully integrated
-        final_character_id = character_id or actor_id
+    async def _dispatch(self, event: Event) -> None:
+        """Dispatch event to all present actors, deduplicating by actor_id."""
+        dispatched: set[str] = set()
 
-        return ChatMessageModel(
-            id=f"msg_{str(uuid.uuid4())[:8]}",
-            name=f"{actor_id.capitalize()} Message",
-            body=text,
-            scene_id=self.id,
-            gametime=self.data.current_gametime or 0,
-            walltime=datetime.now().isoformat(),
-            actor_id=actor_id,
-            character_id=final_character_id,
-            message=text
-        )
+        for character in self.characters.values():
+            actor = character.actor
+            if actor.actor_id in dispatched:
+                continue
+            dispatched.add(actor.actor_id)
 
-    async def chat(self, user_message: ChatMessageModel) -> None:
-        """
-        Entry point for user chat interaction.
+            if isinstance(actor, NPCActor):
+                await self._send_actor_status(character, "thinking")
+                try:
+                    await actor.process(event)
+                except Exception:
+                    logger.exception("Error dispatching to actor %s", actor.actor_id)
+                finally:
+                    await self._send_actor_status(character, "idle")
+            else:
+                try:
+                    await actor.process(event)
+                except Exception:
+                    logger.exception("Error dispatching to actor %s", actor.actor_id)
 
-        Puts the user message on the event queue. The queue worker will
-        persist it, broadcast it, and dispatch it to NPCs.
+    async def _send_actor_status(self, character: Character, status: str) -> None:
+        """Send ephemeral actor_status message to all present User actors."""
+        message = {
+            "type": "actor_status",
+            "character_id": character.data.id,
+            "scene_id": self.id,
+            "status": status,
+        }
+        dispatched_users: set[str] = set()
+        for char in self.characters.values():
+            if isinstance(char.actor, User) and char.actor.actor_id not in dispatched_users:
+                dispatched_users.add(char.actor.actor_id)
+                await char.actor.send(message)
 
-        Args:
-            user_message (ChatMessageModel): The message from the user.
-        """
-        if self.health is not None and not self.health.is_accepting_chat:
-            logger.warning("Chat rejected: campaign health is UNHEALTHY")
-            return
-        await self.queue.put(user_message)
+    # --- Helpers ---
+
+    def _default_event_name(self, event_type: EventType, character_id: str | None) -> str:
+        """Generate default event name following the naming convention."""
+        char_name = ""
+        if character_id and character_id in self.characters:
+            char_name = self.characters[character_id].data.name
+
+        match event_type:
+            case EventType.CHAT_MESSAGE:
+                return f"{char_name} Message" if char_name else "Message"
+            case EventType.JOIN:
+                return f"{char_name} Joins" if char_name else "Join"
+            case EventType.LEAVE:
+                return f"{char_name} Leaves" if char_name else "Leave"
+            case EventType.ADJUST_GAMETIME:
+                return "Time Adjustment"
+            case EventType.ERROR:
+                return "Error"
+            case _:
+                return "Event"

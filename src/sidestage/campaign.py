@@ -517,7 +517,9 @@ class Campaign:
         default_llm = self.get_llm_config("default")
         context_limit = getattr(default_llm, "context_limit", None) or 4096
         return Scene(
-            self.storage, self.agent, data,
+            storage=self.storage,
+            data=data,
+            campaign=self,
             graph_client=self.graph_client,
             embed_config=embed_config,
             health=self.health,
