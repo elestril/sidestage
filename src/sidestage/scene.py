@@ -165,7 +165,10 @@ class Scene:
 
     async def _process_event(self, event: Event) -> None:
         """Queue worker handler. Persist, handle event-type-specific logic, dispatch."""
-        with tracer.start_as_current_span("scene.process_event") as span:
+        links = []
+        if event.span_context and event.span_context.is_valid:
+            links.append(trace.Link(event.span_context))
+        with tracer.start_as_current_span("scene.process_event", links=links) as span:
             span.set_attribute("sidestage.scene.id", self.id)
             span.set_attribute("sidestage.event.id", event.model.id)
             span.set_attribute("sidestage.event.type", event.model.event_type.value)

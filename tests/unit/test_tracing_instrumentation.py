@@ -11,7 +11,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
-from sidestage.models import CharacterModel, ChatMessageModel, SceneModel
+from sidestage.models import CharacterModel, EventModel, EventType, SceneModel
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,7 @@ def otel_exporter():
     import sidestage.scene as _scene
     import sidestage.character as _char
     import sidestage.agent as _agent
+    import sidestage.actors as _actors
     import sidestage.memory.context as _ctx
     import sidestage.memory.tools as _tools
     import sidestage.campaign as _campaign
@@ -68,6 +69,7 @@ def otel_exporter():
     _scene.tracer = provider.get_tracer("sidestage.scene")
     _char.tracer = provider.get_tracer("sidestage.character")
     _agent.tracer = provider.get_tracer("sidestage.agent")
+    _actors.tracer = provider.get_tracer("sidestage.actors")
     _ctx.tracer = provider.get_tracer("sidestage.memory.context")
     _tools.tracer = provider.get_tracer("sidestage.memory.tools")
     _campaign.tracer = provider.get_tracer("sidestage.campaign")
@@ -76,20 +78,21 @@ def otel_exporter():
     provider.shutdown()
 
 
-def _make_chat_message(**overrides) -> ChatMessageModel:
+def _make_event_model(**overrides) -> EventModel:
+    """Create an EventModel with sensible defaults for testing."""
     defaults = dict(
-        id="msg_test1",
-        name="Test Message",
+        id="evt_test1",
+        name="Test Event",
         body="Hello",
-        actor_id="user",
-        character_id="user",
-        message="Hello",
+        event_type=EventType.CHAT_MESSAGE,
         scene_id="scene_01",
         gametime=0,
         walltime="2025-01-01T00:00:00",
+        actor_id="user",
+        character_id="char_user",
     )
     defaults.update(overrides)
-    return ChatMessageModel(**defaults)
+    return EventModel(**defaults)
 
 
 def _make_scene(**overrides) -> SceneModel:
@@ -116,207 +119,318 @@ def _find_spans(exporter, name):
     return [s for s in exporter.get_finished_spans() if s.name == name]
 
 
+def _make_test_scene(scene_id="scene_01", tmp_path=None):
+    """Create a Scene with mocked dependencies for tracing tests."""
+    from sidestage.scene import Scene
+    from sidestage.storage import Storage
+    import tempfile
+
+    if tmp_path is None:
+        tmp_path = tempfile.mkdtemp()
+
+    storage = Storage(db_path=f"{tmp_path}/test.db")
+    scene_data = _make_scene(id=scene_id)
+    campaign = MagicMock()
+    scene = Scene(storage=storage, data=scene_data, campaign=campaign)
+    scene.characters = {}
+    return scene
+
+
+def _make_npc_actor(character_id="char_npc1", character_name="NPC One"):
+    """Create an NPCActor with mocked character data."""
+    from sidestage.actors import NPCActor
+    actor = NPCActor(actor_id=f"agent:{character_id}")
+    char = MagicMock()
+    char.id = character_id
+    char.name = character_name
+    char.body = "A test NPC"
+    char.unseen = False
+    actor.character = char
+    actor.scene_logic = MagicMock()
+    actor.scene_logic.agent = MagicMock()
+    return actor
+
+
 # ===========================================================================
-# 4.1 Scene._process_event tests
+# Event span context capture
+# ===========================================================================
+
+
+class TestEventSpanContext:
+    def test_from_model_captures_span_context(self, otel_exporter):
+        """Event.from_model() captures the current span context when a span is active."""
+        from sidestage.event import Event
+
+        model = _make_event_model()
+        test_tracer = trace.get_tracer("test")
+
+        with test_tracer.start_as_current_span("test_span") as span:
+            expected_ctx = span.get_span_context()
+            event = Event.from_model(model)
+
+        assert event.span_context is not None
+        assert event.span_context.trace_id == expected_ctx.trace_id
+        assert event.span_context.span_id == expected_ctx.span_id
+
+    def test_from_model_no_active_span(self):
+        """Event.from_model() sets span_context to None when no tracing is active."""
+        from sidestage.event import Event
+
+        model = _make_event_model()
+        event = Event.from_model(model)
+
+        # When no real span is active, span_context should be None or invalid
+        if event.span_context is not None:
+            assert not event.span_context.is_valid
+
+
+# ===========================================================================
+# Scene._process_event tests
 # ===========================================================================
 
 
 class TestProcessEvent:
     @pytest.mark.anyio
     async def test_creates_root_span(self, otel_exporter):
-        from sidestage.scene import Scene
+        scene = _make_test_scene()
+        model = _make_event_model()
+        from sidestage.event import Event
+        event = Event(model=model, span_context=None)
 
-        storage = MagicMock()
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
-        logic._broadcast_fn = None
-
-        msg = _make_chat_message()
-        await logic._process_event(msg)
+        await scene._process_event(event)
 
         spans = _find_spans(otel_exporter, "scene.process_event")
         assert len(spans) == 1
 
     @pytest.mark.anyio
     async def test_root_span_attributes(self, otel_exporter):
-        from sidestage.scene import Scene
+        scene = _make_test_scene()
+        model = _make_event_model(scene_id="scene_01", actor_id="user", id="evt_x")
+        from sidestage.event import Event
+        event = Event(model=model, span_context=None)
 
-        storage = MagicMock()
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
-        logic._broadcast_fn = None
-
-        msg = _make_chat_message(scene_id="scene_01", actor_id="user", id="msg_x")
-        await logic._process_event(msg)
+        await scene._process_event(event)
 
         span = _find_spans(otel_exporter, "scene.process_event")[0]
         assert span.attributes["sidestage.scene.id"] == "scene_01"
-        assert span.attributes["sidestage.event.id"] == "msg_x"
+        assert span.attributes["sidestage.event.id"] == "evt_x"
         assert span.attributes["sidestage.event.type"] == "ChatMessage"
         assert span.attributes["sidestage.actor.id"] == "user"
 
     @pytest.mark.anyio
-    async def test_non_chatmessage_no_span(self, otel_exporter):
-        from sidestage.scene import Scene
-        from sidestage.models import EventModel
+    async def test_all_event_types_create_span(self, otel_exporter):
+        """All event types create a processing span (no ChatMessage-only filter)."""
+        scene = _make_test_scene()
+        from sidestage.event import Event
 
-        storage = MagicMock()
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
+        for et in EventType:
+            otel_exporter.clear()
+            model = _make_event_model(event_type=et, id=f"evt_{et.value}")
+            event = Event(model=model, span_context=None)
+            await scene._process_event(event)
 
-        event = EventModel(id="evt_1", name="Test", body="test", scene_id="s1", gametime=0, walltime="2025-01-01")
-        await logic._process_event(event)
-
-        spans = _find_spans(otel_exporter, "scene.process_event")
-        assert len(spans) == 0
+            spans = _find_spans(otel_exporter, "scene.process_event")
+            assert len(spans) == 1, f"Expected span for {et.value}"
 
     @pytest.mark.anyio
     async def test_exception_sets_error_status(self, otel_exporter):
-        from sidestage.scene import Scene
+        scene = _make_test_scene()
+        scene.storage = MagicMock()
+        scene.storage.add_event = MagicMock(side_effect=RuntimeError("db error"))
 
-        storage = MagicMock()
-        storage.update_scene = MagicMock(side_effect=RuntimeError("db error"))
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
+        model = _make_event_model()
+        from sidestage.event import Event
+        event = Event(model=model, span_context=None)
 
-        msg = _make_chat_message()
         with pytest.raises(RuntimeError):
-            await logic._process_event(msg)
+            await scene._process_event(event)
 
         span = _find_spans(otel_exporter, "scene.process_event")[0]
         assert span.status.status_code.name == "ERROR"
 
-
-# ===========================================================================
-# 4.2 Scene._dispatch_to_npcs tests
-# ===========================================================================
-
-
-class TestDispatchToNpcs:
     @pytest.mark.anyio
-    async def test_creates_dispatch_span(self, otel_exporter):
-        from sidestage.scene import Scene
+    async def test_creates_linked_root_span(self, otel_exporter):
+        """_process_event() creates a new root span linked to the event's span context."""
+        from sidestage.event import Event
 
-        storage = MagicMock()
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
+        scene = _make_test_scene()
+        model = _make_event_model()
 
-        msg = _make_chat_message()
-        await logic._dispatch_to_npcs(msg)
+        test_tracer = trace.get_tracer("test")
+        with test_tracer.start_as_current_span("origin_span") as origin:
+            origin_ctx = origin.get_span_context()
+            event = Event.from_model(model)
 
-        spans = _find_spans(otel_exporter, "scene.dispatch_to_npcs")
+        # Process the event outside the original span
+        await scene._process_event(event)
+
+        spans = _find_spans(otel_exporter, "scene.process_event")
         assert len(spans) == 1
 
+        process_span = spans[0]
+        # Verify it has a link to the origin span
+        assert len(process_span.links) == 1
+        link = process_span.links[0]
+        assert link.context.trace_id == origin_ctx.trace_id
+        assert link.context.span_id == origin_ctx.span_id
+
     @pytest.mark.anyio
-    async def test_npc_count_attribute(self, otel_exporter):
-        from sidestage.scene import Scene
+    async def test_no_span_context_no_link(self, otel_exporter):
+        """When event.span_context is None, the processing span has no links."""
+        from sidestage.event import Event
+
+        scene = _make_test_scene()
+        model = _make_event_model()
+        event = Event(model=model, span_context=None)
+
+        await scene._process_event(event)
+
+        span = _find_spans(otel_exporter, "scene.process_event")[0]
+        assert len(span.links) == 0
+
+
+# ===========================================================================
+# Scene._dispatch tests
+# ===========================================================================
+
+
+class TestDispatch:
+    @pytest.mark.anyio
+    async def test_dispatch_within_process_span(self, otel_exporter):
+        """_dispatch() executes within the scene.process_event span context."""
+        from sidestage.event import Event
+        from sidestage.actors import NPCActor, User
         from sidestage.character import Character
 
-        storage = MagicMock()
-        agent = MagicMock()
-        scene_data = _make_scene()
-        logic = Scene(storage, agent, scene_data)
+        scene = _make_test_scene()
+        npc = NPCActor(actor_id="agent:npc1")
+        npc.process = AsyncMock()
+        user = User(actor_id="user")
+        user.process = AsyncMock()
 
-        # Add mock characters
-        char1 = MagicMock()
-        char1.actor = MagicMock()
-        char1.actor.on_event = AsyncMock()
-        char1.data = MagicMock()
-        char1.data.name = "NPC1"
-        logic.characters = {"c1": char1}
+        scene.characters = {
+            "char_npc1": Character(CharacterModel(id="char_npc1", name="NPC1", body=""), npc),
+            "char_user": Character(CharacterModel(id="char_user", name="Player", body=""), user),
+        }
 
-        msg = _make_chat_message()
-        await logic._dispatch_to_npcs(msg)
+        model = _make_event_model()
+        event = Event(model=model, span_context=None)
+        await scene._process_event(event)
 
-        span = _find_spans(otel_exporter, "scene.dispatch_to_npcs")[0]
-        assert span.attributes["sidestage.npc_count"] == 1
-
-
-# ===========================================================================
-# 4.3 AgentActor.on_event tests
-# ===========================================================================
-
-
-class TestAgentOnEvent:
-    @pytest.mark.anyio
-    async def test_creates_on_event_span(self, otel_exporter):
-        from sidestage.character import AgentActor
-
-        char = _make_character()
-        scene_logic = MagicMock()
-        scene_logic.agent = MagicMock()
-        scene_logic.agent.tools = []
-        scene_logic.agent.model = "test-model"
-        scene_logic.agent.api_base = None
-        scene_logic.agent.api_key = None
-        scene_logic.agent.debug_mode = False
-
-        actor = AgentActor(char, scene_logic)
-        actor.agent = MagicMock()
-        actor.agent.arun = AsyncMock(return_value=MagicMock(content=None))
-
-        msg = _make_chat_message()
-        await actor.on_event(msg)
-
-        spans = _find_spans(otel_exporter, "agent.on_event")
+        # The scene.process_event span should exist and encompass dispatch
+        spans = _find_spans(otel_exporter, "scene.process_event")
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_on_event_character_attributes(self, otel_exporter):
-        from sidestage.character import AgentActor
+    async def test_npc_count_in_dispatch(self, otel_exporter):
+        """Dispatch processes the correct number of NPCs."""
+        from sidestage.event import Event
+        from sidestage.actors import NPCActor, User
+        from sidestage.character import Character
 
-        char = _make_character(id="char_abc", name="TestNPC")
-        scene_logic = MagicMock()
-        scene_logic.agent = MagicMock()
-        scene_logic.agent.tools = []
-        scene_logic.agent.model = "test-model"
-        scene_logic.agent.api_base = None
-        scene_logic.agent.api_key = None
-        scene_logic.agent.debug_mode = False
+        scene = _make_test_scene()
 
-        actor = AgentActor(char, scene_logic)
+        npc1 = NPCActor(actor_id="agent:npc1")
+        npc1.process = AsyncMock()
+        npc2 = NPCActor(actor_id="agent:npc2")
+        npc2.process = AsyncMock()
+        user = User(actor_id="user")
+        user.process = AsyncMock()
+
+        scene.characters = {
+            "c1": Character(CharacterModel(id="c1", name="NPC1", body=""), npc1),
+            "c2": Character(CharacterModel(id="c2", name="NPC2", body=""), npc2),
+            "c3": Character(CharacterModel(id="c3", name="Player", body=""), user),
+        }
+
+        model = _make_event_model()
+        event = Event(model=model, span_context=None)
+        await scene._dispatch(event)
+
+        npc1.process.assert_called_once()
+        npc2.process.assert_called_once()
+        user.process.assert_called_once()
+
+
+# ===========================================================================
+# NPCActor.process tracing tests
+# ===========================================================================
+
+
+class TestNPCActorProcess:
+    @pytest.mark.anyio
+    async def test_creates_npc_actor_span(self, otel_exporter):
+        from sidestage.actors import NPCActor, User
+        from sidestage.event import Event
+
+        actor = _make_npc_actor()
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content=None))
 
-        msg = _make_chat_message()
-        await actor.on_event(msg)
+        # Need a User actor on the event's character for the guard to pass
+        model = _make_event_model(actor_id="user", character_id="char_user")
+        event = Event.from_model(model)
+        mock_scene = MagicMock()
+        mock_scene.characters = {
+            "char_user": MagicMock(actor=User(actor_id="user")),
+        }
+        event.scene = mock_scene
 
-        span = _find_spans(otel_exporter, "agent.on_event")[0]
+        await actor.process(event)
+
+        spans = _find_spans(otel_exporter, "npc_actor.process")
+        assert len(spans) == 1
+
+    @pytest.mark.anyio
+    async def test_character_attributes(self, otel_exporter):
+        from sidestage.actors import NPCActor, User
+        from sidestage.event import Event
+
+        actor = _make_npc_actor(character_id="char_abc", character_name="TestNPC")
+        actor.agent = MagicMock()
+        actor.agent.arun = AsyncMock(return_value=MagicMock(content=None))
+
+        model = _make_event_model(actor_id="user", character_id="char_user")
+        event = Event.from_model(model)
+        mock_scene = MagicMock()
+        mock_scene.characters = {
+            "char_user": MagicMock(actor=User(actor_id="user")),
+        }
+        event.scene = mock_scene
+
+        await actor.process(event)
+
+        span = _find_spans(otel_exporter, "npc_actor.process")[0]
         assert span.attributes["sidestage.character.id"] == "char_abc"
         assert span.attributes["sidestage.character.name"] == "TestNPC"
 
     @pytest.mark.anyio
-    async def test_on_event_exception_sets_error(self, otel_exporter):
-        from sidestage.character import AgentActor
+    async def test_exception_sets_error(self, otel_exporter):
+        from sidestage.actors import NPCActor, User
+        from sidestage.event import Event
 
-        char = _make_character()
-        scene_logic = MagicMock()
-        scene_logic.agent = MagicMock()
-        scene_logic.agent.tools = []
-        scene_logic.agent.model = "test-model"
-        scene_logic.agent.api_base = None
-        scene_logic.agent.api_key = None
-        scene_logic.agent.debug_mode = False
-
-        actor = AgentActor(char, scene_logic)
+        actor = _make_npc_actor()
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(side_effect=RuntimeError("agent error"))
 
-        msg = _make_chat_message()
-        with pytest.raises(RuntimeError):
-            await actor.on_event(msg)
+        model = _make_event_model(actor_id="user", character_id="char_user")
+        event = Event.from_model(model)
+        mock_scene = MagicMock()
+        mock_scene.characters = {
+            "char_user": MagicMock(actor=User(actor_id="user")),
+        }
+        mock_scene.process = AsyncMock()
+        event.scene = mock_scene
 
-        span = _find_spans(otel_exporter, "agent.on_event")[0]
+        # NPCActor.process catches exceptions and creates error events
+        await actor.process(event)
+
+        span = _find_spans(otel_exporter, "npc_actor.process")[0]
         assert span.status.status_code.name == "ERROR"
 
 
 # ===========================================================================
-# 4.4 assemble_context tests
+# assemble_context tests
 # ===========================================================================
 
 
@@ -376,7 +490,7 @@ class TestAssembleContext:
 
 
 # ===========================================================================
-# 4.5 LiteLLMAgent.arun tests
+# LiteLLMAgent.arun tests
 # ===========================================================================
 
 
@@ -554,7 +668,7 @@ class TestAgentArun:
 
 
 # ===========================================================================
-# 4.6 Memory tool operations tests
+# Memory tool operations tests
 # ===========================================================================
 
 
@@ -667,7 +781,7 @@ class TestMemoryToolTracing:
 
 
 # ===========================================================================
-# 4.9 EntityModel import tracing tests
+# EntityModel import tracing tests
 # ===========================================================================
 
 

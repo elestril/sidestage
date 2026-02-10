@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from opentelemetry import trace
 
 from sidestage.models import EventModel, EventType
+from sidestage.tracing.middleware import record_error
 
 if TYPE_CHECKING:
     from sidestage.agent import LiteLLMAgent
@@ -186,6 +187,7 @@ class NPCActor(Actor):
                     await event.scene.process(response_event)
 
             except Exception as exc:
+                record_error(span, exc)
                 logger.exception("Error in NPCActor.process for %s", char_name)
                 if event.scene:
                     from datetime import datetime, timezone
