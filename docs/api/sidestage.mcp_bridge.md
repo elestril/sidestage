@@ -12,7 +12,7 @@ The MCP endpoint is mounted on the existing FastAPI server at /v1/mcp.
 Create a FastMCP server with tools wired to the orchestrator.
 
 All tool functions close over the orchestrator instance to access
-campaign state, sync manager, and scene management.
+campaign state and scene management.
 
 Args:
     orchestrator: The SidestageOrchestrator instance.

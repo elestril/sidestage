@@ -95,13 +95,42 @@ class NPCActor(Actor):
             template = template_path.read_text()
             instructions = [template.format(character=self.character)]
 
-        base_agent = self.scene_logic.agent if self.scene_logic else None
-        if base_agent is None:
+        campaign = self.scene_logic
+        if campaign is None:
             return
 
+        # Get LLM settings from campaign config
+        try:
+            llm = campaign.get_llm_config("default")
+        except KeyError:
+            logger.warning("No default LLM config available for NPCActor %s", self.actor_id)
+            return
+
+        provider = llm.provider.lower()
+        if provider == "llama_cpp":
+            model_name = f"openai/{llm.model}"
+        elif provider == "gemini":
+            model_name = f"gemini/{llm.model}"
+        else:
+            model_name = llm.model
+
+        # Build tool list: system actors get world-building tools,
+        # regular NPCs get memory tools only.
         tools: list[Any] = []
-        if self.system_actor and self.scene_logic:
-            tools = list(base_agent.tools)
+        if self.system_actor:
+            world_tools = campaign.world_tools
+            tools = [
+                world_tools.create_character,
+                world_tools.update_character,
+                world_tools.get_character,
+                world_tools.list_characters,
+                world_tools.create_location,
+                world_tools.update_location,
+                world_tools.list_locations,
+                world_tools.create_item,
+                world_tools.update_item,
+                world_tools.list_items,
+            ]
         elif self.graph_client is not None and self.scene_id is not None and self.health is not None:
             from sidestage.memory.tools import MemoryTools
             memory_tools = MemoryTools(
@@ -111,34 +140,34 @@ class NPCActor(Actor):
                 owner_id=self.character.id if self.character else "unknown",
                 scene_id=self.scene_id,
             )
-            tools = list(base_agent.tools) + [
+            tools = [
                 memory_tools.update_scene_memory,
                 memory_tools.update_character_memory,
             ]
-        else:
-            tools = base_agent.tools
 
         char_name = self.character.name if self.character else "NPC"
         self.agent = LiteLLMAgent(
             name=char_name,
-            model=base_agent.model,
-            api_base=base_agent.api_base,
-            api_key=base_agent.api_key,
+            model=model_name,
+            api_base=llm.base_url,
+            api_key=llm.api_key,
             instructions=instructions,
             tools=tools,
-            debug_mode=base_agent.debug_mode,
+            debug_mode=False,
         )
 
     async def process(self, event: Event) -> None:
         """React to events from User actors by generating LLM responses."""
         from sidestage.event import Event as EventCls
 
-        # Guard: only react to CHAT_MESSAGE from User actors
+        # Guard: only react to CHAT_MESSAGE events
         if event.model.event_type != EventType.CHAT_MESSAGE:
             return
-        if not event.character:
+        # Don't respond to our own events or other NPC events
+        actor_id = event.model.actor_id or ""
+        if actor_id == self.actor_id:
             return
-        if not isinstance(event.character.actor, User):
+        if actor_id.startswith("agent:"):
             return
 
         if not self.agent:

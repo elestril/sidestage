@@ -22,6 +22,8 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
         mock_campaign = MagicMock()
         mock_campaign.health = CampaignHealth()
         mock_campaign.campaign_dir = tmp_path
+        mock_campaign.user = MagicMock()
+        mock_campaign.user.send = AsyncMock()
         mock_campaign.list_entities = AsyncMock(return_value=[
             {"id": "char_1", "name": "Gandalf", "type": "Character", "body": "A wizard."}
         ])
@@ -41,8 +43,6 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
         MockCampaign.return_value = mock_campaign
 
         orch = SidestageOrchestrator("test_campaign", base_dir=tmp_path)
-        orch.sync_manager = MagicMock()
-        orch.sync_manager.broadcast = AsyncMock()
         return orch
 
 
@@ -106,7 +106,7 @@ async def test_update_entity_markdown(mcp, mock_orchestrator):
     mock_orchestrator.campaign.update_entity_markdown.assert_awaited_once_with(
         "char_1", "---\nname: Updated\n---\nNew body."
     )
-    mock_orchestrator.sync_manager.broadcast.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
     assert result is not None
 
 
@@ -129,7 +129,7 @@ async def test_update_entity(mcp, mock_orchestrator):
     mock_orchestrator.campaign.update_entity.assert_awaited_once_with(
         "char_1", {"name": "Gandalf the White"}
     )
-    mock_orchestrator.sync_manager.broadcast.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
     assert result is not None
 
 
@@ -140,7 +140,7 @@ async def test_update_entity(mcp, mock_orchestrator):
 async def test_reload_defaults(mcp, mock_orchestrator):
     result = await mcp.call_tool("reload_defaults", {})
     mock_orchestrator.campaign.reload_defaults.assert_called_once()
-    mock_orchestrator.sync_manager.broadcast.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
     assert result is not None
 
 
@@ -170,7 +170,7 @@ async def test_create_scene(mcp, mock_orchestrator):
     mock_orchestrator.campaign.create_scene.assert_awaited_once_with(
         name="New SceneModel", description="A test scene.", current_gametime=None,
     )
-    mock_orchestrator.sync_manager.broadcast.assert_awaited_with({"type": "scene_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "scene_updated"})
     assert result is not None
 
 
@@ -186,6 +186,36 @@ async def test_get_scene_messages_not_found(mcp, mock_orchestrator):
     mock_orchestrator.campaign.get_scene_messages = MagicMock(return_value=None)
     with pytest.raises(ToolError, match="not found"):
         await mcp.call_tool("get_scene_messages", {"scene_id": "bad_id"})
+
+
+# --- Chat tool ---
+
+
+@pytest.mark.anyio
+async def test_send_chat_message(mcp, mock_orchestrator):
+    """send_chat_message calls scene.chat() with raw parameters."""
+    mock_scene = MagicMock()
+    mock_scene.chat = AsyncMock()
+    mock_orchestrator.get_active_scene = AsyncMock(return_value=mock_scene)
+
+    result = await mcp.call_tool("send_chat_message", {
+        "message": "Hello",
+        "scene_id": "scene_1",
+    })
+
+    mock_orchestrator.get_active_scene.assert_awaited_once_with("scene_1")
+    mock_scene.chat.assert_awaited_once_with(actor_id="user", text="Hello")
+    assert result is not None
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_scene_not_found(mcp, mock_orchestrator):
+    mock_orchestrator.get_active_scene = AsyncMock(return_value=None)
+    with pytest.raises(ToolError, match="not found"):
+        await mcp.call_tool("send_chat_message", {
+            "message": "Hello",
+            "scene_id": "bad_id",
+        })
 
 
 # --- MCP endpoint mount ---

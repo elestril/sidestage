@@ -165,11 +165,11 @@ def test_scene_logic_accepts_graph_client():
     from sidestage.scene import Scene
 
     storage = MagicMock()
-    agent = MagicMock()
+    campaign = MagicMock()
     scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
     client = MagicMock(spec=GraphClient)
 
-    sl = Scene(storage, agent, scene_data, graph_client=client)
+    sl = Scene(storage, scene_data, campaign, graph_client=client)
 
     assert sl.graph_client is client
 
@@ -179,12 +179,29 @@ def test_scene_logic_graph_client_defaults_none():
     from sidestage.scene import Scene
 
     storage = MagicMock()
-    agent = MagicMock()
+    campaign = MagicMock()
     scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
 
-    sl = Scene(storage, agent, scene_data)
+    sl = Scene(storage, scene_data, campaign)
 
     assert sl.graph_client is None
+
+
+def _mock_campaign_with_character():
+    """Create a mock Campaign that returns Character-like objects from get_character()."""
+    from sidestage.character import Character
+    from sidestage.actors import User
+
+    campaign = MagicMock()
+    user = User(actor_id="user")
+    campaign.user = user
+
+    def _get_character(model):
+        char = Character(model=model, actor=user)
+        return char
+
+    campaign.get_character = _get_character
+    return campaign
 
 
 @pytest.mark.anyio
@@ -193,11 +210,11 @@ async def test_scene_logic_activate_uses_graph_for_characters():
     from sidestage.scene import Scene
 
     storage = MagicMock()
-    agent = MagicMock()
+    campaign = _mock_campaign_with_character()
     scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
     client = MagicMock(spec=GraphClient)
 
-    sl = Scene(storage, agent, scene_data, graph_client=client)
+    sl = Scene(storage, scene_data, campaign, graph_client=client)
     # Mock the queue to avoid needing a real event loop for asyncio.create_task
     sl.queue = MagicMock()
     sl.queue.start = AsyncMock()
@@ -218,10 +235,10 @@ async def test_scene_logic_activate_falls_back_to_storage():
 
     storage = MagicMock()
     storage.list_characters.return_value = []
-    agent = MagicMock()
+    campaign = _mock_campaign_with_character()
     scene_data = SceneModel(id="s1", name="Test", body="desc", current_gametime=0)
 
-    sl = Scene(storage, agent, scene_data)
+    sl = Scene(storage, scene_data, campaign)
     # Mock the queue to avoid needing a real event loop for asyncio.create_task
     sl.queue = MagicMock()
     sl.queue.start = AsyncMock()

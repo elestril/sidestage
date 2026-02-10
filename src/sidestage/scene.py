@@ -69,11 +69,14 @@ class Scene:
         event.scene = self
         await self.queue.put(event)
 
-    async def chat(self, actor_id: str, text: str, character_id: str | None = None) -> None:
-        """Entry point for user chat. Creates event and enqueues it."""
+    async def chat(self, actor_id: str, text: str, character_id: str | None = None) -> "Event | None":
+        """Entry point for user chat. Creates event and enqueues it.
+
+        Returns the created Event, or None if chat was rejected.
+        """
         if self.health is not None and not self.health.is_accepting_chat:
             logger.warning("Chat rejected: campaign health is UNHEALTHY")
-            return
+            return None
 
         event = self.create_event(
             event_type=EventType.CHAT_MESSAGE,
@@ -82,6 +85,7 @@ class Scene:
             character_id=character_id,
         )
         await self.process(event)
+        return event
 
     def create_event(
         self,

@@ -22,7 +22,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
     """Create a FastMCP server with tools wired to the orchestrator.
 
     All tool functions close over the orchestrator instance to access
-    campaign state, sync manager, and scene management.
+    campaign state and scene management.
 
     Args:
         orchestrator: The SidestageOrchestrator instance.
@@ -82,7 +82,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
         )
         if not success:
             raise ValueError(f"Failed to update entity '{entity_id}'")
-        await orchestrator.sync_manager.broadcast({"type": "entities_updated"})
+        await orchestrator.campaign.user.send({"type": "entities_updated"})
         return f"Entity '{entity_id}' updated successfully"
 
     @mcp.tool()
@@ -98,7 +98,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
         success = await orchestrator.campaign.update_entity(entity_id, data)
         if not success:
             raise ValueError(f"Failed to update entity '{entity_id}'")
-        await orchestrator.sync_manager.broadcast({"type": "entities_updated"})
+        await orchestrator.campaign.user.send({"type": "entities_updated"})
         return f"Entity '{entity_id}' updated successfully"
 
     # --- Campaign tools ---
@@ -107,7 +107,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
     async def reload_defaults() -> str:
         """Reload default entities from the data directory into the campaign."""
         orchestrator.campaign.reload_defaults()
-        await orchestrator.sync_manager.broadcast({"type": "entities_updated"})
+        await orchestrator.campaign.user.send({"type": "entities_updated"})
         return "Defaults reloaded successfully"
 
     @mcp.tool()
@@ -153,7 +153,6 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
         result = await do_import(
             campaign=campaign,
             parse_result=parse_result,
-            sync_manager=orchestrator.sync_manager,
             active_scenes=orchestrator.active_scenes,
         )
         return {
@@ -178,7 +177,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
 
         result = await export_campaign(campaign)
         if result.phase == "complete":
-            await orchestrator.sync_manager.broadcast({"type": "entities_updated"})
+            await orchestrator.campaign.user.send({"type": "entities_updated"})
         return result.model_dump()
 
     # --- Scene tools ---
@@ -206,7 +205,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
             description=description,
             current_gametime=current_gametime,
         )
-        await orchestrator.sync_manager.broadcast({"type": "scene_updated"})
+        await orchestrator.campaign.user.send({"type": "scene_updated"})
         return scene.model_dump()
 
     @mcp.tool()
@@ -238,8 +237,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
         if not scene:
             raise ValueError(f"Scene '{scene_id}' not found")
 
-        user_msg = scene.create_message(actor_id="user", text=message)
-        await scene.chat(user_msg)
-        return {"user_message": user_msg.model_dump()}
+        await scene.chat(actor_id="user", text=message)
+        return {"status": "sent", "scene_id": scene_id}
 
     return mcp

@@ -143,14 +143,6 @@ def mock_campaign(tmp_path: Path):
 
 
 @pytest.fixture
-def mock_sync_manager():
-    """Mock SyncManager for verifying broadcast calls."""
-    sm = MagicMock()
-    sm.broadcast = AsyncMock()
-    return sm
-
-
-@pytest.fixture
 def patch_graph_operations():
     """Patch graph operations used by importer to avoid needing real FalkorDB.
 

@@ -33,6 +33,5 @@ Returns a dict with:
 
 Events in a scene, optionally filtered by gametime.
 
-Returns a list of Event models (may include ChatMessage subtype based
-on node labels). Returns empty list if scene has no events.
-Always ordered by gametime ascending.
+Returns a list of EventModel instances. Returns empty list if scene
+has no events. Always ordered by gametime ascending.

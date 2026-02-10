@@ -6,12 +6,10 @@ from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator
 
 from opentelemetry import trace
 
-from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
 from sidestage.scene import Scene
 from sidestage.models import SceneModel, CharacterModel, LocationModel, ItemModel, EntityModel, EventModel
-from sidestage.schemas import ChatResponse, ChatRequest
 from sidestage.actors import NPCActor, User
 from sidestage.character import Character
 from sidestage.entities import entity_to_markdown, markdown_to_entity
@@ -36,7 +34,7 @@ class Campaign:
     - Configuration (LLM settings)
     - Storage (Database connection)
     - World Tools (Entity manipulation logic)
-    - The 'Co-Author' Agent (System-level assistant)
+    - Actor infrastructure (User actor, Character registry)
     - Defaults/Seeding (Characters, Scenes)
     """
     def __init__(self, name: str, base_dir: Path):
@@ -70,8 +68,6 @@ class Campaign:
 
         # Ensure LLM is available before proceeding
         self._ensure_llm_availability()
-
-        self.agent = self.create_agent()
 
         # Ensure default scene and characters exist
         self._ensure_defaults()
@@ -110,51 +106,6 @@ class Campaign:
         if name not in self.config.llms:
             raise KeyError(f"LLM config '{name}' not found. Available: {list(self.config.llms.keys())}")
         return self.config.llms[name]
-
-    def create_agent(self) -> LiteLLMAgent:
-        """
-        Instantiate the main Co-Author agent based on campaign config.
-
-        Returns:
-            LiteLLMAgent: The configured agent instance.
-        """
-        llm = self.get_llm_config("default")
-        provider = llm.provider.lower()
-
-        if provider == "llama_cpp":
-            model_name = f"openai/{llm.model}"
-        elif provider == "gemini":
-            model_name = f"gemini/{llm.model}"
-        else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
-
-        return LiteLLMAgent(
-            name="Sidestage Co-Author",
-            model=model_name,
-            api_base=llm.base_url,
-            api_key=llm.api_key,
-            instructions=[
-                "You are the Sidestage Co-Author, a world-building assistant.",
-                "STRICT PERSONA: NEVER identify as a 'large language model'. You are strictly the Sidestage Co-Author.",
-                "DATABASE-ONLY KNOWLEDGE: You know NOTHING about Characters, locations, or items except what is in your database.",
-                "TOOL-FIRST: If asked about characters, world details, or 'which characters do you know?', you MUST call `list_characters` immediately.",
-                "NEVER list famous characters from other games (like Fallout or Elder Scrolls) unless they were created in THIS campaign.",
-                "TONE: Helpful and collaborative."
-            ],
-            tools=[
-                self.world_tools.create_character,
-                self.world_tools.update_character,
-                self.world_tools.get_character,
-                self.world_tools.list_characters,
-                self.world_tools.create_location,
-                self.world_tools.update_location,
-                self.world_tools.list_locations,
-                self.world_tools.create_item,
-                self.world_tools.update_item,
-                self.world_tools.list_items,
-            ],
-            debug_mode=False
-        )
 
     def _ensure_defaults(self) -> None:
         """Ensure that necessary default entities (scenes, characters) exist in the database."""
@@ -493,12 +444,20 @@ class Campaign:
             self.storage.add_scene(scene)
         return scene
 
-    def get_scene_events(self, scene_id: str) -> Optional[List[str]]:
-        """Get the event IDs for a specific scene."""
+    def get_scene_messages(self, scene_id: str) -> Optional[List[EventModel]]:
+        """Get chat message events for a specific scene."""
         scene_schema = self.storage.get_scene(scene_id)
         if not scene_schema:
             return None
-        return scene_schema.events
+        from sidestage.models import EventType
+        return self.storage.list_events_by_scene(scene_id, event_type=EventType.CHAT_MESSAGE)
+
+    def get_scene_events(self, scene_id: str) -> Optional[List[EventModel]]:
+        """Get all events for a specific scene."""
+        scene_schema = self.storage.get_scene(scene_id)
+        if not scene_schema:
+            return None
+        return self.storage.list_events_by_scene(scene_id)
 
     def get_scene_object(self, scene_id: str) -> Optional[Scene]:
         """

@@ -17,8 +17,7 @@ Domain model classes live in models.py.
 
 | Field | Type | Default |
 |-------|------|---------|
-| `user_message` | `ChatMessageModel` | — |
-| `agent_message` | `ChatMessageModel | None` | — |
+| `event` | `EventModel` | — |
 
 ### `EntityListResponse(BaseModel)`
 

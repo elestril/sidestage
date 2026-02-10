@@ -36,6 +36,10 @@
 
 #### `list_characters() -> list[CharacterModel]`
 
+#### `list_events_by_scene(scene_id: str, event_type: EventType | None = None) -> list[EventModel]`
+
+List events for a scene, optionally filtered by event_type.
+
 #### `list_items() -> list[ItemModel]`
 
 #### `list_locations() -> list[LocationModel]`

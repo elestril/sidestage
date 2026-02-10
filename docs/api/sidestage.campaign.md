@@ -10,7 +10,7 @@ The Campaign class serves as the container for:
 - Configuration (LLM settings)
 - Storage (Database connection)
 - World Tools (Entity manipulation logic)
-- The 'Co-Author' Agent (System-level assistant)
+- Actor infrastructure (User actor, Character registry)
 - Defaults/Seeding (Characters, Scenes)
 
 #### `__init__(name: str, base_dir: Path)`
@@ -21,13 +21,6 @@ Args:
     name (str): The name of the campaign.
     base_dir (Path): The root directory where campaign data is stored.
 
-#### `create_agent() -> LiteLLMAgent`
-
-Instantiate the main Co-Author agent based on campaign config.
-
-Returns:
-    LiteLLMAgent: The configured agent instance.
-
 #### `create_scene(name: str, description: str, current_gametime: int | None) -> SceneModel` *async*
 
 Create and persist a new scene.
@@ -35,6 +28,10 @@ Create and persist a new scene.
 #### `export_entities() -> int` *async*
 
 Export all entities to markdown files in the campaign directory.
+
+#### `get_character(model: CharacterModel) -> Character`
+
+Get or create a Character instance for the given model.
 
 #### `get_entity_markdown(entity_id: str) -> str | None` *async*
 
@@ -50,9 +47,13 @@ Args:
 Raises:
     KeyError: If the named LLM config doesn't exist.
 
-#### `get_scene_messages(scene_id: str) -> list[ChatMessageModel] | None`
+#### `get_scene_events(scene_id: str) -> list[EventModel] | None`
 
-Get the message history for a specific scene.
+Get all events for a specific scene.
+
+#### `get_scene_messages(scene_id: str) -> list[EventModel] | None`
+
+Get chat message events for a specific scene.
 
 #### `get_scene_object(scene_id: str) -> Scene | None`
 

@@ -31,6 +31,8 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
         mock_campaign.campaign_dir = tmp_path
         mock_campaign.list_entities = AsyncMock(return_value=[])
         mock_campaign.list_scenes = AsyncMock(return_value=[])
+        mock_campaign.user = MagicMock()
+        mock_campaign.user.send = AsyncMock()
         MockCampaign.return_value = mock_campaign
 
         orch = SidestageOrchestrator("test_campaign", base_dir=tmp_path)

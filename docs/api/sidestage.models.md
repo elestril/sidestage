@@ -12,35 +12,36 @@ API request/response schemas live in schemas.py.
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
 | `unseen` | `bool` | False |
 | `location_id` | `str | None` | — |
 | `inventory` | `list[str]` | *factory* |
+| `owner` | `str` | 'npc' |
+| `system_actor` | `bool` | False |
 
-### `ChatMessageModel(EventModel)`
+### `ChatMessageModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
+| `event_type` | `EventType` | — |
 | `scene_id` | `str` | — |
 | `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `character_id` | `str` | — |
+| `walltime` | `datetime` | — |
+| `character_id` | `str | None` | — |
 | `actor_id` | `str | None` | — |
-| `message` | `str` | — |
-| `widget` | `dict[str, Any] | None` | — |
-
-#### `backfill_legacy_fields(data: Any) -> Any`
+| `metadata` | `dict[str, Any]` | *factory* |
+| `visibility` | `Visibility` | <Visibility.PUBLIC: 'public'> |
 
 ### `EntityModel(BaseModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
 
 ### `EventModel(EntityModel)`
@@ -48,62 +49,89 @@ API request/response schemas live in schemas.py.
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
+| `event_type` | `EventType` | — |
 | `scene_id` | `str` | — |
 | `gametime` | `int` | — |
-| `walltime` | `str` | — |
+| `walltime` | `datetime` | — |
+| `character_id` | `str | None` | — |
+| `actor_id` | `str | None` | — |
+| `metadata` | `dict[str, Any]` | *factory* |
+| `visibility` | `Visibility` | <Visibility.PUBLIC: 'public'> |
 
-### `FastForwardEventModel(EventModel)`
+### `EventType(str, Enum)`
+
+**Values:**
+
+- `CHAT_MESSAGE` = `'ChatMessage'`
+- `JOIN` = `'JoinEvent'`
+- `LEAVE` = `'LeaveEvent'`
+- `ADJUST_GAMETIME` = `'AdjustGametime'`
+- `ERROR` = `'Error'`
+
+### `FastForwardEventModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
+| `event_type` | `EventType` | — |
 | `scene_id` | `str` | — |
 | `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `duration_str` | `str` | — |
+| `walltime` | `datetime` | — |
+| `character_id` | `str | None` | — |
+| `actor_id` | `str | None` | — |
+| `metadata` | `dict[str, Any]` | *factory* |
+| `visibility` | `Visibility` | <Visibility.PUBLIC: 'public'> |
 
 ### `ItemModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
 
-### `JoinEventModel(EventModel)`
+### `JoinEventModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
+| `event_type` | `EventType` | — |
 | `scene_id` | `str` | — |
 | `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `actor_id` | `str` | — |
+| `walltime` | `datetime` | — |
+| `character_id` | `str | None` | — |
+| `actor_id` | `str | None` | — |
+| `metadata` | `dict[str, Any]` | *factory* |
+| `visibility` | `Visibility` | <Visibility.PUBLIC: 'public'> |
 
-### `LeaveEventModel(EventModel)`
+### `LeaveEventModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
+| `event_type` | `EventType` | — |
 | `scene_id` | `str` | — |
 | `gametime` | `int` | — |
-| `walltime` | `str` | — |
-| `actor_id` | `str` | — |
+| `walltime` | `datetime` | — |
+| `character_id` | `str | None` | — |
+| `actor_id` | `str | None` | — |
+| `metadata` | `dict[str, Any]` | *factory* |
+| `visibility` | `Visibility` | <Visibility.PUBLIC: 'public'> |
 
 ### `LocationModel(EntityModel)`
 
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
 | `connected_locations` | `list[str]` | *factory* |
 
@@ -112,9 +140,16 @@ API request/response schemas live in schemas.py.
 | Field | Type | Default |
 |-------|------|---------|
 | `name` | `str` | — |
-| `body` | `str` | — |
+| `body` | `str` | '' |
 | `id` | `str` | — |
 | `current_gametime` | `int | None` | — |
 | `location_id` | `str | None` | — |
 | `events` | `list[str]` | *factory* |
-| `messages` | `list[ChatMessageModel]` | *factory* |
+
+### `Visibility(str, Enum)`
+
+**Values:**
+
+- `PUBLIC` = `'public'`
+- `GM_ONLY` = `'gm_only'`
+- `PRIVATE` = `'private'`

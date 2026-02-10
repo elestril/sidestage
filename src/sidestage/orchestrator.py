@@ -13,7 +13,6 @@ import json
 import asyncio
 
 from sidestage.campaign import Campaign
-from sidestage.sync import SyncManager
 from sidestage.health import HealthStatus
 from sidestage.tracing import (
     init_tracing,
@@ -75,7 +74,7 @@ class SidestageOrchestrator:
     The Orchestrator is responsible for:
     1. Initializing the FastAPI application and routes.
     2. Managing the lifecycle of Campaigns.
-    3. Handling WebSocket connections via SyncManager.
+    3. Handling WebSocket connections via User actor.
     4. Routing API requests to the appropriate Campaign or Scene components.
     5. Serving the frontend static assets.
     """
@@ -89,9 +88,6 @@ class SidestageOrchestrator:
         """
         self.base_dir = base_dir or (Path.home() / ".sidestage")
         self.pid_file = self.base_dir / "sidestage.pid"
-
-        # API Dispatching: SyncManager owned by Orchestrator
-        self.sync_manager = SyncManager()
 
         # Manage multiple campaigns
         self.campaigns: Dict[str, Campaign] = {}
@@ -187,47 +183,28 @@ class SidestageOrchestrator:
         
         scene_logic = self.campaign.get_scene_object(scene_id)
         if scene_logic:
-            scene_logic.set_broadcast(self._broadcast_chat_event)
             await scene_logic.activate()
             self.active_scenes[scene_id] = scene_logic
             return scene_logic
         return None
 
-    async def _broadcast_chat_event(self, event: Any) -> None:
-        """Broadcast a chat message to all connected WebSocket clients."""
-        await self.sync_manager.broadcast({
-            "type": "chat_message",
-            "message": event.model_dump(),
-            "scene_id": event.scene_id
-        })
-
     async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
-        """
-        Internal handler for incoming WebSocket messages from clients.
-        
-        Routes 'chat_message' type messages to the appropriate active Scene bus.
-
-        Args:
-            websocket (WebSocket): The client connection.
-            message (Dict[str, Any]): The parsed JSON message.
-        """
+        """Handle incoming WebSocket messages from clients."""
         msg_type = message.get("type")
         scene_id = message.get("scene_id")
-        
+
         if msg_type == "chat_message" and scene_id:
             scene = await self.get_active_scene(scene_id)
             if scene:
-                # Convert dict to ChatMessage schema
-                # This assumes the frontend sends a format that matches ChatMessage or can be adapted
-                from sidestage.models import ChatMessageModel
                 try:
-                    # If it's a raw text from user, we need to create a proper ChatMessage
-                    text = message.get("text")
-                    if text:
-                        user_msg = scene.create_message(actor_id="user", text=text)
-                        await scene.chat(user_msg)
+                    text = message.get("text", "")
+                    character_id = message.get("character_id")
+                    await scene.chat(actor_id="user", text=text, character_id=character_id)
                 except Exception as e:
-                    logger.error(f"Error publishing to scene bus: {e}")
+                    logger.error(f"Error processing chat message: {e}")
+
+        elif msg_type == "entity_content_sync":
+            await self.campaign.user.send(message, exclude=websocket)
 
     def _setup_mcp(self) -> None:
         """Create and mount the MCP Streamable HTTP endpoint at /v1/mcp.
@@ -248,13 +225,14 @@ class SidestageOrchestrator:
         # WebSocket
         @self.fastapi_app.websocket("/v1/ws")
         async def websocket_endpoint(websocket: WebSocket):
-            await self.sync_manager.connect(websocket)
+            user = self.campaign.user
+            await user.connect(websocket)
             try:
                 while True:
-                    data = await websocket.receive_text()
-                    await self.sync_manager.handle_message(websocket, data, handler=self._handle_ws_message)
+                    data = await websocket.receive_json()
+                    await self._handle_ws_message(websocket, data)
             except WebSocketDisconnect:
-                self.sync_manager.disconnect(websocket)
+                user.disconnect(websocket)
 
         # Entities
         @self.fastapi_app.get("/v1/entities")
@@ -281,7 +259,7 @@ class SidestageOrchestrator:
             """Import entities from the file system, updating the database."""
             count = await self.campaign.import_entities()
             if count > 0:
-                await self.sync_manager.broadcast({"type": "entities_updated"})
+                await self.campaign.user.send({"type": "entities_updated"})
             return {"message": f"Successfully imported {count} entities."}
 
         @self.fastapi_app.post("/v1/entities/{entity_id}/markdown")
@@ -290,7 +268,7 @@ class SidestageOrchestrator:
             success = await self.campaign.update_entity_markdown(entity_id, request.markdown)
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
-            await self.sync_manager.broadcast({"type": "entities_updated"})
+            await self.campaign.user.send({"type": "entities_updated"})
             return {"status": "ok"}
 
         @self.fastapi_app.post("/v1/entities/{entity_id}")
@@ -299,14 +277,14 @@ class SidestageOrchestrator:
             success = await self.campaign.update_entity(entity_id, data)
             if not success:
                 raise HTTPException(status_code=400, detail="Failed to update entity")
-            await self.sync_manager.broadcast({"type": "entities_updated"})
+            await self.campaign.user.send({"type": "entities_updated"})
             return {"status": "ok"}
 
         @self.fastapi_app.post("/v1/campaign/reload-defaults")
         async def reload_defaults():
             """Reload default characters and prompts from the data directory."""
             self.campaign.reload_defaults()
-            await self.sync_manager.broadcast({"type": "entities_updated"})
+            await self.campaign.user.send({"type": "entities_updated"})
             return {"status": "ok"}
 
         # Campaign migration (import/backup)
@@ -369,6 +347,8 @@ class SidestageOrchestrator:
                 parse_result=parse_result,
                 active_scenes=self.active_scenes,
             )
+            if result.phase == "complete":
+                await self.campaign.user.send({"type": "entities_updated"})
             return MigrationImportResponse(
                 action="execute",
                 validation=validation_report,
@@ -389,7 +369,7 @@ class SidestageOrchestrator:
 
             result = await export_campaign(self.campaign)
             if result.phase == "complete":
-                await self.sync_manager.broadcast({"type": "entities_updated"})
+                await self.campaign.user.send({"type": "entities_updated"})
             return result
 
         # Scenes
@@ -406,7 +386,7 @@ class SidestageOrchestrator:
                 description=request.description,
                 current_gametime=request.current_gametime
             )
-            await self.sync_manager.broadcast({"type": "scene_updated"})
+            await self.campaign.user.send({"type": "scene_updated"})
             return scene.model_dump()
 
         @self.fastapi_app.get("/v1/scenes/{scene_id}/messages")
@@ -426,20 +406,15 @@ class SidestageOrchestrator:
             This endpoint handles the user's message, creating a ChatMessage event
             and publishing it to the scene's message bus. Agent responses occur asynchronously.
             """
-            # 1. Get Scene object (Ensures it's activated)
             scene = await self.get_active_scene(request.scene_id)
             if not scene:
                 raise HTTPException(status_code=404, detail="Scene not found")
 
-            # 2. Create user message object (Logic handled by Scene factory)
-            user_msg = scene.create_message(actor_id="user", text=request.message)
-            
-            # 3. Call chat (which publishes to bus)
-            # This is now fire-and-forget regarding the agent response.
-            # Persistence and broadcasting (via _on_scene_event) will happen automatically.
-            await scene.chat(user_msg)
-            
-            return ChatResponse(user_message=user_msg)
+            event = await scene.chat(actor_id="user", text=request.message, character_id="user")
+            if event is None:
+                raise HTTPException(status_code=503, detail="Chat unavailable")
+
+            return ChatResponse(event=event.model)
 
         # --- Tracing endpoints ---
 

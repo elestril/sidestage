@@ -4,12 +4,13 @@ Auto-generated from source. Run `python scripts/generate_api_docs.py` to regener
 
 ## Modules
 
+- [sidestage.actors](sidestage.actors.md)
 - [sidestage.agent](sidestage.agent.md)
-- [sidestage.bus](sidestage.bus.md)
 - [sidestage.campaign](sidestage.campaign.md)
 - [sidestage.character](sidestage.character.md)
 - [sidestage.config](sidestage.config.md)
 - [sidestage.entities](sidestage.entities.md)
+- [sidestage.event](sidestage.event.md)
 - [sidestage.graph](sidestage.graph.md)
 - [sidestage.graph.client](sidestage.graph.client.md)
 - [sidestage.graph.entities](sidestage.graph.entities.md)
@@ -38,7 +39,6 @@ Auto-generated from source. Run `python scripts/generate_api_docs.py` to regener
 - [sidestage.schemas](sidestage.schemas.md)
 - [sidestage.server](sidestage.server.md)
 - [sidestage.storage](sidestage.storage.md)
-- [sidestage.sync](sidestage.sync.md)
 - [sidestage.time](sidestage.time.md)
 - [sidestage.tools](sidestage.tools.md)
 - [sidestage.tracing](sidestage.tracing.md)

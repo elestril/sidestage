@@ -9,7 +9,7 @@ The central coordinator for the Sidestage application.
 The Orchestrator is responsible for:
 1. Initializing the FastAPI application and routes.
 2. Managing the lifecycle of Campaigns.
-3. Handling WebSocket connections via SyncManager.
+3. Handling WebSocket connections via User actor.
 4. Routing API requests to the appropriate Campaign or Scene components.
 5. Serving the frontend static assets.
 
