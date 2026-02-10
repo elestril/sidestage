@@ -10,8 +10,10 @@ from sidestage.agent import LiteLLMAgent
 from sidestage.storage import Storage
 from sidestage.tools import WorldTools
 from sidestage.scene import Scene
-from sidestage.models import SceneModel, CharacterModel, LocationModel, ItemModel, EntityModel, EventModel, ChatMessageModel
+from sidestage.models import SceneModel, CharacterModel, LocationModel, ItemModel, EntityModel, EventModel
 from sidestage.schemas import ChatResponse, ChatRequest
+from sidestage.actors import NPCActor, User
+from sidestage.character import Character
 from sidestage.entities import entity_to_markdown, markdown_to_entity
 from sidestage.migration.parser import parse_directory
 from sidestage.graph import GraphConfig, GraphClient, connect, close
@@ -62,9 +64,13 @@ class Campaign:
         self.health = CampaignHealth()
         self.world_tools = WorldTools(storage=self.storage, graph_client=self.graph_client)
 
+        # Actor infrastructure
+        self.characters: Dict[str, Character] = {}
+        self.user = User(actor_id="user")
+
         # Ensure LLM is available before proceeding
         self._ensure_llm_availability()
-        
+
         self.agent = self.create_agent()
 
         # Ensure default scene and characters exist
@@ -305,11 +311,33 @@ class Campaign:
 
     async def shutdown(self) -> None:
         """Shut down the campaign, closing graph connections."""
+        self.characters = {}
         if self.graph_client is not None:
             await close(self.graph_client)
             self.graph_client = None
             self.world_tools.graph_client = None
             logger.info("Graph connection closed for campaign '%s'", self.name)
+
+    # --- Character Registry ---
+
+    def get_character(self, model: CharacterModel) -> Character:
+        """Get or create a Character instance for the given model."""
+        if model.id in self.characters:
+            return self.characters[model.id]
+        actor = self._resolve_actor(model)
+        char = Character(model=model, actor=actor)
+        self.characters[model.id] = char
+        return char
+
+    def _resolve_actor(self, model: CharacterModel):
+        """Determine which Actor controls this character."""
+        if model.owner == "npc":
+            return NPCActor(
+                actor_id=f"agent:{model.id}",
+                system_actor=model.system_actor,
+            )
+        else:
+            return self.user
 
     # --- Campaign Logic Methods ---
 
@@ -465,12 +493,12 @@ class Campaign:
             self.storage.add_scene(scene)
         return scene
 
-    def get_scene_messages(self, scene_id: str) -> Optional[List[ChatMessageModel]]:
-        """Get the message history for a specific scene."""
+    def get_scene_events(self, scene_id: str) -> Optional[List[str]]:
+        """Get the event IDs for a specific scene."""
         scene_schema = self.storage.get_scene(scene_id)
         if not scene_schema:
             return None
-        return scene_schema.messages
+        return scene_schema.events
 
     def get_scene_object(self, scene_id: str) -> Optional[Scene]:
         """
