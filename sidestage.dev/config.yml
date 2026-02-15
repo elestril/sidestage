@@ -13,18 +13,12 @@ llms:
     memory_token_budget: null
     model: default
     provider: llama_cpp
-  embed:
-    api_key: sk-no-key-required
-    base_url: http://localhost:8080/v1
-    context_limit: null
-    memory_token_budget: null
-    model: embed
-    provider: llama_cpp
-loglevel: DEBUG
+logging:
+  level: INFO
 tracing:
   capture_memory_content: true
   capture_prompts: true
   capture_tool_args: true
-  enabled: true
-  max_attribute_length: 65535
+  enabled: false
+  max_attribute_length: 4096
   otlp_endpoint: http://localhost:4318

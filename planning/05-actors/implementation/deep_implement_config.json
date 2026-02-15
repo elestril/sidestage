@@ -16,7 +16,50 @@
     "section-07-frontend",
     "section-08-integration"
   ],
-  "sections_state": {},
+  "sections_state": {
+    "section-01-event-model": {
+      "status": "complete",
+      "commit_hash": "1e2a0d4",
+      "review_file": "section-01-review.md",
+      "completed_at": "2026-02-10T03:49:00.939381+00:00"
+    },
+    "section-02-actors": {
+      "status": "complete",
+      "commit_hash": "98aa2fd",
+      "review_file": "section-02-review.md",
+      "completed_at": "2026-02-10T03:56:32.601151+00:00"
+    },
+    "section-03-storage": {
+      "status": "complete",
+      "commit_hash": "096ec36",
+      "completed_at": "2026-02-10T04:30:08.028786+00:00"
+    },
+    "section-04-scene-loop": {
+      "status": "complete",
+      "commit_hash": "ab575b8",
+      "completed_at": "2026-02-10T04:40:17.553641+00:00"
+    },
+    "section-05-tracing": {
+      "status": "complete",
+      "commit_hash": "bae9e2d",
+      "completed_at": "2026-02-10T04:45:20.952974+00:00"
+    },
+    "section-06-orchestrator": {
+      "status": "complete",
+      "commit_hash": "b897fb1",
+      "completed_at": "2026-02-10T05:14:13.105667+00:00"
+    },
+    "section-07-frontend": {
+      "status": "complete",
+      "commit_hash": "13eb3fa",
+      "completed_at": "2026-02-10T05:18:48.925140+00:00"
+    },
+    "section-08-integration": {
+      "status": "complete",
+      "commit_hash": "f15d2bb",
+      "completed_at": "2026-02-10T05:29:22.090843+00:00"
+    }
+  },
   "pre_commit": {
     "present": false,
     "type": "none",

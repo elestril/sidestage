@@ -6,7 +6,7 @@ CAMPAIGN="${1:-dev}"
 
 cd $(dirname $(realpath "$0"))/../sidestage.dev
 
-if [ -f sidestage.pid]; then
+if [ -f "sidestage.pid" ]; then
   print "sidestage.pid already exists, exiting" 
   exit 0
 fi
