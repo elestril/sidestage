@@ -9,17 +9,18 @@ from sidestage.schemas import (
     SceneCreateRequest, EntityMarkdownUpdateRequest, ChatRequest,
 )
 from unittest.mock import patch
+from sidestage import config as sidestage_config
 
 
 class TestApiCompliance:
     @pytest.fixture(autouse=True)
     def setup_server(self, tmp_path: Path):
         self.campaign_name = "test_compliance_campaign"
+        sidestage_config.init(tmp_path)
 
         with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
             self.orchestrator = SidestageOrchestrator(
                 campaign_name=self.campaign_name,
-                base_dir=tmp_path
             )
 
         self.client = TestClient(self.orchestrator.fastapi_app)

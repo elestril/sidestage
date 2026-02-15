@@ -13,7 +13,7 @@ from sidestage.models import CharacterModel
 
 def _make_campaign(tmp_path: Path) -> Campaign:
     """Create a Campaign with mocked LLM availability check."""
-    with patch("sidestage.config.get", return_value=SidestageConfig()):
+    with patch("sidestage.config.get_config", return_value=SidestageConfig()):
         with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
             return Campaign(name="test", base_dir=tmp_path)
 

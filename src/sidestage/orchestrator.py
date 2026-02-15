@@ -2,7 +2,7 @@ import atexit
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union, Callable, AsyncIterator, MutableMapping
 from pathlib import Path
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, HTTPException
@@ -13,6 +13,7 @@ import json
 import asyncio
 
 from sidestage.campaign import Campaign
+from sidestage import config
 from sidestage.health import HealthStatus
 from sidestage.tracing import (
     init_tracing,
@@ -43,6 +44,8 @@ from sidestage.schemas import (
     ImportResponse,
     ChatResponse
 )
+from sidestage.scene import Scene
+from sidestage.models import EventModel
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +58,10 @@ class _LoggingASGIWrapper:
     also reach the application logger.
     """
 
-    def __init__(self, app):
+    def __init__(self, app: Any):
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: MutableMapping[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
         try:
             await self.app(scope, receive, send)
         except Exception:
@@ -78,7 +81,7 @@ class SidestageOrchestrator:
     4. Routing API requests to the appropriate Campaign or Scene components.
     5. Serving the frontend static assets.
     """
-    def __init__(self, campaign_name: str, base_dir: Optional[Path] = None):
+    def __init__(self, campaign_name: str):
         """
         Initialize the Orchestrator.
 
@@ -86,21 +89,21 @@ class SidestageOrchestrator:
             campaign_name (str): The name of the campaign to load/create.
             base_dir (Optional[Path]): The base directory for data storage. Defaults to ~/.sidestage.
         """
-        self.base_dir = base_dir or (Path.home() / ".sidestage")
-        self.pid_file = self.base_dir / "sidestage.pid"
 
         # Manage multiple campaigns
         self.campaigns: Dict[str, Campaign] = {}
         self.active_campaign_name = campaign_name
+        self.base_dir: Path = config.SIDESTAGE_DIR
 
         # Active scenes across all campaigns (scene_id -> Scene)
-        self.active_scenes: Dict[str, Any] = {}
+        self.active_scenes: Dict[str, Scene] = {}
 
         # Initialize the requested campaign
         self._load_campaign(campaign_name)
+        self._mcp_server: Any = None
 
         # Initialize FastAPI app
-        self.fastapi_app = FastAPI(
+        self.fastapi_app: FastAPI = FastAPI(
             title="Sidestage Core",
             version="0.1.0",
             lifespan=self._lifespan,
@@ -111,9 +114,8 @@ class SidestageOrchestrator:
         self._mount_frontend()
 
     @asynccontextmanager
-    async def _lifespan(self, app: FastAPI):
+    async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:
         """Write PID file on startup, init tracing, run MCP session manager, remove on shutdown."""
-        self._write_pid_file()
         self._init_tracing()
         try:
             async with self._mcp_server.session_manager.run():
@@ -123,21 +125,7 @@ class SidestageOrchestrator:
                 shutdown_tracing()
             except Exception:
                 logger.exception("Error during tracing shutdown")
-            self._remove_pid_file()
 
-    def _write_pid_file(self) -> None:
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.pid_file.write_text(str(os.getpid()))
-        atexit.register(self._remove_pid_file)
-        logger.info(f"PID {os.getpid()} written to {self.pid_file}")
-
-    def _remove_pid_file(self) -> None:
-        try:
-            if self.pid_file.exists() and self.pid_file.read_text().strip() == str(os.getpid()):
-                self.pid_file.unlink()
-                logger.info(f"PID file {self.pid_file} removed")
-        except OSError:
-            pass
 
     def _init_tracing(self) -> None:
         """Initialize the tracing subsystem with OTLP exporter."""
@@ -165,7 +153,7 @@ class SidestageOrchestrator:
         """Helper to access the currently active campaign."""
         return self.campaigns[self.active_campaign_name]
 
-    async def get_active_scene(self, scene_id: str) -> Optional[Any]:
+    async def get_active_scene(self, scene_id: str) -> Optional[Scene]:
         """
         Retrieve or activate a scene by ID.
         
@@ -176,7 +164,7 @@ class SidestageOrchestrator:
             scene_id (str): The ID of the scene.
 
         Returns:
-            Optional[Any]: The active Scene instance, or None if not found.
+            Optional[Scene]: The active Scene instance, or None if not found.
         """
         if scene_id in self.active_scenes:
             return self.active_scenes[scene_id]
@@ -224,7 +212,7 @@ class SidestageOrchestrator:
         """Define and register all FastAPI routes."""
         # WebSocket
         @self.fastapi_app.websocket("/v1/ws")
-        async def websocket_endpoint(websocket: WebSocket):
+        async def websocket_endpoint(websocket: WebSocket) -> None:
             user = self.campaign.user
             await user.connect(websocket)
             try:
@@ -236,12 +224,12 @@ class SidestageOrchestrator:
 
         # Entities
         @self.fastapi_app.get("/v1/entities")
-        async def list_entities():
+        async def list_entities() -> List[Dict[str, Any]]:
             """List all entities in the active campaign."""
             return await self.campaign.list_entities()
 
         @self.fastapi_app.get("/v1/entities/{entity_id}/markdown")
-        async def get_entity_markdown(entity_id: str):
+        async def get_entity_markdown(entity_id: str) -> Dict[str, str]:
             """Get the markdown body of a specific entity."""
             markdown = await self.campaign.get_entity_markdown(entity_id)
             if not markdown:
@@ -249,13 +237,13 @@ class SidestageOrchestrator:
             return {"markdown": markdown}
 
         @self.fastapi_app.post("/v1/entities/export")
-        async def export_entities():
+        async def export_entities() -> Dict[str, str]:
             """Export all entities to the file system."""
             count = await self.campaign.export_entities()
             return {"message": f"Exported {count} entities to disk"}
 
         @self.fastapi_app.post("/v1/entities/import")
-        async def import_entities():
+        async def import_entities() -> Dict[str, str]:
             """Import entities from the file system, updating the database."""
             count = await self.campaign.import_entities()
             if count > 0:
@@ -263,7 +251,7 @@ class SidestageOrchestrator:
             return {"message": f"Successfully imported {count} entities."}
 
         @self.fastapi_app.post("/v1/entities/{entity_id}/markdown")
-        async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest):
+        async def update_entity_markdown(entity_id: str, request: EntityMarkdownUpdateRequest) -> Dict[str, str]:
             """Update the markdown body of an entity."""
             success = await self.campaign.update_entity_markdown(entity_id, request.markdown)
             if not success:
@@ -272,7 +260,7 @@ class SidestageOrchestrator:
             return {"status": "ok"}
 
         @self.fastapi_app.post("/v1/entities/{entity_id}")
-        async def update_entity(entity_id: str, data: Dict[str, Any]):
+        async def update_entity(entity_id: str, data: Dict[str, Any]) -> Dict[str, str]:
             """Update arbitrary fields of an entity."""
             success = await self.campaign.update_entity(entity_id, data)
             if not success:
@@ -281,7 +269,7 @@ class SidestageOrchestrator:
             return {"status": "ok"}
 
         @self.fastapi_app.post("/v1/campaign/reload-defaults")
-        async def reload_defaults():
+        async def reload_defaults() -> Dict[str, str]:
             """Reload default characters and prompts from the data directory."""
             self.campaign.reload_defaults()
             await self.campaign.user.send({"type": "entities_updated"})
@@ -374,12 +362,12 @@ class SidestageOrchestrator:
 
         # Scenes
         @self.fastapi_app.get("/v1/scenes")
-        async def list_scenes():
+        async def list_scenes() -> List[Dict[str, Any]]:
             """List all scenes."""
             return await self.campaign.list_scenes()
 
         @self.fastapi_app.post("/v1/scenes")
-        async def create_scene(request: SceneCreateRequest):
+        async def create_scene(request: SceneCreateRequest) -> Dict[str, Any]:
             """Create a new scene."""
             scene = await self.campaign.create_scene(
                 name=request.name,
@@ -390,7 +378,7 @@ class SidestageOrchestrator:
             return scene.model_dump()
 
         @self.fastapi_app.get("/v1/scenes/{scene_id}/messages")
-        async def get_scene_messages(scene_id: str):
+        async def get_scene_messages(scene_id: str) -> List[EventModel]:
             """Get message history for a scene."""
             messages = self.campaign.get_scene_messages(scene_id)
             if messages is None:
@@ -399,7 +387,7 @@ class SidestageOrchestrator:
 
         # Chat
         @self.fastapi_app.post("/v1/chat", response_model=ChatResponse)
-        async def chat_endpoint(request: ChatRequest):
+        async def chat_endpoint(request: ChatRequest) -> ChatResponse:
             """
             Send a chat message to a scene.
             
@@ -422,7 +410,7 @@ class SidestageOrchestrator:
             enabled: bool
 
         @self.fastapi_app.post("/v1/tracing/toggle")
-        async def toggle_tracing_endpoint(body: _TracingToggleRequest):
+        async def toggle_tracing_endpoint(body: _TracingToggleRequest) -> Dict[str, bool]:
             """Toggle tracing on or off."""
             enabled, error = toggle_tracing(body.enabled)
             if error is not None:
@@ -430,10 +418,10 @@ class SidestageOrchestrator:
             return {"tracing_enabled": enabled}
 
         @self.fastapi_app.get("/v1/tracing/status")
-        async def tracing_status():
+        async def tracing_status() -> Dict[str, Any]:
             """Return current tracing status."""
             from sidestage import config as sidestage_config
-            trace_config = sidestage_config.get().tracing
+            trace_config = sidestage_config.get_config().tracing
 
             return {
                 "enabled": get_tracing_enabled(),
@@ -443,23 +431,23 @@ class SidestageOrchestrator:
 
         # Redirect root to /sidestage
         @self.fastapi_app.get("/")
-        async def root_redirect():
+        async def root_redirect() -> RedirectResponse:
             return RedirectResponse(url="/sidestage")
 
         # Redirect legacy routes
         @self.fastapi_app.get("/scenes")
         @self.fastapi_app.get("/scenes/{rest:path}")
-        async def scenes_redirect(rest: str = ""):
+        async def scenes_redirect(rest: str = "") -> RedirectResponse:
             return RedirectResponse(url=f"/sidestage/scenes/{rest}")
 
         @self.fastapi_app.get("/entities")
         @self.fastapi_app.get("/entities/{rest:path}")
-        async def entities_redirect(rest: str = ""):
+        async def entities_redirect(rest: str = "") -> RedirectResponse:
             return RedirectResponse(url=f"/sidestage/entities/{rest}")
 
         # UI Catch-all for SPA routing
         @self.fastapi_app.get("/sidestage/{full_path:path}")
-        async def ui_catch_all(full_path: str):
+        async def ui_catch_all(full_path: str) -> FileResponse:
             dist_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
             
             # Check if it's a direct file request (e.g. assets)

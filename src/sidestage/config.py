@@ -1,13 +1,13 @@
-import logging
 import yaml
+import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Annotated, Any
 from pydantic import BaseModel, Field
 
 from sidestage.graph import GraphConfig
+from sidestage.logging import initLogging, LogConfig
 
-logger = logging.getLogger(__name__)
-
+SIDESTAGE_DIR: Path = Path("~/.sidestage")
 
 class LLMConfig(BaseModel):
     """Configuration for a single LLM endpoint."""
@@ -31,7 +31,10 @@ class TraceConfig(BaseModel):
 
 class SidestageConfig(BaseModel):
     """Configuration model for Sidestage settings."""
-    loglevel: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    logging: LogConfig = Field(
+        default_factory=LogConfig, 
+        description="Logging configuration"
+    )
 
     llms: Dict[str, LLMConfig] = Field(
         default_factory=lambda: {"default": LLMConfig()},
@@ -44,17 +47,23 @@ class SidestageConfig(BaseModel):
     # Tracing Configuration
     tracing: TraceConfig = Field(default_factory=TraceConfig, description="Tracing configuration")
 
-
 _instance: Optional[SidestageConfig] = None
 
 
-def init(sidestage_dir: Path) -> SidestageConfig:
+
+def get_config() -> SidestageConfig:
     """Load config from sidestage_dir/config.yml and set as global singleton.
 
     Creates the config file with defaults if it doesn't exist.
     """
     global _instance
-    config_path = sidestage_dir / "config.yml"
+    if _instance is not None:
+        return _instance
+    if SIDESTAGE_DIR is None:
+        raise ValueError("SIDESTAGE_DIR not set")
+
+    config_path = SIDESTAGE_DIR / "config.yml"
+    logger = logging.getLogger(__name__)
 
     if config_path.exists():
         with open(config_path, "r") as f:
@@ -66,8 +75,10 @@ def init(sidestage_dir: Path) -> SidestageConfig:
                 config = SidestageConfig()
     else:
         logger.info(f"Creating default configuration at: {config_path}")
-        sidestage_dir.mkdir(parents=True, exist_ok=True)
+        SIDESTAGE_DIR.mkdir(parents=True, exist_ok=True)
         config = SidestageConfig()
+
+    initLogging(SIDESTAGE_DIR, config.logging)
 
     # Persist the config (fills in defaults for new fields)
     with open(config_path, "w") as f:
@@ -76,13 +87,10 @@ def init(sidestage_dir: Path) -> SidestageConfig:
     _instance = config
     return config
 
-
-def get() -> SidestageConfig:
-    """Get the global config singleton.
-
-    Raises:
-        RuntimeError: If init() has not been called yet.
-    """
-    if _instance is None:
-        raise RuntimeError("SidestageConfig not initialized. Call config.init() first.")
-    return _instance
+def init(sidestage_dir: Path) -> SidestageConfig:
+    """Initialize the configuration with a specific directory."""
+    global SIDESTAGE_DIR, _instance
+    SIDESTAGE_DIR = sidestage_dir
+    _instance = None
+    # Force reload
+    return get_config()

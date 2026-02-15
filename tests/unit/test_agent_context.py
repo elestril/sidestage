@@ -1,40 +1,23 @@
-"""Unit tests for agent context injection and AgentActor memory integration."""
+"""Unit tests for agent context injection and NPCActor memory integration."""
 
 import copy
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from sidestage.agent import LiteLLMAgent, AgentResponse
-from sidestage.character import AgentActor, Character
-from sidestage.models import CharacterModel, ChatMessageModel
+from sidestage.actors import NPCActor
+from sidestage.character import Character
+from sidestage.event import Event
+from sidestage.models import CharacterModel, EventModel, EventType
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _make_scene_logic(**overrides: Any) -> MagicMock:
-    """Build a MagicMock scene_logic with sensible defaults."""
-    sl = MagicMock()
-    sl.agent.model = "openai/test-model"
-    sl.agent.api_base = "http://localhost:8080/v1"
-    sl.agent.api_key = "sk-test"
-    sl.agent.tools = []
-    sl.agent.debug_mode = False
-    sl.messages = []
-    sl.queue.put = AsyncMock()
-    sl.create_message = lambda actor_id, text, character_id: ChatMessageModel(
-        id="reply_1", name="Reply", body=text,
-        actor_id=actor_id, character_id=character_id, message=text,
-        scene_id="scene_01", gametime=0, walltime="now",
-    )
-    for k, v in overrides.items():
-        setattr(sl, k, v)
-    return sl
-
 
 def _mock_completion_response(content: str | None = "Hello", tool_calls: list[Any] | None = None) -> MagicMock:
     """Build a mock litellm.acompletion response."""
@@ -46,6 +29,25 @@ def _mock_completion_response(content: str | None = "Hello", tool_calls: list[An
     resp = MagicMock()
     resp.choices = [choice]
     return resp
+
+
+def _make_event(actor_id: str = "user", body: str = "Hello", scene_id: str = "scene_01") -> Event:
+    """Build an Event with a mock scene for testing NPCActor.process()."""
+    model = EventModel(
+        id="m1",
+        name="Msg",
+        body=body,
+        event_type=EventType.CHAT_MESSAGE,
+        scene_id=scene_id,
+        gametime=0,
+        walltime=datetime.now(timezone.utc),
+        actor_id=actor_id,
+        character_id="user",
+    )
+    event = Event(model=model)
+    event.scene = MagicMock()
+    event.scene.process = AsyncMock()
+    return event
 
 
 # ---------------------------------------------------------------------------
@@ -174,33 +176,31 @@ class TestArunContextParameter:
 
 
 # ---------------------------------------------------------------------------
-# AgentActor memory integration tests
+# NPCActor memory integration tests
 # ---------------------------------------------------------------------------
 
 
-class TestAgentActorMemoryIntegration:
-    """Tests for AgentActor memory dependencies and context assembly."""
+class TestNPCActorMemoryIntegration:
+    """Tests for NPCActor memory dependencies and context assembly."""
 
-    def test_backwards_compatible_without_memory_args(self) -> None:
-        """AgentActor still works without memory-related arguments."""
-        sl = _make_scene_logic()
-        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(char, sl)
+    def test_defaults_without_memory_args(self) -> None:
+        """NPCActor works without memory-related arguments."""
+        actor = NPCActor(actor_id="agent:c1")
         assert actor.graph_client is None
         assert actor.embed_config is None
         assert actor.health is None
         assert actor.scene_id is None
 
     def test_accepts_memory_kwargs(self) -> None:
-        """AgentActor stores memory-related keyword arguments."""
-        sl = _make_scene_logic()
-        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
+        """NPCActor stores memory-related keyword arguments."""
         mock_client = MagicMock()
         mock_config = MagicMock()
         mock_health = MagicMock()
 
-        actor = AgentActor(
-            char, sl,
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
             graph_client=mock_client,
             embed_config=mock_config,
             health=mock_health,
@@ -217,17 +217,17 @@ class TestAgentActorMemoryIntegration:
 
     @pytest.mark.anyio
     @patch("sidestage.memory.context.assemble_context", new_callable=AsyncMock)
-    async def test_on_event_assembles_context_when_graph_available(self, mock_assemble: AsyncMock) -> None:
-        """on_event calls assemble_context when graph_client is available."""
+    async def test_process_assembles_context_when_graph_available(self, mock_assemble: AsyncMock) -> None:
+        """process() calls assemble_context when graph_client is available."""
         from sidestage.memory.models import ContextResult
         mock_assemble.return_value = ContextResult(
             memory_text="## World\n- War rages", chat_text="[c2]: Hello", token_estimate=50,
         )
 
-        sl = _make_scene_logic()
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(
-            char, sl,
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
             graph_client=MagicMock(),
             scene_id="scene_01",
             present_character_ids=["c2"],
@@ -236,12 +236,8 @@ class TestAgentActorMemoryIntegration:
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi"))
 
-        user_msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_01", gametime=0, walltime="now",
-        )
-        await actor.on_event(user_msg)
+        event = _make_event()
+        await actor.process(event)
 
         mock_assemble.assert_awaited_once()
         # arun should be called with the assembled context
@@ -250,20 +246,15 @@ class TestAgentActorMemoryIntegration:
         assert context_val == "## World\n- War rages\n\n[c2]: Hello"
 
     @pytest.mark.anyio
-    async def test_on_event_no_context_without_graph(self) -> None:
-        """on_event passes context=None when graph_client is not available."""
-        sl = _make_scene_logic()
+    async def test_process_no_context_without_graph(self) -> None:
+        """process() passes context=None when graph_client is not available."""
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(char, sl)  # No graph_client
+        actor = NPCActor(actor_id="agent:c1", character=char)  # No graph_client
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi"))
 
-        user_msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_01", gametime=0, walltime="now",
-        )
-        await actor.on_event(user_msg)
+        event = _make_event()
+        await actor.process(event)
 
         actor.agent.arun.assert_awaited_once()
         call_args = actor.agent.arun.call_args
@@ -273,42 +264,46 @@ class TestAgentActorMemoryIntegration:
 
     @pytest.mark.anyio
     @patch("sidestage.memory.context.assemble_context", new_callable=AsyncMock)
-    async def test_on_event_graceful_degradation_on_context_failure(self, mock_assemble: AsyncMock) -> None:
-        """on_event proceeds without context if assemble_context raises."""
+    async def test_process_graceful_degradation_on_context_failure(self, mock_assemble: AsyncMock) -> None:
+        """process() proceeds without context if assemble_context raises."""
         mock_assemble.side_effect = Exception("graph down")
 
-        sl = _make_scene_logic()
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(
-            char, sl,
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
             graph_client=MagicMock(),
             scene_id="scene_01",
         )
         actor.agent = MagicMock()
         actor.agent.arun = AsyncMock(return_value=MagicMock(content="Hi anyway"))
 
-        user_msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_01", gametime=0, walltime="now",
-        )
-        await actor.on_event(user_msg)
+        event = _make_event()
+        await actor.process(event)
 
         # Agent should still be called (graceful degradation)
         actor.agent.arun.assert_awaited_once()
 
     def test_memory_tools_added_when_graph_available(self) -> None:
         """MemoryTools methods are added to agent tools when graph_client is set."""
-        sl = _make_scene_logic()
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(
-            char, sl,
+        campaign = MagicMock()
+        campaign.get_llm_config.return_value = MagicMock(
+            provider="llama_cpp", model="test-model",
+            base_url="http://localhost:8080/v1", api_key="sk-test",
+        )
+
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
+            scene_logic=campaign,
             graph_client=MagicMock(),
             embed_config=MagicMock(),
             health=MagicMock(),
             scene_id="scene_01",
         )
-        # Agent should have memory tools
+        actor._update_prompt()
+
         assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" in tool_names
@@ -316,9 +311,20 @@ class TestAgentActorMemoryIntegration:
 
     def test_no_memory_tools_without_graph(self) -> None:
         """No memory tools added when graph_client is None."""
-        sl = _make_scene_logic()
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(char, sl)  # No graph_client
+        campaign = MagicMock()
+        campaign.get_llm_config.return_value = MagicMock(
+            provider="llama_cpp", model="test-model",
+            base_url="http://localhost:8080/v1", api_key="sk-test",
+        )
+
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
+            scene_logic=campaign,
+        )  # No graph_client
+        actor._update_prompt()
+
         assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" not in tool_names
@@ -326,14 +332,23 @@ class TestAgentActorMemoryIntegration:
 
     def test_no_memory_tools_without_health(self) -> None:
         """No memory tools added when health is None (even if graph_client is set)."""
-        sl = _make_scene_logic()
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        actor = AgentActor(
-            char, sl,
+        campaign = MagicMock()
+        campaign.get_llm_config.return_value = MagicMock(
+            provider="llama_cpp", model="test-model",
+            base_url="http://localhost:8080/v1", api_key="sk-test",
+        )
+
+        actor = NPCActor(
+            actor_id="agent:c1",
+            character=char,
+            scene_logic=campaign,
             graph_client=MagicMock(),
             scene_id="scene_01",
             health=None,  # health is None
         )
+        actor._update_prompt()
+
         assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" not in tool_names
@@ -341,65 +356,45 @@ class TestAgentActorMemoryIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Character memory deps forwarding tests
+# Character wrapper tests
 # ---------------------------------------------------------------------------
 
 
-class TestCharacterMemoryDeps:
-    """Tests for Character forwarding memory dependencies to AgentActor."""
+class TestCharacterWrapper:
+    """Tests for the new Character(model, actor) wrapper."""
 
-    def test_backwards_compatible_without_memory_args(self) -> None:
-        """Character still works without memory-related arguments."""
-        sl = _make_scene_logic()
+    def test_character_stores_model_and_actor(self) -> None:
+        """Character stores model and actor references."""
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        logic = Character(char, sl)
-        assert logic.graph_client is None
-
-    def test_stores_memory_kwargs(self) -> None:
-        """Character stores memory-related keyword arguments."""
-        sl = _make_scene_logic()
-        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        mock_client = MagicMock()
-
-        logic = Character(
-            char, sl,
-            graph_client=mock_client,
-            embed_config=MagicMock(),
-            health=MagicMock(),
-            scene_id="scene_01",
-            present_character_ids=["c2"],
-            context_limit=8192,
-        )
-        assert logic.graph_client is mock_client
-        assert logic.scene_id == "scene_01"
+        actor = NPCActor(actor_id="agent:c1", character=char)
+        logic = Character(model=char, actor=actor)
+        assert logic.data is char
+        assert logic.actor is actor
 
     @pytest.mark.anyio
-    async def test_activate_forwards_memory_deps_to_actor(self) -> None:
-        """activate() forwards memory dependencies to AgentActor."""
-        sl = _make_scene_logic()
+    async def test_activate_calls_update_prompt_for_npc(self) -> None:
+        """activate() calls _update_prompt() for NPCActor."""
         char = CharacterModel(id="c1", name="Alice", body="I am Alice")
-        mock_client = MagicMock()
-        mock_config = MagicMock()
-        mock_health = MagicMock()
-
-        logic = Character(
-            char, sl,
-            graph_client=mock_client,
-            embed_config=mock_config,
-            health=mock_health,
-            scene_id="scene_01",
-            present_character_ids=["c2"],
-            context_limit=8192,
+        campaign = MagicMock()
+        campaign.get_llm_config.return_value = MagicMock(
+            provider="llama_cpp", model="test-model",
+            base_url="http://localhost:8080/v1", api_key="sk-test",
         )
-        await logic.activate()
 
-        assert logic.actor is not None
-        assert logic.actor.graph_client is mock_client
-        assert logic.actor.embed_config is mock_config
-        assert logic.actor.health is mock_health
-        assert logic.actor.scene_id == "scene_01"
-        assert logic.actor.present_character_ids == ["c2"]
-        assert logic.actor.context_limit == 8192
+        actor = NPCActor(actor_id="agent:c1", character=char, scene_logic=campaign)
+        logic = Character(model=char, actor=actor)
+        await logic.activate()
+        assert actor.agent is not None
+
+    @pytest.mark.anyio
+    async def test_deactivate_clears_agent(self) -> None:
+        """deactivate() clears the NPCActor agent."""
+        char = CharacterModel(id="c1", name="Alice", body="I am Alice")
+        actor = NPCActor(actor_id="agent:c1", character=char)
+        actor.agent = MagicMock()
+        logic = Character(model=char, actor=actor)
+        await logic.deactivate()
+        assert actor.agent is None
 
 
 # ---------------------------------------------------------------------------

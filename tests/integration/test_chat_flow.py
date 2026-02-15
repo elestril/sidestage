@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from sidestage.orchestrator import SidestageOrchestrator
 from sidestage.agent import AgentResponse
+from sidestage import config as sidestage_config
 
 
 @pytest.fixture
@@ -37,11 +38,9 @@ def mock_agent():
 @pytest.fixture
 def orchestrator(tmp_path: Path) -> SidestageOrchestrator:
     """Create an Orchestrator with mocked LLM availability check."""
+    sidestage_config.init(tmp_path)
     with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
-        orch = SidestageOrchestrator(
-            campaign_name="test_chat_flow",
-            base_dir=tmp_path,
-        )
+        orch = SidestageOrchestrator(campaign_name="test_chat_flow")
     return orch
 
 

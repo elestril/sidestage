@@ -17,10 +17,11 @@ class TestServerUnmocked:
         alive between requests, allowing background tasks (bus worker,
         agent LLM calls) to complete.
         """
+        from sidestage import config as sidestage_config
+        sidestage_config.init(tmp_path)
         self.campaign_name = "unmocked_campaign"
         self.orchestrator = SidestageOrchestrator(
             campaign_name=self.campaign_name,
-            base_dir=tmp_path
         )
         with TestClient(self.orchestrator.fastapi_app) as client:
             self.client = client
@@ -41,37 +42,36 @@ class TestServerUnmocked:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "user_message" in data
+        assert "event" in data
 
-        # Agent responses are async (fire-and-forget via the bus).
+        # Agent responses are async (fire-and-forget via the event queue).
         # Poll storage until at least one agent reply appears.
         deadline = time.time() + 15
-        scene = None
+        events = []
         while time.time() < deadline:
-            scene = self.orchestrator.campaign.storage.get_scene("campaign_planning")
-            if scene and len(scene.messages) >= 2:
+            events = self.orchestrator.campaign.storage.list_events_by_scene("campaign_planning")
+            if len(events) >= 2:
                 break
             time.sleep(0.5)
 
-        assert scene is not None
-        assert len(scene.messages) >= 2  # User msg + Agent msg
+        assert len(events) >= 2  # User msg + Agent msg
 
-        last_msg = scene.messages[-1]
-        assert last_msg.actor_id is not None
-        assert last_msg.actor_id.startswith("agent")
-        content = last_msg.message
+        last_evt = events[-1]
+        assert last_evt.actor_id is not None
+        assert last_evt.actor_id.startswith("agent")
+        content = last_evt.body
 
         print(f"Received response: {content}")
         assert "sausage" in content.lower()
 
     def _wait_stable(self, scene_id: str, min_messages: int, timeout: float = 30) -> int:
-        """Wait until the message count reaches min_messages and stops changing."""
+        """Wait until the event count reaches min_messages and stops changing."""
         deadline = time.time() + timeout
         last_count = 0
         stable_since = None
         while time.time() < deadline:
-            scene = self.orchestrator.campaign.storage.get_scene(scene_id)
-            count = len(scene.messages) if scene else 0
+            events = self.orchestrator.campaign.storage.list_events_by_scene(scene_id)
+            count = len(events)
             if count >= min_messages:
                 if count != last_count:
                     last_count = count

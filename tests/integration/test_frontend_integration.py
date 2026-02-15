@@ -4,10 +4,11 @@ from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
 from pathlib import Path
 from unittest.mock import patch
+from sidestage import config as sidestage_config
 
-# Skip if backend dependencies like llama_cpp are problematic, but here we use TestClient so it's fine 
+# Skip if backend dependencies like llama_cpp are problematic, but here we use TestClient so it's fine
 # as long as we mock or if the real one works.
-# The previous test used `is_backend_up` for the real backend, but here we are testing the FastAPI app logic 
+# The previous test used `is_backend_up` for the real backend, but here we are testing the FastAPI app logic
 # which runs in-process with TestClient.
 
 class TestFrontendIntegration:
@@ -19,14 +20,11 @@ class TestFrontendIntegration:
         Since we are running tests from the project root, it should find it if we don't mess up paths.
         """
         self.campaign_name = "integration_test_campaign"
-        # We need to make sure the orchestrator finds the real frontend/out
-        # The orchestrator uses __file__ relative path. 
-        # Since we are importing SidestageOrchestrator, its __file__ should be correct relative to the project.
-        
+        sidestage_config.init(tmp_path)
+
         with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
             self.orchestrator = SidestageOrchestrator(
                 campaign_name=self.campaign_name,
-                base_dir=tmp_path
             )
         self.client = TestClient(self.orchestrator.fastapi_app)
 

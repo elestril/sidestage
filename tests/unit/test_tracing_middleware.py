@@ -117,7 +117,7 @@ class TestAddTraceEvent:
     def test_truncates_long_strings(self):
         """String values longer than max_attribute_length are truncated with '[truncated]' suffix."""
         # Set a short max_attribute_length for testing
-        cfg = sidestage_config.get()
+        cfg = sidestage_config.get_config()
         cfg.tracing.max_attribute_length = 10
 
         provider, exporter = _setup_provider()
@@ -135,7 +135,7 @@ class TestAddTraceEvent:
 
     def test_skips_prompt_events_when_disabled(self):
         """When capture_prompts=False, events named 'gen_ai.prompt' are not added."""
-        cfg = sidestage_config.get()
+        cfg = sidestage_config.get_config()
         cfg.tracing.capture_prompts = False
 
         provider, exporter = _setup_provider()
@@ -152,7 +152,7 @@ class TestAddTraceEvent:
 
     def test_skips_tool_events_when_disabled(self):
         """When capture_tool_args=False, events named 'tool.arguments' are not added."""
-        cfg = sidestage_config.get()
+        cfg = sidestage_config.get_config()
         cfg.tracing.capture_tool_args = False
 
         provider, exporter = _setup_provider()
@@ -169,7 +169,7 @@ class TestAddTraceEvent:
 
     def test_skips_memory_events_when_disabled(self):
         """When capture_memory_content=False, events named 'memory.content' are not added."""
-        cfg = sidestage_config.get()
+        cfg = sidestage_config.get_config()
         cfg.tracing.capture_memory_content = False
 
         provider, exporter = _setup_provider()

@@ -4,13 +4,15 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
 from sidestage.orchestrator import SidestageOrchestrator
 from sidestage.agent import AgentResponse
+from sidestage import config as sidestage_config
 
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
     campaign_name = "test_integration"
+    sidestage_config.init(tmp_path)
 
     with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
-        orchestrator = SidestageOrchestrator(campaign_name=campaign_name, base_dir=tmp_path)
+        orchestrator = SidestageOrchestrator(campaign_name=campaign_name)
 
     return TestClient(orchestrator.fastapi_app)
 

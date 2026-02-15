@@ -8,8 +8,8 @@ def test_logging_to_campaign_server_log(tmp_path: Path):
     os.chdir(tmp_path)
     
     campaign_name = "test_campaign"
-    campaign_dir = tmp_path / ".sidestage" / campaign_name
-    log_file = campaign_dir / "server.log"
+    sidestage_dir = tmp_path / ".sidestage"
+    log_file = sidestage_dir / "server.log"
     
     project_root = Path(__file__).parent.parent.parent
     src_dir = project_root / "src"
@@ -30,11 +30,7 @@ base_dir = Path("{tmp_path}") / ".sidestage"
 sidestage_config.init(base_dir)
 
 with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
-    # Initialize orchestrator with a custom base_dir
-    orchestrator = SidestageOrchestrator(
-        campaign_name="{campaign_name}",
-        base_dir=Path("{tmp_path}") / ".sidestage"
-    )
+    orchestrator = SidestageOrchestrator(campaign_name="{campaign_name}")
 
 logger = logging.getLogger("test_logger")
 logger.info("Integration test message in campaign dir")

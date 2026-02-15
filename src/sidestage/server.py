@@ -1,3 +1,4 @@
+import atexit
 import argparse
 import os
 import sys
@@ -6,6 +7,30 @@ import uvicorn
 from pathlib import Path
 from sidestage.orchestrator import SidestageOrchestrator
 from sidestage import config
+from typing import Optional
+
+_pid_file: Optional[Path]
+def _create_pid_file():
+  global _pid_file
+  _pid_file = config.SIDESTAGE_DIR / "sidestage.pid"
+  if _pid_file.exists():
+    raise RuntimeError(f"PID file {_pid_file} already exists.")
+  _pid_file.write_text(str(os.getpid()))
+  atexit.register(_remove_pid_file)
+  logging.info(f"PID {os.getpid()} written to {_pid_file}")
+
+def _remove_pid_file():
+  global _pid_file
+  if type(_pid_file)  is not Path:
+     return
+  try:
+    if _pid_file.exists() and _pid_file.read_text().strip() == str(os.getpid()):
+      _pid_file.unlink()
+      _pid_file = None
+      logging.info(f"PID file {_pid_file} removed")
+  except OSError as e:
+      logging.error(f"Cannot remove PID file{_pid_file}: {e}")
+    
 
 # Global app instance for Uvicorn reload support
 def get_app():
@@ -20,18 +45,12 @@ def get_app():
         FastAPI: The initialized FastAPI application.
     """
     campaign = os.getenv("SIDESTAGE_CAMPAIGN")
-    sidestage_dir = os.getenv("SIDESTAGE_DIR")
+    config.SIDESTAGE_DIR = Path(os.getenv("SIDESTAGE_DIR"))
+
     if not campaign:
         return None
 
-    base_dir = Path(sidestage_dir) if sidestage_dir else Path.home() / ".sidestage"
-
-    cfg = config.init(base_dir)
-    logging.basicConfig(
-        level=getattr(logging, cfg.loglevel.upper(), logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-    orchestrator = SidestageOrchestrator(campaign_name=campaign, base_dir=base_dir)
+    orchestrator = SidestageOrchestrator(campaign_name=campaign)
     return orchestrator.fastapi_app
 
 def main():
@@ -54,15 +73,15 @@ def main():
     # Set environment variable so the reloaded process knows which campaign to use
     os.environ["SIDESTAGE_CAMPAIGN"] = args.campaign
     os.environ["SIDESTAGE_DIR"] = args.sidestage_dir
+    config.SIDESTAGE_DIR = Path(args.sidestage_dir)
 
-    # Load config early so we can read the log level for the main process
-    cfg = config.init(Path(args.sidestage_dir))
-    logging.basicConfig(
-        level=getattr(logging, cfg.loglevel.upper(), logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    config.SIDESTAGE_DIR.mkdir(parents=True, exist_ok=True)
+    _create_pid_file()
+
+    # Load config early to initialize logging for the main process
+    config.get_config()
+
     logger = logging.getLogger(__name__)
-
     # Start the AgentOS server using the import string and factory mode to enable reload
     logger.info(f"Starting Sidestage Server on {args.host}:{args.port} with reload enabled...")
     logger.info(f"Campaign data: {os.path.abspath(os.path.join(args.sidestage_dir, args.campaign))}")

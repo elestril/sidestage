@@ -25,7 +25,10 @@ from sidestage.orchestrator import SidestageOrchestrator
 @pytest.fixture
 def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
     """Create a SidestageOrchestrator with mocked Campaign dependencies."""
-    with patch("sidestage.orchestrator.Campaign") as MockCampaign:
+    with (
+        patch("sidestage.orchestrator.Campaign") as MockCampaign,
+        patch("sidestage.orchestrator.config.SIDESTAGE_DIR", tmp_path),
+    ):
         mock_campaign = MagicMock()
         mock_campaign.health = CampaignHealth()
         mock_campaign.campaign_dir = tmp_path
@@ -35,7 +38,7 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
         mock_campaign.user.send = AsyncMock()
         MockCampaign.return_value = mock_campaign
 
-        orch = SidestageOrchestrator("test_campaign", base_dir=tmp_path)
+        orch = SidestageOrchestrator("test_campaign")
         return orch
 
 

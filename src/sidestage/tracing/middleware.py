@@ -49,7 +49,7 @@ def add_trace_event(name: str, attributes: dict[str, Any] | None = None) -> None
     if not span.is_recording():
         return
 
-    cfg = sidestage_config.get().tracing
+    cfg = sidestage_config.get_config().tracing
 
     # Check capture flags
     if name.startswith(("gen_ai.prompt", "gen_ai.completion")) and not cfg.capture_prompts:

@@ -4,6 +4,7 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from sidestage.orchestrator import SidestageOrchestrator
+from sidestage import config as sidestage_config
 from unittest.mock import patch
 
 
@@ -12,11 +13,9 @@ class TestWebSocketIntegration:
     @pytest.fixture
     def client(self, tmp_path: Path) -> TestClient:
         campaign_name = "test_ws_campaign"
+        sidestage_config.init(tmp_path)
         with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
-            orchestrator = SidestageOrchestrator(
-                campaign_name=campaign_name,
-                base_dir=tmp_path
-            )
+            orchestrator = SidestageOrchestrator(campaign_name=campaign_name)
         return TestClient(orchestrator.fastapi_app)
 
     def test_websocket_broadcast_on_entity_update(self, client: TestClient):

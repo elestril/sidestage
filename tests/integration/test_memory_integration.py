@@ -5,9 +5,10 @@ from typing import Any
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from sidestage.models import SceneModel, CharacterModel, ChatMessageModel
+from sidestage.models import SceneModel, CharacterModel, EventModel, EventType
 from sidestage.scene import Scene
-from sidestage.character import Character, AgentActor
+from sidestage.actors import NPCActor
+from sidestage.character import Character
 from sidestage.agent import LiteLLMAgent
 
 
@@ -36,15 +37,21 @@ def _make_character(**overrides: Any) -> CharacterModel:
     return CharacterModel(**defaults)  # type: ignore[arg-type]
 
 
-def _make_agent() -> MagicMock:
-    """Create a mock LiteLLMAgent with expected attributes."""
-    agent = MagicMock(spec=LiteLLMAgent)
-    agent.model = "openai/default"
-    agent.api_base = "http://localhost:8080/v1"
-    agent.api_key = "sk-no-key-required"
-    agent.tools = []
-    agent.debug_mode = False
-    return agent
+def _make_campaign() -> MagicMock:
+    """Create a mock Campaign with get_character() that returns Character instances."""
+    campaign = MagicMock()
+    campaign.get_llm_config.return_value = MagicMock(
+        provider="llama_cpp", model="test-model",
+        base_url="http://localhost:8080/v1", api_key="sk-test",
+        context_limit=4096,
+    )
+
+    def _get_character(model: CharacterModel) -> Character:
+        actor = NPCActor(actor_id=f"agent:{model.id}")
+        return Character(model=model, actor=actor)
+
+    campaign.get_character = MagicMock(side_effect=_get_character)
+    return campaign
 
 
 def _make_storage() -> MagicMock:
@@ -69,7 +76,7 @@ class TestSceneMemoryDeps:
         mock_health = MagicMock()
 
         sl = Scene(
-            _make_storage(), _make_agent(), _make_scene(),
+            _make_storage(), _make_scene(), _make_campaign(),
             graph_client=mock_client,
             embed_config=mock_config,
             health=mock_health,
@@ -81,23 +88,23 @@ class TestSceneMemoryDeps:
 
     def test_backwards_compatible_without_memory_kwargs(self) -> None:
         """Scene works without memory-related arguments."""
-        sl = Scene(_make_storage(), _make_agent(), _make_scene())
+        sl = Scene(_make_storage(), _make_scene(), _make_campaign())
         assert sl.embed_config is None
         assert sl.health is None
         assert sl.context_limit == 4096
 
 
 # ---------------------------------------------------------------------------
-# Scene.activate passes memory deps to Character
+# Scene.activate passes memory deps to NPCActor
 # ---------------------------------------------------------------------------
 
 
 class TestSceneActivation:
-    """Scene.activate() passes memory dependencies to Character."""
+    """Scene.activate() passes memory dependencies to NPCActor."""
 
     @pytest.mark.anyio
-    async def test_activate_passes_graph_client_to_character_logic(self) -> None:
-        """Characters receive graph_client during scene activation."""
+    async def test_activate_passes_memory_deps_to_actor(self) -> None:
+        """NPCActors receive memory deps during scene activation."""
         mock_config = MagicMock()
         mock_health = MagicMock()
         mock_health.is_accepting_chat = True
@@ -109,7 +116,7 @@ class TestSceneActivation:
         ]
 
         sl = Scene(
-            storage, _make_agent(), _make_scene(),
+            storage, _make_scene(), _make_campaign(),
             embed_config=mock_config,
             health=mock_health,
             context_limit=8192,
@@ -119,21 +126,23 @@ class TestSceneActivation:
         await sl.activate()
 
         for char_logic in sl.characters.values():
-            assert char_logic.graph_client is None  # No graph_client on Scene
-            assert char_logic.embed_config is mock_config
-            assert char_logic.health is mock_health
-            assert char_logic.context_limit == 8192
+            actor = char_logic.actor
+            assert isinstance(actor, NPCActor)
+            assert actor.graph_client is None  # No graph_client on Scene
+            assert actor.embed_config is mock_config
+            assert actor.health is mock_health
+            assert actor.context_limit == 8192
 
     @pytest.mark.anyio
     async def test_activate_passes_scene_id_and_present_characters(self) -> None:
-        """Characters receive scene_id and the full list of present character IDs."""
+        """NPCActors receive scene_id and the full list of present character IDs."""
         storage = _make_storage()
         alice = _make_character(id="char_alice")
         bob = _make_character(id="char_bob", name="Bob", body="A sly rogue.")
         storage.list_characters.return_value = [alice, bob]
 
         sl = Scene(
-            storage, _make_agent(), _make_scene(id="scene_tavern"),
+            storage, _make_scene(id="scene_tavern"), _make_campaign(),
             health=MagicMock(),
         )
         sl.queue = MagicMock()
@@ -141,9 +150,11 @@ class TestSceneActivation:
         await sl.activate()
 
         for char_logic in sl.characters.values():
-            assert char_logic.scene_id == "scene_tavern"
-            assert char_logic.present_character_ids is not None
-            assert set(char_logic.present_character_ids) == {"char_alice", "char_bob"}
+            actor = char_logic.actor
+            assert isinstance(actor, NPCActor)
+            assert actor.scene_id == "scene_tavern"
+            assert actor.present_character_ids is not None
+            assert set(actor.present_character_ids) == {"char_alice", "char_bob"}
 
     @pytest.mark.anyio
     @patch("sidestage.graph.list_entities", new_callable=AsyncMock)
@@ -155,7 +166,7 @@ class TestSceneActivation:
         ]
 
         sl = Scene(
-            _make_storage(), _make_agent(), _make_scene(),
+            _make_storage(), _make_scene(), _make_campaign(),
             graph_client=mock_client,
             health=MagicMock(),
         )
@@ -165,20 +176,22 @@ class TestSceneActivation:
 
         mock_list.assert_awaited_once_with(mock_client, entity_type="Character")
         assert "char_alice" in sl.characters
-        assert sl.characters["char_alice"].graph_client is mock_client
+        actor = sl.characters["char_alice"].actor
+        assert isinstance(actor, NPCActor)
+        assert actor.graph_client is mock_client
 
 
 # ---------------------------------------------------------------------------
-# Full wiring chain: Scene -> Character -> AgentActor
+# Full wiring chain: Scene -> Character -> NPCActor
 # ---------------------------------------------------------------------------
 
 
 class TestFullWiringChain:
-    """Verify memory deps flow from Scene to AgentActor."""
+    """Verify memory deps flow from Scene to NPCActor."""
 
     @pytest.mark.anyio
     async def test_actor_receives_memory_deps_after_activation(self) -> None:
-        """AgentActor receives memory deps after scene and character activation."""
+        """NPCActor receives memory deps after scene activation."""
         mock_config = MagicMock()
         mock_health = MagicMock()
         mock_health.is_accepting_chat = True
@@ -187,7 +200,7 @@ class TestFullWiringChain:
         storage.list_characters.return_value = [_make_character(id="char_alice")]
 
         sl = Scene(
-            storage, _make_agent(), _make_scene(id="scene_01"),
+            storage, _make_scene(id="scene_01"), _make_campaign(),
             embed_config=mock_config,
             health=mock_health,
             context_limit=8192,
@@ -198,7 +211,7 @@ class TestFullWiringChain:
 
         char_logic = sl.characters["char_alice"]
         actor = char_logic.actor
-        assert actor is not None
+        assert isinstance(actor, NPCActor)
         assert actor.embed_config is mock_config
         assert actor.health is mock_health
         assert actor.scene_id == "scene_01"
@@ -206,7 +219,7 @@ class TestFullWiringChain:
 
     @pytest.mark.anyio
     async def test_actor_has_memory_tools_when_graph_and_health_set(self) -> None:
-        """AgentActor has memory tools when graph_client and health are set."""
+        """NPCActor has memory tools when graph_client and health are set."""
         mock_client = MagicMock()
         mock_config = MagicMock()
         mock_health = MagicMock()
@@ -215,22 +228,23 @@ class TestFullWiringChain:
         storage = _make_storage()
         storage.list_characters.return_value = [_make_character(id="char_alice")]
 
+        campaign = _make_campaign()
         sl = Scene(
-            storage, _make_agent(), _make_scene(id="scene_01"),
+            storage, _make_scene(id="scene_01"), campaign,
             graph_client=mock_client,
             embed_config=mock_config,
             health=mock_health,
             context_limit=4096,
         )
+        # Need to mock graph list_entities since graph_client is set
         sl.queue = MagicMock()
         sl.queue.start = AsyncMock()
-        # Need to mock graph list_entities since graph_client is set
         with patch("sidestage.graph.list_entities", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = [_make_character(id="char_alice")]
             await sl.activate()
 
         actor = sl.characters["char_alice"].actor
-        assert actor is not None
+        assert isinstance(actor, NPCActor)
         assert actor.agent is not None
         tool_names = [t.__name__ for t in actor.agent.tools]
         assert "update_scene_memory" in tool_names
@@ -252,19 +266,14 @@ class TestSceneHealthCheck:
         mock_health.is_accepting_chat = True
 
         sl = Scene(
-            _make_storage(), _make_agent(), _make_scene(),
+            _make_storage(), _make_scene(), _make_campaign(),
             health=mock_health,
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_test", gametime=0, walltime="now",
-        )
-        await sl.chat(msg)
-        sl.queue.put.assert_awaited_once()
+        result = await sl.chat("user", "Hello")
+        assert result is not None
 
     @pytest.mark.anyio
     async def test_chat_blocked_when_unhealthy(self) -> None:
@@ -273,36 +282,27 @@ class TestSceneHealthCheck:
         mock_health.is_accepting_chat = False
 
         sl = Scene(
-            _make_storage(), _make_agent(), _make_scene(),
+            _make_storage(), _make_scene(), _make_campaign(),
             health=mock_health,
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_test", gametime=0, walltime="now",
-        )
-        await sl.chat(msg)
+        result = await sl.chat("user", "Hello")
+        assert result is None
         sl.queue.put.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_chat_proceeds_without_health(self) -> None:
         """Chat proceeds when health is None (backwards compatible)."""
         sl = Scene(
-            _make_storage(), _make_agent(), _make_scene(),
+            _make_storage(), _make_scene(), _make_campaign(),
         )
         sl.queue = MagicMock()
         sl.queue.put = AsyncMock()
 
-        msg = ChatMessageModel(
-            id="m1", name="Msg", body="Hello",
-            actor_id="user", character_id="user", message="Hello",
-            scene_id="scene_test", gametime=0, walltime="now",
-        )
-        await sl.chat(msg)
-        sl.queue.put.assert_awaited_once()
+        result = await sl.chat("user", "Hello")
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +331,6 @@ class TestCampaignGetSceneObject:
         )
         campaign.graph_client = MagicMock()
         campaign.health = CampaignHealth()
-        campaign.agent = _make_agent()
 
         storage = _make_storage()
         storage.get_scene.return_value = _make_scene()
@@ -359,7 +358,6 @@ class TestCampaignGetSceneObject:
         )
         campaign.graph_client = None
         campaign.health = CampaignHealth()
-        campaign.agent = _make_agent()
 
         storage = _make_storage()
         storage.get_scene.return_value = _make_scene()

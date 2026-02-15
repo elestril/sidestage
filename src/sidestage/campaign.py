@@ -16,6 +16,7 @@ from sidestage.entities import entity_to_markdown, markdown_to_entity
 from sidestage.migration.parser import parse_directory
 from sidestage.graph import GraphConfig, GraphClient, connect, close
 from sidestage.health import CampaignHealth, HealthStatus
+from sidestage.logging import getSidestageLogger
 from sidestage.graph import create_entity as graph_create_entity
 from sidestage.graph import get_entity as graph_get_entity
 from sidestage.graph import update_entity as graph_update_entity
@@ -49,11 +50,7 @@ class Campaign:
         self.base_dir = base_dir
         self.campaign_dir = self.base_dir / name
         self._ensure_campaign_dir()
-        
-        # Setup logging to campaign directory
-        self._setup_logging()
-
-        self.config = config.get()
+        self.config = config.get_config()
         
         # Storage handles SQLite connection
         self.storage = Storage(db_path=self.campaign_dir / "sidestage.db")
@@ -65,6 +62,13 @@ class Campaign:
         # Actor infrastructure
         self.characters: Dict[str, Character] = {}
         self.user = User(actor_id="user")
+
+        # loggers
+        self.campaign_log = getSidestageLogger(
+            self.name, self.campaign_dir / 'campaign.log') 
+        self.actor_log = getSidestageLogger(
+            f'{self.name}.actor', self.campaign_dir / 'actor.log'
+        )
 
         # Ensure LLM is available before proceeding
         self._ensure_llm_availability()
@@ -79,20 +83,6 @@ class Campaign:
             self.campaign_dir.mkdir(parents=True, exist_ok=True)
         else:
             logger.info(f"Loading campaign from: {self.campaign_dir}")
-
-    def _setup_logging(self) -> None:
-        """Configure file-based logging to the campaign directory."""
-        log_file = self.campaign_dir / "server.log"
-        
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        
-        if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file.absolute()) for h in root_logger.handlers):
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-            root_logger.addHandler(file_handler)
-            
-            logger.info(f"Logging initialized. Output redirected to: {log_file}")
 
     def get_llm_config(self, name: str = "default") -> LLMConfig:
         """Get a named LLM configuration.
