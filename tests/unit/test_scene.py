@@ -2,6 +2,8 @@
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +20,7 @@ from sidestage.storage import Storage
 
 
 @pytest.fixture
-def mock_storage(tmp_path) -> Storage:
+def mock_storage(tmp_path: Path) -> Storage:
     return Storage(db_path=tmp_path / "test.db")
 
 
@@ -40,7 +42,7 @@ def mock_campaign() -> MagicMock:
 
 
 @pytest.fixture
-def scene(mock_storage, scene_data, mock_campaign) -> Scene:
+def scene(mock_storage: Storage, scene_data: SceneModel, mock_campaign: MagicMock) -> Scene:
     return Scene(
         storage=mock_storage,
         data=scene_data,
@@ -49,7 +51,7 @@ def scene(mock_storage, scene_data, mock_campaign) -> Scene:
 
 
 @pytest.fixture
-def chat_event(scene) -> Event:
+def chat_event(scene: Scene) -> Event:
     return scene.create_event(
         event_type=EventType.CHAT_MESSAGE,
         actor_id="user",
@@ -62,7 +64,7 @@ def chat_event(scene) -> Event:
 
 
 @pytest.mark.anyio
-async def test_process_sets_event_scene(scene, chat_event):
+async def test_process_sets_event_scene(scene: Scene, chat_event: Event):
     """Scene.process() sets event.scene = self before enqueueing."""
     scene.queue = MagicMock()
     scene.queue.put = AsyncMock()
@@ -73,7 +75,7 @@ async def test_process_sets_event_scene(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_process_puts_event_on_queue(scene, chat_event):
+async def test_process_puts_event_on_queue(scene: Scene, chat_event: Event):
     """Scene.process() puts event on the queue."""
     scene.queue = MagicMock()
     scene.queue.put = AsyncMock()
@@ -87,7 +89,7 @@ async def test_process_puts_event_on_queue(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_process_event_persists_to_storage(scene, chat_event):
+async def test_process_event_persists_to_storage(scene: Scene, chat_event: Event):
     """_process_event() persists EventModel to storage."""
     scene.characters = {}  # No actors to dispatch to
 
@@ -100,7 +102,7 @@ async def test_process_event_persists_to_storage(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_process_event_creates_graph_node(scene, chat_event):
+async def test_process_event_creates_graph_node(scene: Scene, chat_event: Event):
     """_process_event() creates graph node and HAS_EVENT edge."""
     mock_client = MagicMock()
     scene.graph_client = mock_client
@@ -116,7 +118,7 @@ async def test_process_event_creates_graph_node(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_process_event_dispatches_for_all_event_types(scene):
+async def test_process_event_dispatches_for_all_event_types(scene: Scene):
     """_process_event() calls _dispatch() for each EventType."""
     scene._dispatch = AsyncMock()
     scene.characters = {}
@@ -133,7 +135,7 @@ async def test_process_event_dispatches_for_all_event_types(scene):
 
 
 @pytest.mark.anyio
-async def test_process_event_updates_gametime_for_adjust(scene):
+async def test_process_event_updates_gametime_for_adjust(scene: Scene):
     """_process_event() updates current_gametime for ADJUST_GAMETIME events."""
     scene.characters = {}
     event = scene.create_event(
@@ -147,11 +149,12 @@ async def test_process_event_updates_gametime_for_adjust(scene):
     assert scene.data.current_gametime == 3600
     # Verify scene was persisted to storage
     stored = scene.storage.get_scene("scene_test")
+    assert stored is not None
     assert stored.current_gametime == 3600
 
 
 @pytest.mark.anyio
-async def test_process_event_does_not_update_gametime_for_other_types(scene):
+async def test_process_event_does_not_update_gametime_for_other_types(scene: Scene):
     """_process_event() does NOT update gametime for non-ADJUST_GAMETIME events."""
     scene.characters = {}
     original_gametime = scene.data.current_gametime
@@ -172,7 +175,7 @@ async def test_process_event_does_not_update_gametime_for_other_types(scene):
 
 
 @pytest.mark.anyio
-async def test_dispatch_calls_process_on_all_actors(scene, chat_event):
+async def test_dispatch_calls_process_on_all_actors(scene: Scene, chat_event: Event):
     """_dispatch() calls process() on every present actor."""
     npc1 = NPCActor(actor_id="agent:char_1")
     npc1.process = AsyncMock()
@@ -195,7 +198,7 @@ async def test_dispatch_calls_process_on_all_actors(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_dispatch_deduplicates_by_actor_id(scene, chat_event):
+async def test_dispatch_deduplicates_by_actor_id(scene: Scene, chat_event: Event):
     """_dispatch() deduplicates by actor_id (same User controlling 2 characters)."""
     user = User(actor_id="user")
     user.process = AsyncMock()
@@ -211,21 +214,20 @@ async def test_dispatch_deduplicates_by_actor_id(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_dispatch_sends_thinking_before_npc_process(scene, chat_event):
+async def test_dispatch_sends_thinking_before_npc_process(scene: Scene, chat_event: Event):
     """_dispatch() sends thinking status to Users before calling NPCActor.process()."""
     call_order = []
 
     npc = NPCActor(actor_id="agent:char_npc")
-    async def npc_process(event):
+    async def npc_process(event: Event) -> None:
         call_order.append("npc_process")
     npc.process = npc_process
 
     user = User(actor_id="user")
     user.process = AsyncMock()
-    original_send = user.send
-    async def capture_send(msg, exclude=None):
+    async def capture_send(msg: dict[str, Any], exclude: Any = None) -> None:
         call_order.append(f"user_send_{msg.get('status', 'event')}")
-    user.send = capture_send
+    object.__setattr__(user, "send", capture_send)
 
     scene.characters = {
         "char_npc": Character(CharacterModel(id="char_npc", name="NPC", body=""), npc),
@@ -243,7 +245,7 @@ async def test_dispatch_sends_thinking_before_npc_process(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_dispatch_sends_idle_after_npc_process(scene, chat_event):
+async def test_dispatch_sends_idle_after_npc_process(scene: Scene, chat_event: Event):
     """_dispatch() sends idle status after NPCActor.process() completes."""
     statuses = []
 
@@ -252,10 +254,10 @@ async def test_dispatch_sends_idle_after_npc_process(scene, chat_event):
 
     user = User(actor_id="user")
     user.process = AsyncMock()
-    async def capture_send(msg, exclude=None):
+    async def capture_send(msg: dict[str, Any], exclude: Any = None) -> None:
         if msg.get("type") == "actor_status":
             statuses.append(msg["status"])
-    user.send = capture_send
+    object.__setattr__(user, "send", capture_send)
 
     scene.characters = {
         "char_npc": Character(CharacterModel(id="char_npc", name="NPC", body=""), npc),
@@ -268,7 +270,7 @@ async def test_dispatch_sends_idle_after_npc_process(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_dispatch_sends_idle_even_when_npc_raises(scene, chat_event):
+async def test_dispatch_sends_idle_even_when_npc_raises(scene: Scene, chat_event: Event):
     """_dispatch() sends idle status even when NPCActor.process() raises."""
     statuses = []
 
@@ -277,10 +279,10 @@ async def test_dispatch_sends_idle_even_when_npc_raises(scene, chat_event):
 
     user = User(actor_id="user")
     user.process = AsyncMock()
-    async def capture_send(msg, exclude=None):
+    async def capture_send(msg: dict[str, Any], exclude: Any = None) -> None:
         if msg.get("type") == "actor_status":
             statuses.append(msg["status"])
-    user.send = capture_send
+    object.__setattr__(user, "send", capture_send)
 
     scene.characters = {
         "char_npc": Character(CharacterModel(id="char_npc", name="NPC", body=""), npc),
@@ -293,15 +295,15 @@ async def test_dispatch_sends_idle_even_when_npc_raises(scene, chat_event):
 
 
 @pytest.mark.anyio
-async def test_dispatch_no_thinking_for_user_only(scene, chat_event):
+async def test_dispatch_no_thinking_for_user_only(scene: Scene, chat_event: Event):
     """_dispatch() does NOT send thinking status when only User actors are present."""
     send_calls = []
 
     user = User(actor_id="user")
     user.process = AsyncMock()
-    async def capture_send(msg, exclude=None):
+    async def capture_send(msg: dict[str, Any], exclude: Any = None) -> None:
         send_calls.append(msg)
-    user.send = capture_send
+    object.__setattr__(user, "send", capture_send)
 
     scene.characters = {
         "char_user": Character(CharacterModel(id="char_user", name="Player", body=""), user),
@@ -317,20 +319,20 @@ async def test_dispatch_no_thinking_for_user_only(scene, chat_event):
 # --- Scene.create_event() ---
 
 
-def test_create_event_returns_event(scene):
+def test_create_event_returns_event(scene: Scene):
     """create_event() returns Event wrapping EventModel."""
     event = scene.create_event(EventType.CHAT_MESSAGE, actor_id="user", body="Hello")
     assert isinstance(event, Event)
     assert isinstance(event.model, EventModel)
 
 
-def test_create_event_generates_evt_prefix(scene):
+def test_create_event_generates_evt_prefix(scene: Scene):
     """create_event() generates ID with evt_ prefix."""
     event = scene.create_event(EventType.CHAT_MESSAGE, actor_id="user")
     assert event.model.id.startswith("evt_")
 
 
-def test_create_event_sets_scene_fields(scene):
+def test_create_event_sets_scene_fields(scene: Scene):
     """create_event() sets scene_id, gametime, walltime, event_type."""
     event = scene.create_event(EventType.JOIN, actor_id="user")
     assert event.model.scene_id == "scene_test"
@@ -339,13 +341,13 @@ def test_create_event_sets_scene_fields(scene):
     assert event.model.event_type == EventType.JOIN
 
 
-def test_create_event_default_name_chat(scene):
+def test_create_event_default_name_chat(scene: Scene):
     """create_event() generates default name for CHAT_MESSAGE."""
     event = scene.create_event(EventType.CHAT_MESSAGE, actor_id="user")
     assert event.model.name == "Message"
 
 
-def test_create_event_default_name_with_character(scene):
+def test_create_event_default_name_with_character(scene: Scene):
     """create_event() includes character name in default name."""
     scene.characters["char_alice"] = Character(
         CharacterModel(id="char_alice", name="Alice", body=""), User()
@@ -360,7 +362,7 @@ def test_create_event_default_name_with_character(scene):
 
 
 @pytest.mark.anyio
-async def test_chat_creates_and_enqueues_event(scene):
+async def test_chat_creates_and_enqueues_event(scene: Scene):
     """chat() creates CHAT_MESSAGE event and enqueues via process()."""
     scene.process = AsyncMock()
 
@@ -375,7 +377,7 @@ async def test_chat_creates_and_enqueues_event(scene):
 
 
 @pytest.mark.anyio
-async def test_chat_rejects_when_unhealthy(scene):
+async def test_chat_rejects_when_unhealthy(scene: Scene):
     """chat() rejects messages when health is not accepting chat."""
     from sidestage.health import CampaignHealth, HealthStatus
     scene.health = CampaignHealth()
@@ -391,7 +393,7 @@ async def test_chat_rejects_when_unhealthy(scene):
 
 
 @pytest.mark.anyio
-async def test_activate_starts_queue(scene, mock_campaign):
+async def test_activate_starts_queue(scene: Scene, mock_campaign: MagicMock):
     """activate() starts the event queue."""
     scene.queue = MagicMock()
     scene.queue.start = AsyncMock()
@@ -406,7 +408,7 @@ async def test_activate_starts_queue(scene, mock_campaign):
 
 
 @pytest.mark.anyio
-async def test_deactivate_stops_queue_and_clears_characters(scene):
+async def test_deactivate_stops_queue_and_clears_characters(scene: Scene):
     """deactivate() stops queue and clears characters dict."""
     scene._active = True
     scene.queue = MagicMock()

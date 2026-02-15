@@ -4,15 +4,25 @@ Verifies that spans are created with correct names, attributes, and hierarchy
 at each instrumentation point.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+from collections.abc import Generator
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
 from sidestage.models import CharacterModel, EventModel, EventType, SceneModel
+
+if TYPE_CHECKING:
+    from sidestage.actors import NPCActor
+    from sidestage.scene import Scene
 
 
 # ---------------------------------------------------------------------------
@@ -22,25 +32,25 @@ from sidestage.models import CharacterModel, EventModel, EventType, SceneModel
 class _SpanCollector(SpanExporter):
     """Collects spans for test assertions."""
 
-    def __init__(self):
-        self._spans: list = []
+    def __init__(self) -> None:
+        self._spans: list[ReadableSpan] = []
 
-    def export(self, spans):
+    def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # type: ignore[override]
         self._spans.extend(spans)
         return SpanExportResult.SUCCESS
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         pass
 
-    def get_finished_spans(self) -> list:
+    def get_finished_spans(self) -> list[ReadableSpan]:
         return list(self._spans)
 
-    def clear(self):
+    def clear(self) -> None:
         self._spans.clear()
 
 
 @pytest.fixture
-def otel_exporter():
+def otel_exporter() -> Generator[_SpanCollector, None, None]:
     """Set up a span collector and TracerProvider for capturing spans.
 
     Resets the global OTel state, creates a fresh provider, and replaces
@@ -68,7 +78,7 @@ def otel_exporter():
     import sidestage.campaign as _campaign
 
     _scene.tracer = provider.get_tracer("sidestage.scene")
-    _char.tracer = provider.get_tracer("sidestage.character")
+    _char.tracer = provider.get_tracer("sidestage.character")  # type: ignore[attr-defined]
     _agent.tracer = provider.get_tracer("sidestage.agent")
     _actors.tracer = provider.get_tracer("sidestage.actors")
     _ctx.tracer = provider.get_tracer("sidestage.memory.context")
@@ -79,9 +89,9 @@ def otel_exporter():
     provider.shutdown()
 
 
-def _make_event_model(**overrides) -> EventModel:
+def _make_event_model(**overrides: Any) -> EventModel:
     """Create an EventModel with sensible defaults for testing."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         id="evt_test1",
         name="Test Event",
         body="Hello",
@@ -96,8 +106,8 @@ def _make_event_model(**overrides) -> EventModel:
     return EventModel(**defaults)
 
 
-def _make_scene(**overrides) -> SceneModel:
-    defaults = dict(
+def _make_scene(**overrides: Any) -> SceneModel:
+    defaults: dict[str, Any] = dict(
         id="scene_01",
         name="Test SceneModel",
         body="A test scene",
@@ -106,8 +116,8 @@ def _make_scene(**overrides) -> SceneModel:
     return SceneModel(**defaults)
 
 
-def _make_character(**overrides) -> CharacterModel:
-    defaults = dict(
+def _make_character(**overrides: Any) -> CharacterModel:
+    defaults: dict[str, Any] = dict(
         id="char_npc1",
         name="NPC One",
         body="A test NPC",
@@ -116,11 +126,11 @@ def _make_character(**overrides) -> CharacterModel:
     return CharacterModel(**defaults)
 
 
-def _find_spans(exporter, name):
+def _find_spans(exporter: _SpanCollector, name: str) -> list[ReadableSpan]:
     return [s for s in exporter.get_finished_spans() if s.name == name]
 
 
-def _make_test_scene(scene_id="scene_01", tmp_path=None):
+def _make_test_scene(scene_id: str = "scene_01", tmp_path: str | Path | None = None) -> "Scene":
     """Create a Scene with mocked dependencies for tracing tests."""
     from sidestage.scene import Scene
     from sidestage.storage import Storage
@@ -137,7 +147,7 @@ def _make_test_scene(scene_id="scene_01", tmp_path=None):
     return scene
 
 
-def _make_npc_actor(character_id="char_npc1", character_name="NPC One"):
+def _make_npc_actor(character_id: str = "char_npc1", character_name: str = "NPC One") -> "NPCActor":
     """Create an NPCActor with mocked character data."""
     from sidestage.actors import NPCActor
     actor = NPCActor(actor_id=f"agent:{character_id}")
@@ -158,7 +168,7 @@ def _make_npc_actor(character_id="char_npc1", character_name="NPC One"):
 
 
 class TestEventSpanContext:
-    def test_from_model_captures_span_context(self, otel_exporter):
+    def test_from_model_captures_span_context(self, otel_exporter: _SpanCollector):
         """Event.from_model() captures the current span context when a span is active."""
         from sidestage.event import Event
 
@@ -192,7 +202,7 @@ class TestEventSpanContext:
 
 class TestProcessEvent:
     @pytest.mark.anyio
-    async def test_creates_root_span(self, otel_exporter):
+    async def test_creates_root_span(self, otel_exporter: _SpanCollector):
         scene = _make_test_scene()
         model = _make_event_model()
         from sidestage.event import Event
@@ -204,7 +214,7 @@ class TestProcessEvent:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_root_span_attributes(self, otel_exporter):
+    async def test_root_span_attributes(self, otel_exporter: _SpanCollector):
         scene = _make_test_scene()
         model = _make_event_model(scene_id="scene_01", actor_id="user", id="evt_x")
         from sidestage.event import Event
@@ -213,13 +223,14 @@ class TestProcessEvent:
         await scene._process_event(event)
 
         span = _find_spans(otel_exporter, "scene.process_event")[0]
+        assert span.attributes is not None
         assert span.attributes["sidestage.scene.id"] == "scene_01"
         assert span.attributes["sidestage.event.id"] == "evt_x"
         assert span.attributes["sidestage.event.type"] == "ChatMessage"
         assert span.attributes["sidestage.actor.id"] == "user"
 
     @pytest.mark.anyio
-    async def test_all_event_types_create_span(self, otel_exporter):
+    async def test_all_event_types_create_span(self, otel_exporter: _SpanCollector):
         """All event types create a processing span (no ChatMessage-only filter)."""
         scene = _make_test_scene()
         from sidestage.event import Event
@@ -234,7 +245,7 @@ class TestProcessEvent:
             assert len(spans) == 1, f"Expected span for {et.value}"
 
     @pytest.mark.anyio
-    async def test_exception_sets_error_status(self, otel_exporter):
+    async def test_exception_sets_error_status(self, otel_exporter: _SpanCollector):
         scene = _make_test_scene()
         scene.storage = MagicMock()
         scene.storage.add_event = MagicMock(side_effect=RuntimeError("db error"))
@@ -250,7 +261,7 @@ class TestProcessEvent:
         assert span.status.status_code.name == "ERROR"
 
     @pytest.mark.anyio
-    async def test_creates_linked_root_span(self, otel_exporter):
+    async def test_creates_linked_root_span(self, otel_exporter: _SpanCollector):
         """_process_event() creates a new root span linked to the event's span context."""
         from sidestage.event import Event
 
@@ -276,7 +287,7 @@ class TestProcessEvent:
         assert link.context.span_id == origin_ctx.span_id
 
     @pytest.mark.anyio
-    async def test_no_span_context_no_link(self, otel_exporter):
+    async def test_no_span_context_no_link(self, otel_exporter: _SpanCollector):
         """When event.span_context is None, the processing span has no links."""
         from sidestage.event import Event
 
@@ -297,7 +308,7 @@ class TestProcessEvent:
 
 class TestDispatch:
     @pytest.mark.anyio
-    async def test_dispatch_within_process_span(self, otel_exporter):
+    async def test_dispatch_within_process_span(self, otel_exporter: _SpanCollector):
         """_dispatch() executes within the scene.process_event span context."""
         from sidestage.event import Event
         from sidestage.actors import NPCActor, User
@@ -323,7 +334,7 @@ class TestDispatch:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_npc_count_in_dispatch(self, otel_exporter):
+    async def test_npc_count_in_dispatch(self, otel_exporter: _SpanCollector):
         """Dispatch processes the correct number of NPCs."""
         from sidestage.event import Event
         from sidestage.actors import NPCActor, User
@@ -360,7 +371,7 @@ class TestDispatch:
 
 class TestNPCActorProcess:
     @pytest.mark.anyio
-    async def test_creates_npc_actor_span(self, otel_exporter):
+    async def test_creates_npc_actor_span(self, otel_exporter: _SpanCollector):
         from sidestage.actors import NPCActor, User
         from sidestage.event import Event
 
@@ -383,7 +394,7 @@ class TestNPCActorProcess:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_character_attributes(self, otel_exporter):
+    async def test_character_attributes(self, otel_exporter: _SpanCollector):
         from sidestage.actors import NPCActor, User
         from sidestage.event import Event
 
@@ -402,11 +413,12 @@ class TestNPCActorProcess:
         await actor.process(event)
 
         span = _find_spans(otel_exporter, "npc_actor.process")[0]
+        assert span.attributes is not None
         assert span.attributes["sidestage.character.id"] == "char_abc"
         assert span.attributes["sidestage.character.name"] == "TestNPC"
 
     @pytest.mark.anyio
-    async def test_exception_sets_error(self, otel_exporter):
+    async def test_exception_sets_error(self, otel_exporter: _SpanCollector):
         from sidestage.actors import NPCActor, User
         from sidestage.event import Event
 
@@ -437,7 +449,7 @@ class TestNPCActorProcess:
 
 class TestAssembleContext:
     @pytest.mark.anyio
-    async def test_creates_span(self, otel_exporter):
+    async def test_creates_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.context import assemble_context
         from sidestage.memory.models import ContextMemories
 
@@ -463,7 +475,7 @@ class TestAssembleContext:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_span_attributes(self, otel_exporter):
+    async def test_span_attributes(self, otel_exporter: _SpanCollector):
         from sidestage.memory.context import assemble_context
         from sidestage.memory.models import ContextMemories
 
@@ -486,6 +498,7 @@ class TestAssembleContext:
                 )
 
         span = _find_spans(otel_exporter, "memory.assemble_context")[0]
+        assert span.attributes is not None
         assert span.attributes["sidestage.owner_id"] == "char_owner"
         assert span.attributes["sidestage.scene.id"] == "scene_ctx"
 
@@ -497,7 +510,7 @@ class TestAssembleContext:
 
 class TestAgentArun:
     @pytest.mark.anyio
-    async def test_creates_agent_run_span(self, otel_exporter):
+    async def test_creates_agent_run_span(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -515,10 +528,11 @@ class TestAgentArun:
 
         spans = _find_spans(otel_exporter, "agent.run")
         assert len(spans) == 1
+        assert spans[0].attributes is not None
         assert spans[0].attributes["gen_ai.request.model"] == "test-model"
 
     @pytest.mark.anyio
-    async def test_llm_completion_span(self, otel_exporter):
+    async def test_llm_completion_span(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -536,10 +550,11 @@ class TestAgentArun:
 
         spans = _find_spans(otel_exporter, "llm.completion")
         assert len(spans) == 1
+        assert spans[0].attributes is not None
         assert spans[0].attributes["agent.turn"] == 1
 
     @pytest.mark.anyio
-    async def test_token_usage_attributes(self, otel_exporter):
+    async def test_token_usage_attributes(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -560,11 +575,12 @@ class TestAgentArun:
             await agent.arun("Hello")
 
         span = _find_spans(otel_exporter, "llm.completion")[0]
+        assert span.attributes is not None
         assert span.attributes["gen_ai.usage.input_tokens"] == 10
         assert span.attributes["gen_ai.usage.output_tokens"] == 20
 
     @pytest.mark.anyio
-    async def test_token_usage_skipped_when_none(self, otel_exporter):
+    async def test_token_usage_skipped_when_none(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -581,10 +597,11 @@ class TestAgentArun:
             await agent.arun("Hello")
 
         span = _find_spans(otel_exporter, "llm.completion")[0]
+        assert span.attributes is not None
         assert "gen_ai.usage.input_tokens" not in span.attributes
 
     @pytest.mark.anyio
-    async def test_tool_execute_span(self, otel_exporter):
+    async def test_tool_execute_span(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         def my_tool(arg1: str) -> str:
@@ -621,10 +638,11 @@ class TestAgentArun:
 
         tool_spans = _find_spans(otel_exporter, "tool.execute")
         assert len(tool_spans) == 1
+        assert tool_spans[0].attributes is not None
         assert tool_spans[0].attributes["tool.name"] == "my_tool"
 
     @pytest.mark.anyio
-    async def test_llm_exception_sets_error(self, otel_exporter):
+    async def test_llm_exception_sets_error(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -636,7 +654,7 @@ class TestAgentArun:
         assert span.status.status_code.name == "ERROR"
 
     @pytest.mark.anyio
-    async def test_llm_error_still_sets_turn_count(self, otel_exporter):
+    async def test_llm_error_still_sets_turn_count(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -645,10 +663,11 @@ class TestAgentArun:
             await agent.arun("Hello")
 
         span = _find_spans(otel_exporter, "agent.run")[0]
+        assert span.attributes is not None
         assert span.attributes["agent.turn_count"] == 1
 
     @pytest.mark.anyio
-    async def test_turn_count_on_parent_span(self, otel_exporter):
+    async def test_turn_count_on_parent_span(self, otel_exporter: _SpanCollector):
         from sidestage.agent import LiteLLMAgent
 
         agent = LiteLLMAgent(name="test", model="test-model")
@@ -665,6 +684,7 @@ class TestAgentArun:
             await agent.arun("Hello")
 
         span = _find_spans(otel_exporter, "agent.run")[0]
+        assert span.attributes is not None
         assert span.attributes["agent.turn_count"] == 1
 
 
@@ -675,7 +695,7 @@ class TestAgentArun:
 
 class TestMemoryToolTracing:
     @pytest.mark.anyio
-    async def test_update_scene_memory_span(self, otel_exporter):
+    async def test_update_scene_memory_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import MemoryTools
 
         mock_client = MagicMock()
@@ -693,7 +713,7 @@ class TestMemoryToolTracing:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_update_character_memory_span(self, otel_exporter):
+    async def test_update_character_memory_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import MemoryTools
 
         mock_client = MagicMock()
@@ -711,7 +731,7 @@ class TestMemoryToolTracing:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_update_common_memory_span(self, otel_exporter):
+    async def test_update_common_memory_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import DmMemoryTools
 
         mock_client = MagicMock()
@@ -729,7 +749,7 @@ class TestMemoryToolTracing:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_update_canonical_memory_span(self, otel_exporter):
+    async def test_update_canonical_memory_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import DmMemoryTools
 
         mock_client = MagicMock()
@@ -747,7 +767,7 @@ class TestMemoryToolTracing:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_add_world_fact_span(self, otel_exporter):
+    async def test_add_world_fact_span(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import DmMemoryTools
 
         mock_client = MagicMock()
@@ -765,7 +785,7 @@ class TestMemoryToolTracing:
         assert len(spans) == 1
 
     @pytest.mark.anyio
-    async def test_memory_exception_sets_error(self, otel_exporter):
+    async def test_memory_exception_sets_error(self, otel_exporter: _SpanCollector):
         from sidestage.memory.tools import MemoryTools
 
         mock_client = MagicMock()
@@ -787,7 +807,8 @@ class TestMemoryToolTracing:
 
 
 class TestReloadDefaultsTracing:
-    def test_creates_span(self, otel_exporter, tmp_path):
+    @pytest.mark.anyio
+    async def test_creates_span(self, otel_exporter: _SpanCollector, tmp_path: Path):
         from sidestage.campaign import Campaign
 
         with patch.object(Campaign, "__init__", lambda self, *a, **k: None):
@@ -798,6 +819,7 @@ class TestReloadDefaultsTracing:
             campaign.storage.add_location = MagicMock()
             campaign.storage.add_item = MagicMock()
             campaign.storage.add_event = MagicMock()
+            campaign.graph_client = None
             campaign.campaign_log = logging.getLogger("test.campaign")
 
             from sidestage.migration.parser import ParseResult
@@ -805,12 +827,13 @@ class TestReloadDefaultsTracing:
 
             with patch("sidestage.campaign.parse_directory", return_value=mock_result):
                 with patch("pathlib.Path.exists", return_value=True):
-                    campaign.reload_defaults()
+                    await campaign.reload_defaults()
 
         spans = _find_spans(otel_exporter, "campaign.reload_defaults")
         assert len(spans) == 1
 
-    def test_span_has_loaded_count(self, otel_exporter, tmp_path):
+    @pytest.mark.anyio
+    async def test_span_has_loaded_count(self, otel_exporter: _SpanCollector, tmp_path: Path):
         from sidestage.campaign import Campaign
 
         with patch.object(Campaign, "__init__", lambda self, *a, **k: None):
@@ -821,6 +844,7 @@ class TestReloadDefaultsTracing:
             campaign.storage.add_location = MagicMock()
             campaign.storage.add_item = MagicMock()
             campaign.storage.add_event = MagicMock()
+            campaign.graph_client = None
             campaign.campaign_log = logging.getLogger("test.campaign")
 
             char = _make_character()
@@ -829,7 +853,8 @@ class TestReloadDefaultsTracing:
 
             with patch("sidestage.campaign.parse_directory", return_value=mock_result):
                 with patch("pathlib.Path.exists", return_value=True):
-                    campaign.reload_defaults()
+                    await campaign.reload_defaults()
 
         span = _find_spans(otel_exporter, "campaign.reload_defaults")[0]
+        assert span.attributes is not None
         assert span.attributes["entities.loaded_count"] == 1

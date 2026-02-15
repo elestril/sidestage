@@ -33,7 +33,7 @@ console = Console(theme=SIDESTAGE_THEME)
 _SERVER_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 _REQUEST_FORMAT = "%(asctime)s [%(request_id)s] %(user)s - %(message)s"
 _CAMPAIGN_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-_CHAT_FORMAT = "%(asctime)s %(actor)s - %(message)s"
+_CHAT_FORMAT = "%(asctime)s %(user)s - %(message)s"
 _RICH_FORMAT = "%(name)s - %(message)s"
 
 
@@ -207,6 +207,7 @@ def initCampaignLogging(
 
     chat_fh = logging.FileHandler(campaign_dir / "chat.log")
     chat_fh.setFormatter(logging.Formatter(_CHAT_FORMAT))
+    chat_fh.addFilter(RequestContextFilter())
     chat_logger.addHandler(chat_fh)
 
     return campaign_logger, chat_logger

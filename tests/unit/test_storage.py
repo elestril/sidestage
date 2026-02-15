@@ -1,3 +1,4 @@
+from datetime import datetime
 import pytest
 from pathlib import Path
 from sidestage.models import CharacterModel, LocationModel, ItemModel
@@ -57,7 +58,7 @@ def test_event_crud(storage: Storage):
     from sidestage.models import EventModel, EventType
     event = EventModel(
         id="evt_1", name="Alice Message", body="Hello",
-        scene_id="scene_1", gametime=100, walltime="2024-01-01T00:00:00",
+        scene_id="scene_1", gametime=100, walltime=datetime.fromisoformat("2024-01-01T00:00:00"),
         event_type=EventType.CHAT_MESSAGE, character_id="char_alice",
     )
     storage.add_event(event)
@@ -72,12 +73,12 @@ def test_list_events_by_scene_and_type(storage: Storage):
     from sidestage.models import EventModel, EventType
     chat = EventModel(
         id="evt_1", name="msg", body="hi", scene_id="s1",
-        gametime=100, walltime="2024-01-01T00:00:00",
+        gametime=100, walltime=datetime.fromisoformat("2024-01-01T00:00:00"),
         event_type=EventType.CHAT_MESSAGE,
     )
     join = EventModel(
         id="evt_2", name="join", body="", scene_id="s1",
-        gametime=100, walltime="2024-01-01T00:00:00",
+        gametime=100, walltime=datetime.fromisoformat("2024-01-01T00:00:00"),
         event_type=EventType.JOIN,
     )
     storage.add_event(chat)

@@ -1,3 +1,4 @@
+from datetime import datetime
 """Unit tests for context assembly."""
 
 from typing import Any
@@ -31,7 +32,7 @@ def _make_memory(**overrides: Any) -> Memory:
 def _make_chat_message(character_id: str, message: str, **overrides: Any) -> EventModel:
     defaults = dict(
         id="msg-1", name="msg", body=message, scene_id="scene-1",
-        gametime=100, walltime="2024-01-01T00:00:00",
+        gametime=100, walltime=datetime.fromisoformat("2024-01-01T00:00:00"),
         event_type=EventType.CHAT_MESSAGE, character_id=character_id,
     )
     defaults.update(overrides)

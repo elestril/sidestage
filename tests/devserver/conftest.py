@@ -11,7 +11,9 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -64,7 +66,7 @@ def _ensure_campaign_markdown() -> None:
 
 
 @pytest.fixture(scope="session")
-def devserver() -> str:
+def devserver() -> Generator[str, None, None]:
     """Ensure the dev server is running for the test session.
 
     If already running, reuse it.  Otherwise start via ``scripts/run-dev.sh``,
@@ -116,7 +118,7 @@ def devserver() -> str:
 
 
 @pytest.fixture(scope="session")
-def client(devserver: str) -> httpx.Client:
+def client(devserver: str) -> Generator[httpx.Client, None, None]:
     """Session-scoped httpx client pointed at the dev server."""
     with httpx.Client(base_url=devserver, timeout=30.0) as c:
         yield c
@@ -128,7 +130,7 @@ def client(devserver: str) -> httpx.Client:
 
 
 @pytest.fixture()
-def log_observer() -> LogObserver:
+def log_observer() -> Any:
     """Per-test log observer — records file positions before the test body."""
     observer = LogObserver(LOG_FILES)
     observer.mark()
@@ -136,7 +138,7 @@ def log_observer() -> LogObserver:
 
 
 @pytest.fixture(autouse=True)
-def _check_server_errors() -> None:
+def _check_server_errors() -> Generator[None, None, None]:
     """Fail the test if the server emitted ERROR-level log entries."""
     observer = LogObserver(LOG_FILES)
     observer.mark()

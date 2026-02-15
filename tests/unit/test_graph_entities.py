@@ -1,3 +1,4 @@
+from datetime import datetime
 """Unit tests for graph entity CRUD operations."""
 from typing import Any
 
@@ -85,7 +86,7 @@ async def test_create_entity_chat_message_labels(mock_client: MagicMock) -> None
     """create_entity with EventModel CHAT_MESSAGE generates Cypher with :Entity:Event:ChatMessage labels."""
     msg = EventModel(
         id="m1", name="msg", body="desc", scene_id="s1",
-        gametime=100, walltime="2024-01-01T00:00:00",
+        gametime=100, walltime=datetime.fromisoformat("2024-01-01T00:00:00"),
         event_type=EventType.CHAT_MESSAGE, character_id="c1",
     )
     mock_client.graph.query.return_value = MagicMock(result_set=[[]])

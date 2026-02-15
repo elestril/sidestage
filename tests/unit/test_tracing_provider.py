@@ -1,5 +1,7 @@
 """Tests for tracing provider setup, FilteringSpanProcessor, and lifecycle functions."""
 
+from typing import Any
+
 import pytest
 from unittest.mock import MagicMock, patch
 from opentelemetry import trace
@@ -117,6 +119,7 @@ class TestCheckOtlpEndpoint:
         ):
             reachable, error = check_otlp_endpoint("http://localhost:4318")
             assert reachable is False
+            assert error is not None
             assert "unreachable" in error
             assert "localhost:4318" in error
 
@@ -140,7 +143,7 @@ class TestInitTracing:
         provider_module._otlp_endpoint = None
 
     @_REACHABLE
-    def test_init_enabled_creates_provider(self, _mock):
+    def test_init_enabled_creates_provider(self, _mock: Any):
         """init_tracing sets up a TracerProvider with FilteringSpanProcessor enabled."""
         try:
             config = TraceConfig(enabled=True)
@@ -175,13 +178,14 @@ class TestInitTracing:
                 provider = init_tracing(config, "test_campaign")
                 assert isinstance(provider, TracerProvider)
                 assert provider_module._filtering_processors[0].enabled is False
-                assert get_tracing_error() is not None
-                assert "unreachable" in get_tracing_error()
+                err = get_tracing_error()
+                assert err is not None
+                assert "unreachable" in err
             finally:
                 self._cleanup()
 
     @_REACHABLE
-    def test_shutdown_tracing(self, _mock):
+    def test_shutdown_tracing(self, _mock: Any):
         """shutdown_tracing calls provider.shutdown() cleanly."""
         try:
             config = TraceConfig(enabled=True)
@@ -195,7 +199,7 @@ class TestInitTracing:
             self._cleanup()
 
     @_REACHABLE
-    def test_toggle_tracing_via_function(self, _mock):
+    def test_toggle_tracing_via_function(self, _mock: Any):
         """toggle_tracing flips enabled state on all filtering processors."""
         try:
             config = TraceConfig(enabled=True)
@@ -241,7 +245,7 @@ class TestInitTracing:
             self._cleanup()
 
     @_REACHABLE
-    def test_init_idempotent(self, _mock):
+    def test_init_idempotent(self, _mock: Any):
         """Calling init_tracing again shuts down the previous provider first."""
         try:
             config = TraceConfig(enabled=True)

@@ -1,3 +1,4 @@
+from datetime import datetime
 """Tests for migration/importer.py -- import campaign from parsed data into FalkorDB."""
 
 from pathlib import Path
@@ -75,7 +76,7 @@ def sample_entities() -> list[EntityModel]:
         EventModel(
             name="Eldric Joins Brawl", body="Eldric enters the fray.",
             id="evt_join", scene_id="scene_brawl", gametime=3600,
-            walltime="2026-01-15T14:30:00Z", actor_id="actor_1",
+            walltime=datetime.fromisoformat("2026-01-15T14:30:00Z"), actor_id="actor_1",
             event_type=EventType.JOIN,
         ),
     ]
@@ -303,7 +304,7 @@ async def test_creates_has_event_edges_for_events(mock_campaign: MagicMock, ) ->
             SceneModel(name="S", body="", id="s1"),
             EventModel(
                 name="E", body="", id="e1", scene_id="s1",
-                gametime=0, walltime="2026-01-01T00:00:00Z", actor_id="a1",
+                gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), actor_id="a1",
                 event_type=EventType.JOIN,
             ),
         ],

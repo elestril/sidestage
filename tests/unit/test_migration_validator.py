@@ -1,3 +1,4 @@
+from datetime import datetime
 """Tests for migration/validator.py -- referential integrity and schema validation."""
 
 import pytest
@@ -49,7 +50,7 @@ def valid_scene(valid_location: LocationModel) -> SceneModel:
 def valid_event(valid_scene: SceneModel) -> EventModel:
     """An EventModel in a valid scene."""
     return EventModel(id="evt_join", name="Eldric Joins", body="Eldric enters the fray.",
-                 scene_id="scene_brawl", gametime=3600, walltime="2026-01-15T14:30:00Z",
+                 scene_id="scene_brawl", gametime=3600, walltime=datetime.fromisoformat("2026-01-15T14:30:00Z"),
                  event_type=EventType.JOIN)
 
 
@@ -148,7 +149,7 @@ def test_detects_scene_location_id_referencing_nonexistent_location():
 def test_detects_event_scene_id_referencing_nonexistent_scene():
     """EventModel.scene_id pointing to a non-existent SceneModel ID produces an error."""
     evt = EventModel(id="evt_1", name="Event", body="An event.", scene_id="scene_gone",
-                     gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.CHAT_MESSAGE)
+                     gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.CHAT_MESSAGE)
     pr = ParseResult(entities=[evt], memories=[], chatlogs={}, errors=[])
     report = validate_parse_result(pr)
     assert report.valid is False
@@ -159,7 +160,7 @@ def test_detects_chat_message_event_scene_id_referencing_nonexistent_scene():
     """EventModel with CHAT_MESSAGE event_type and bad scene_id triggers an error."""
     msg = EventModel(
         id="msg_1", name="Message", body="Hello.", scene_id="scene_missing",
-        gametime=0, walltime="2026-01-01T00:00:00Z",
+        gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"),
         event_type=EventType.CHAT_MESSAGE, character_id="char_1",
     )
     pr = ParseResult(entities=[msg], memories=[], chatlogs={}, errors=[])

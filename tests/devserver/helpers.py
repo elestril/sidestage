@@ -10,6 +10,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -91,7 +92,7 @@ def poll_scene_messages(
     min_count: int = 1,
     predicate: object = None,
     timeout: float = 15.0,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Poll ``GET /v1/scenes/{id}/messages`` until a condition is met.
 
     Args:

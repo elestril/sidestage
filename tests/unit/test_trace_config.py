@@ -1,5 +1,7 @@
 """Tests for TraceConfig model and its integration with SidestageConfig."""
 
+from typing import Any
+
 import pytest
 import yaml
 from pathlib import Path
@@ -96,14 +98,14 @@ class TestSidestageConfigTracingIntegration:
         assert dumped["tracing"]["otlp_endpoint"] == "http://localhost:4318"
 
     def test_sidestage_config_from_dict_with_tracing(self):
-        data = {"tracing": {"enabled": True, "otlp_endpoint": "http://viewer:4318"}}
+        data: dict[str, Any] = {"tracing": {"enabled": True, "otlp_endpoint": "http://viewer:4318"}}
         sc = SidestageConfig(**data)
         assert sc.tracing.enabled is True
         assert sc.tracing.otlp_endpoint == "http://viewer:4318"
         assert sc.tracing.capture_prompts is True  # default preserved
 
     def test_backward_compat_no_tracing_section(self):
-        data = {"loglevel": "DEBUG"}
+        data: dict[str, Any] = {"loglevel": "DEBUG"}
         sc = SidestageConfig(**data)
         assert sc.tracing.enabled is False
         assert sc.tracing.otlp_endpoint == "http://localhost:4318"

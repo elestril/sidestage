@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import httpx
 import pytest
@@ -35,7 +36,7 @@ class TestCampaignImport:
         assert counts.get("Location", 0) >= 2   # Tavern, Castle, Town Square
         assert counts.get("Scene", 0) >= 1       # Tavern Brawl
 
-    def _do_import(self, client: httpx.Client) -> dict:
+    def _do_import(self, client: httpx.Client) -> dict[str, Any]:
         """Execute a campaign import and assert it succeeded."""
         resp = client.post(
             "/v1/campaign/import",

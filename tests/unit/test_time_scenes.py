@@ -1,3 +1,4 @@
+from datetime import datetime
 import pytest
 from pathlib import Path
 from sidestage.time import Gametime
@@ -40,7 +41,7 @@ def test_event_storage(tmp_path: Path):
         name="Test EventModel",
         scene_id="scene_1",
         gametime=3600,
-        walltime="2026-01-30T22:30:00",
+        walltime=datetime.fromisoformat("2026-01-30T22:30:00"),
         body="Something happened",
         event_type=EventType.CHAT_MESSAGE,
     )

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -9,13 +10,13 @@ from sidestage.event import Event, EventQueue
 # EventQueue uses asyncio.create_task, so restrict async tests to asyncio backend
 
 @pytest.fixture(params=["asyncio"])
-def anyio_backend(request):
+def anyio_backend(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
-def _make_event_model(**overrides) -> EventModel:
+def _make_event_model(**overrides: Any) -> EventModel:
     """Helper to create an EventModel with sensible defaults."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         id="evt_test",
         name="Test",
         body="",

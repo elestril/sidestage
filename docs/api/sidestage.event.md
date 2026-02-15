@@ -12,7 +12,7 @@ objects sequentially through a handler callback.
 
 Runtime event wrapper carrying model data, tracing context, and scene reference.
 
-#### `__init__(model: EventModel, span_context: SpanContext | None = None, scene: object | None = None) -> None`
+#### `__init__(model: EventModel, span_context: SpanContext | None = None, scene: Any | None = None) -> None`
 
 #### `character` *property*
 

@@ -22,8 +22,8 @@ class _CollectingExporter(SpanExporter):
     def __init__(self):
         self.spans: list = []
 
-    def export(self, spans):
-        self.spans.extend(spans)
+    def export(self, spans: object) -> SpanExportResult:
+        self.spans.extend(spans)  # type: ignore[arg-type]
         return SpanExportResult.SUCCESS
 
     def shutdown(self):

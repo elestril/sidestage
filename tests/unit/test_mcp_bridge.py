@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
 from sidestage.health import CampaignHealth, HealthStatus
@@ -35,7 +36,7 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
         )
         mock_campaign.update_entity_markdown = AsyncMock(return_value=True)
         mock_campaign.update_entity = AsyncMock(return_value=True)
-        mock_campaign.reload_defaults = MagicMock()
+        mock_campaign.reload_defaults = AsyncMock()
         mock_campaign.list_scenes = AsyncMock(return_value=[
             {"id": "scene_1", "name": "The Tavern", "type": "Scene", "body": "A noisy place."}
         ])
@@ -50,14 +51,14 @@ def mock_orchestrator(tmp_path: Path) -> SidestageOrchestrator:
 
 
 @pytest.fixture
-def mcp(mock_orchestrator: SidestageOrchestrator):
+def mcp(mock_orchestrator: SidestageOrchestrator) -> FastMCP:
     return create_mcp_server(mock_orchestrator)
 
 
 # --- Tool registration ---
 
 
-def test_expected_tools_registered(mcp):
+def test_expected_tools_registered(mcp: FastMCP):
     """All expected tools are registered on the FastMCP instance."""
     tool_names = {t.name for t in mcp._tool_manager.list_tools()}
     expected = {
@@ -80,41 +81,41 @@ def test_expected_tools_registered(mcp):
 
 
 @pytest.mark.anyio
-async def test_list_entities(mcp, mock_orchestrator):
+async def test_list_entities(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("list_entities", {})
-    mock_orchestrator.campaign.list_entities.assert_awaited_once()
+    mock_orchestrator.campaign.list_entities.assert_awaited_once()  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_get_entity_markdown(mcp, mock_orchestrator):
+async def test_get_entity_markdown(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("get_entity_markdown", {"entity_id": "char_1"})
-    mock_orchestrator.campaign.get_entity_markdown.assert_awaited_once_with("char_1")
+    mock_orchestrator.campaign.get_entity_markdown.assert_awaited_once_with("char_1")  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_get_entity_markdown_not_found(mcp, mock_orchestrator):
+async def test_get_entity_markdown_not_found(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     mock_orchestrator.campaign.get_entity_markdown = AsyncMock(return_value=None)
     with pytest.raises(ToolError, match="not found"):
         await mcp.call_tool("get_entity_markdown", {"entity_id": "bad_id"})
 
 
 @pytest.mark.anyio
-async def test_update_entity_markdown(mcp, mock_orchestrator):
+async def test_update_entity_markdown(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("update_entity_markdown", {
         "entity_id": "char_1",
         "markdown": "---\nname: Updated\n---\nNew body.",
     })
-    mock_orchestrator.campaign.update_entity_markdown.assert_awaited_once_with(
+    mock_orchestrator.campaign.update_entity_markdown.assert_awaited_once_with(  # type: ignore[attr-defined]
         "char_1", "---\nname: Updated\n---\nNew body."
     )
-    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_update_entity_markdown_failure(mcp, mock_orchestrator):
+async def test_update_entity_markdown_failure(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     mock_orchestrator.campaign.update_entity_markdown = AsyncMock(return_value=False)
     with pytest.raises(ToolError, match="Failed to update"):
         await mcp.call_tool("update_entity_markdown", {
@@ -124,15 +125,15 @@ async def test_update_entity_markdown_failure(mcp, mock_orchestrator):
 
 
 @pytest.mark.anyio
-async def test_update_entity(mcp, mock_orchestrator):
+async def test_update_entity(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("update_entity", {
         "entity_id": "char_1",
         "fields_json": '{"name": "Gandalf the White"}',
     })
-    mock_orchestrator.campaign.update_entity.assert_awaited_once_with(
+    mock_orchestrator.campaign.update_entity.assert_awaited_once_with(  # type: ignore[attr-defined]
         "char_1", {"name": "Gandalf the White"}
     )
-    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})  # type: ignore[attr-defined]
     assert result is not None
 
 
@@ -140,15 +141,15 @@ async def test_update_entity(mcp, mock_orchestrator):
 
 
 @pytest.mark.anyio
-async def test_reload_defaults(mcp, mock_orchestrator):
+async def test_reload_defaults(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("reload_defaults", {})
-    mock_orchestrator.campaign.reload_defaults.assert_called_once()
-    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})
+    mock_orchestrator.campaign.reload_defaults.assert_awaited_once()  # type: ignore[attr-defined]
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "entities_updated"})  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_backup_campaign_degraded(mcp, mock_orchestrator):
+async def test_backup_campaign_degraded(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     mock_orchestrator.campaign.health.status = HealthStatus.DEGRADED
     with pytest.raises(ToolError, match="already in progress"):
         await mcp.call_tool("backup_campaign", {})
@@ -158,34 +159,34 @@ async def test_backup_campaign_degraded(mcp, mock_orchestrator):
 
 
 @pytest.mark.anyio
-async def test_list_scenes(mcp, mock_orchestrator):
+async def test_list_scenes(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("list_scenes", {})
-    mock_orchestrator.campaign.list_scenes.assert_awaited_once()
+    mock_orchestrator.campaign.list_scenes.assert_awaited_once()  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_create_scene(mcp, mock_orchestrator):
+async def test_create_scene(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("create_scene", {
         "name": "New SceneModel",
         "description": "A test scene.",
     })
-    mock_orchestrator.campaign.create_scene.assert_awaited_once_with(
+    mock_orchestrator.campaign.create_scene.assert_awaited_once_with(  # type: ignore[attr-defined]
         name="New SceneModel", description="A test scene.", current_gametime=None,
     )
-    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "scene_updated"})
+    mock_orchestrator.campaign.user.send.assert_awaited_with({"type": "scene_updated"})  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_get_scene_messages(mcp, mock_orchestrator):
+async def test_get_scene_messages(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     result = await mcp.call_tool("get_scene_messages", {"scene_id": "scene_1"})
-    mock_orchestrator.campaign.get_scene_messages.assert_called_once_with("scene_1")
+    mock_orchestrator.campaign.get_scene_messages.assert_called_once_with("scene_1")  # type: ignore[attr-defined]
     assert result is not None
 
 
 @pytest.mark.anyio
-async def test_get_scene_messages_not_found(mcp, mock_orchestrator):
+async def test_get_scene_messages_not_found(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     mock_orchestrator.campaign.get_scene_messages = MagicMock(return_value=None)
     with pytest.raises(ToolError, match="not found"):
         await mcp.call_tool("get_scene_messages", {"scene_id": "bad_id"})
@@ -195,7 +196,7 @@ async def test_get_scene_messages_not_found(mcp, mock_orchestrator):
 
 
 @pytest.mark.anyio
-async def test_send_chat_message(mcp, mock_orchestrator):
+async def test_send_chat_message(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     """send_chat_message calls scene.chat() with raw parameters."""
     mock_scene = MagicMock()
     mock_scene.chat = AsyncMock()
@@ -212,7 +213,7 @@ async def test_send_chat_message(mcp, mock_orchestrator):
 
 
 @pytest.mark.anyio
-async def test_send_chat_message_scene_not_found(mcp, mock_orchestrator):
+async def test_send_chat_message_scene_not_found(mcp: FastMCP, mock_orchestrator: SidestageOrchestrator):
     mock_orchestrator.get_active_scene = AsyncMock(return_value=None)
     with pytest.raises(ToolError, match="not found"):
         await mcp.call_tool("send_chat_message", {
@@ -224,8 +225,8 @@ async def test_send_chat_message_scene_not_found(mcp, mock_orchestrator):
 # --- MCP endpoint mount ---
 
 
-def test_mcp_endpoint_mounted(mock_orchestrator):
+def test_mcp_endpoint_mounted(mock_orchestrator: SidestageOrchestrator):
     """The /v1/mcp route is mounted on the FastAPI app."""
     app = mock_orchestrator.fastapi_app
-    mount_paths = [route.path for route in app.routes if hasattr(route, 'path')]
+    mount_paths = [route.path for route in app.routes if hasattr(route, 'path')]  # type: ignore[attr-defined]
     assert "/v1/mcp" in mount_paths

@@ -1,3 +1,4 @@
+from datetime import datetime
 """Unit tests for entity serialization to/from graph node properties."""
 import json
 import pytest
@@ -50,7 +51,7 @@ def test_entity_to_labels_chat_message_event():
     """entity_to_labels for EventModel with CHAT_MESSAGE returns ['Entity', 'Event', 'ChatMessage']."""
     event = EventModel(
         id="e1", name="msg", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
     )
     assert entity_to_labels(event) == ["Entity", "Event", "ChatMessage"]
 
@@ -59,7 +60,7 @@ def test_entity_to_labels_join_event():
     """entity_to_labels for EventModel with JOIN returns ['Entity', 'Event', 'JoinEvent']."""
     event = EventModel(
         id="e1", name="join", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.JOIN,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.JOIN,
     )
     assert entity_to_labels(event) == ["Entity", "Event", "JoinEvent"]
 
@@ -68,7 +69,7 @@ def test_entity_to_labels_leave_event():
     """entity_to_labels for EventModel with LEAVE returns ['Entity', 'Event', 'LeaveEvent']."""
     event = EventModel(
         id="e1", name="leave", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.LEAVE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.LEAVE,
     )
     assert entity_to_labels(event) == ["Entity", "Event", "LeaveEvent"]
 
@@ -77,7 +78,7 @@ def test_entity_to_labels_adjust_gametime_event():
     """entity_to_labels for ADJUST_GAMETIME returns ['Entity', 'Event', 'AdjustGametime']."""
     event = EventModel(
         id="e1", name="time", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.ADJUST_GAMETIME,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.ADJUST_GAMETIME,
     )
     assert entity_to_labels(event) == ["Entity", "Event", "AdjustGametime"]
 
@@ -86,7 +87,7 @@ def test_entity_to_labels_error_event():
     """entity_to_labels for ERROR returns ['Entity', 'Event', 'Error']."""
     event = EventModel(
         id="e1", name="Error", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.ERROR,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.ERROR,
     )
     assert entity_to_labels(event) == ["Entity", "Event", "Error"]
 
@@ -110,7 +111,7 @@ def test_entity_to_properties_serializes_metadata_as_json_string():
     """metadata dict is serialized as a JSON string in graph properties."""
     event = EventModel(
         id="e1", name="msg", body="hi", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
         metadata={"widget": {"type": "card"}},
     )
     props = entity_to_properties(event)
@@ -122,7 +123,7 @@ def test_entity_to_properties_empty_metadata_serialized_as_json():
     """Empty metadata dict serialized as '{}' JSON string."""
     event = EventModel(
         id="e1", name="msg", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
     )
     props = entity_to_properties(event)
     assert props["metadata"] == "{}"
@@ -132,7 +133,7 @@ def test_entity_to_properties_walltime_as_iso_string():
     """walltime is stored as ISO string in graph properties."""
     event = EventModel(
         id="e1", name="msg", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T12:30:00+00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T12:30:00+00:00"), event_type=EventType.CHAT_MESSAGE,
     )
     props = entity_to_properties(event)
     assert isinstance(props["walltime"], str)
@@ -142,7 +143,7 @@ def test_entity_to_properties_event_type_as_string():
     """event_type stored as its string value."""
     event = EventModel(
         id="e1", name="msg", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
     )
     props = entity_to_properties(event)
     assert props["event_type"] == "ChatMessage"
@@ -152,7 +153,7 @@ def test_entity_to_properties_visibility_as_string():
     """visibility stored as its string value."""
     event = EventModel(
         id="e1", name="msg", body="", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
         visibility=Visibility.GM_ONLY,
     )
     props = entity_to_properties(event)
@@ -230,6 +231,7 @@ def test_node_to_entity_deserializes_metadata_from_json_string():
         "visibility": "public",
     }
     entity = node_to_entity(labels, properties)
+    assert isinstance(entity, EventModel)
     assert isinstance(entity.metadata, dict)
     assert entity.metadata["widget"] == "poll"
 
@@ -238,7 +240,7 @@ def test_event_model_roundtrip_through_graph_helpers():
     """EventModel survives entity_to_properties -> node_to_entity round-trip."""
     event = EventModel(
         id="e1", name="msg", body="hello", scene_id="s1", gametime=100,
-        walltime="2024-01-01T00:00:00", event_type=EventType.CHAT_MESSAGE,
+        walltime=datetime.fromisoformat("2024-01-01T00:00:00"), event_type=EventType.CHAT_MESSAGE,
         character_id="c1", visibility=Visibility.PUBLIC,
         metadata={"key": "value"},
     )

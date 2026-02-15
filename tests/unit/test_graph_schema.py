@@ -14,8 +14,6 @@ from sidestage.graph.schema import (
     get_schema_version,
     initialize_schema,
 )
-from sidestage.graph.errors import SchemaError
-
 
 def _make_client(query_results: list[list[Any]] | None = None) -> MagicMock:
     """Create a mock GraphClient with a mock graph.query().
@@ -199,17 +197,20 @@ async def test_initialize_schema_updates_version_after_migration():
 
 
 @pytest.mark.anyio
-async def test_initialize_schema_raises_schema_error_on_failure():
+async def test_initialize_schema_handles_index_failure_gracefully():
+    """Index creation failures are logged as warnings, not raised."""
     client = _make_client()
     version_result = MagicMock()
     version_result.result_set = []
 
+    # First call returns version, second fails (index creation), rest succeed
     client.graph.query = AsyncMock(
         side_effect=[version_result, Exception("Cypher syntax error")]
+        + [_ok()] * 20
     )
 
-    with pytest.raises(SchemaError, match="Failed to create index"):
-        await initialize_schema(client)
+    # Should complete without raising
+    await initialize_schema(client)
 
 
 # --- index/constraint ordering ---

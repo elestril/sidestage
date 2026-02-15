@@ -11,6 +11,9 @@ Depends on all sections (01-07) being implemented.
 """
 
 import time
+from collections.abc import Generator
+from typing import Any
+
 import pytest
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -23,7 +26,7 @@ from sidestage import config as sidestage_config
 
 
 @pytest.fixture
-def mock_agent():
+def mock_agent() -> MagicMock:
     """Create a mock LiteLLMAgent that returns a canned response."""
     agent = MagicMock()
     agent.arun = AsyncMock(return_value=AgentResponse(content="NPC response text."))
@@ -45,7 +48,7 @@ def orchestrator(tmp_path: Path) -> SidestageOrchestrator:
 
 
 @pytest.fixture
-def client(orchestrator: SidestageOrchestrator, mock_agent) -> TestClient:
+def client(orchestrator: SidestageOrchestrator, mock_agent: MagicMock) -> Generator[TestClient, None, None]:
     """TestClient with LiteLLMAgent patched to return mock_agent."""
     with patch("sidestage.agent.LiteLLMAgent", return_value=mock_agent):
         yield TestClient(orchestrator.fastapi_app)
@@ -112,7 +115,7 @@ class TestFullChatFlow:
 class TestNPCResponse:
     """NPCActor response -> new event created -> persisted."""
 
-    def test_npc_responds_to_user_message(self, client: TestClient, mock_agent):
+    def test_npc_responds_to_user_message(self, client: TestClient, mock_agent: MagicMock):
         """After a user sends a message, NPCActor generates a response."""
         client.post(
             "/v1/chat",
@@ -137,7 +140,7 @@ class TestNPCResponse:
 
         assert found, "NPC response not found in scene messages"
 
-    def test_npc_response_has_agent_actor_id(self, client: TestClient, mock_agent):
+    def test_npc_response_has_agent_actor_id(self, client: TestClient, mock_agent: MagicMock):
         """The NPC response has an actor_id starting with 'agent:'."""
         client.post(
             "/v1/chat",
@@ -161,7 +164,7 @@ class TestNPCResponse:
 
         assert found, "NPC response with agent: actor_id not found"
 
-    def test_user_and_npc_messages_in_history(self, client: TestClient, mock_agent):
+    def test_user_and_npc_messages_in_history(self, client: TestClient, mock_agent: MagicMock):
         """Both user message and NPC response appear in scene history."""
         client.post(
             "/v1/chat",
@@ -190,7 +193,7 @@ class TestLLMFailure:
     """LLM failure -> ERROR event created -> persisted."""
 
     @pytest.fixture
-    def failing_agent(self):
+    def failing_agent(self) -> MagicMock:
         """Create a mock agent that raises on arun."""
         agent = MagicMock()
         agent.arun = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -203,8 +206,8 @@ class TestLLMFailure:
 
     @pytest.fixture
     def failing_client(
-        self, orchestrator: SidestageOrchestrator, failing_agent
-    ) -> TestClient:
+        self, orchestrator: SidestageOrchestrator, failing_agent: MagicMock
+    ) -> Generator[TestClient, None, None]:
         with patch("sidestage.agent.LiteLLMAgent", return_value=failing_agent):
             yield TestClient(orchestrator.fastapi_app)
 
@@ -255,7 +258,7 @@ class TestLLMFailure:
 class TestCoAuthorParticipation:
     """Co-Author NPCActor with system_actor=True participates in scenes."""
 
-    def test_co_author_responds_as_npc(self, client: TestClient, mock_agent):
+    def test_co_author_responds_as_npc(self, client: TestClient, mock_agent: MagicMock):
         """The Co-Author responds with character_id='char_co_author'."""
         client.post(
             "/v1/chat",

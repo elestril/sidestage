@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import uuid
+from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
@@ -68,7 +70,7 @@ class TestAsyncPropagation:
     """Context propagation through async/await and asyncio.create_task."""
 
     @pytest.fixture(params=["asyncio"])
-    def anyio_backend(self, request):
+    def anyio_backend(self, request: pytest.FixtureRequest) -> str:
         return request.param
 
     @pytest.mark.anyio
@@ -124,11 +126,11 @@ class TestRequestContextMiddleware:
     """Tests for the FastAPI middleware."""
 
     @pytest.fixture(params=["asyncio"])
-    def anyio_backend(self, request):
+    def anyio_backend(self, request: pytest.FixtureRequest) -> str:
         return request.param
 
     @pytest.fixture
-    def app(self):
+    def app(self) -> FastAPI:
         from fastapi import FastAPI
         from sidestage.request_context_middleware import RequestContextMiddleware
 
@@ -136,7 +138,7 @@ class TestRequestContextMiddleware:
         app.add_middleware(RequestContextMiddleware)
 
         @app.get("/ctx")
-        async def read_ctx():
+        async def read_ctx() -> dict[str, object]:
             ctx = get_request_context()
             if ctx is None:
                 return {"error": "no context"}
@@ -150,7 +152,7 @@ class TestRequestContextMiddleware:
         return app
 
     @pytest.mark.anyio
-    async def test_populates_context_from_headers(self, app):
+    async def test_populates_context_from_headers(self, app: FastAPI):
         from httpx import ASGITransport, AsyncClient
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -167,7 +169,7 @@ class TestRequestContextMiddleware:
         assert data["annotations"]["debug-tag"] == "my-test"
 
     @pytest.mark.anyio
-    async def test_generates_request_id_when_missing(self, app):
+    async def test_generates_request_id_when_missing(self, app: FastAPI):
         from httpx import ASGITransport, AsyncClient
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -177,7 +179,7 @@ class TestRequestContextMiddleware:
         assert len(data["request_id"]) > 0
 
     @pytest.mark.anyio
-    async def test_returns_request_id_in_response_header(self, app):
+    async def test_returns_request_id_in_response_header(self, app: FastAPI):
         from httpx import ASGITransport, AsyncClient
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -185,7 +187,7 @@ class TestRequestContextMiddleware:
         assert resp.headers["x-request-id"] == "echo-me"
 
     @pytest.mark.anyio
-    async def test_defaults_actor_to_anonymous(self, app):
+    async def test_defaults_actor_to_anonymous(self, app: FastAPI):
         from httpx import ASGITransport, AsyncClient
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -193,7 +195,7 @@ class TestRequestContextMiddleware:
         assert resp.json()["user"] == "anonymous"
 
     @pytest.mark.anyio
-    async def test_context_cleaned_up_after_request(self, app):
+    async def test_context_cleaned_up_after_request(self, app: FastAPI):
         from httpx import ASGITransport, AsyncClient
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -239,11 +241,11 @@ class TestRequestContextFilter:
 
 
 class _CollectingExporter(SpanExporter):
-    def __init__(self):
-        self.spans: list = []
+    def __init__(self) -> None:
+        self.spans: list[Any] = []
 
-    def export(self, spans):
-        self.spans.extend(spans)
+    def export(self, spans: object) -> SpanExportResult:
+        self.spans.extend(spans)  # type: ignore[arg-type]
         return SpanExportResult.SUCCESS
 
     def shutdown(self):
@@ -254,7 +256,7 @@ class TestStampSpanWithRequestContext:
     """Tests for stamp_span_with_request_context."""
 
     @pytest.fixture(params=["asyncio"])
-    def anyio_backend(self, request):
+    def anyio_backend(self, request: pytest.FixtureRequest) -> str:
         return request.param
 
     def _setup_provider(self):

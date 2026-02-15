@@ -196,7 +196,7 @@ def _mock_campaign_with_character():
     user = User(actor_id="user")
     campaign.user = user
 
-    def _get_character(model):
+    def _get_character(model: CharacterModel) -> Character:
         char = Character(model=model, actor=user)
         return char
 

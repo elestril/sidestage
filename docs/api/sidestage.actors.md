@@ -52,6 +52,6 @@ Remove a WebSocket connection.
 
 Send event to all WebSocket connections.
 
-#### `send(message: dict, exclude: Any = None) -> None` *async*
+#### `send(message: dict[str, Any], exclude: Any = None) -> None` *async*
 
 Send to all connections, optionally excluding one.

@@ -77,12 +77,11 @@ List all entities as dictionaries with an added 'type' field.
 
 List all scenes in the campaign.
 
-#### `reload_defaults() -> None`
+#### `reload_defaults() -> None` *async*
 
-Load default entities from data/campaign_defaults/markdown/.
+Load default entities into both SQLite storage and the graph.
 
-Uses the migration parser to read all entity types (characters, scenes,
-locations, items, events) and upserts them into the database.
+Called via the /v1/campaign/reload-defaults endpoint or after import.
 
 #### `shutdown() -> None` *async*
 

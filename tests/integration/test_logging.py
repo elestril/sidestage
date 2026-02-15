@@ -18,7 +18,8 @@ def test_root_logger_writes_to_server_log(tmp_path: Path):
 
     test_logger = logging.getLogger("test_root_logger_writes")
     test_logger.info("hello from test")
-    logging.shutdown()
+    for handler in logging.root.handlers + logging.getLogger().handlers:
+        handler.flush()
 
     content = (tmp_path / "server.log").read_text()
     assert "hello from test" in content
@@ -30,7 +31,8 @@ def test_root_logger_does_not_write_to_request_log(tmp_path: Path):
 
     test_logger = logging.getLogger("test_root_not_in_request")
     test_logger.info("should not appear in request log")
-    logging.shutdown()
+    for handler in logging.root.handlers + logging.getLogger().handlers:
+        handler.flush()
 
     content = (tmp_path / "request.log").read_text()
     assert "should not appear" not in content
@@ -47,7 +49,8 @@ def test_campaign_logging_creates_log_files(tmp_path: Path):
 
     campaign_log.info("campaign message")
     chat_log.debug("chat debug message")
-    logging.shutdown()
+    for h in campaign_log.handlers + chat_log.handlers:
+        h.flush()
 
     assert (campaign_dir / "campaign.log").exists()
     assert (campaign_dir / "chat.log").exists()
@@ -68,7 +71,10 @@ def test_campaign_log_does_not_propagate_to_server(tmp_path: Path):
 
     campaign_log, _ = initCampaignLogging("test_no_prop", campaign_dir)
     campaign_log.info("campaign only message")
-    logging.shutdown()
+    for h in campaign_log.handlers:
+        h.flush()
+    for h in logging.root.handlers:
+        h.flush()
 
     server_content = (tmp_path / "server.log").read_text()
     assert "campaign only message" not in server_content

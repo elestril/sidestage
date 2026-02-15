@@ -15,7 +15,7 @@ Truncates string attribute values exceeding max_attribute_length.
 
 Get the current trace_id as a hex string, or None if no active span.
 
-### `record_error(span, exception: Exception) -> None`
+### `record_error(span: trace.Span, exception: Exception) -> None`
 
 Set span status to ERROR and record the exception.
 
@@ -25,6 +25,6 @@ Copy ambient :class:`RequestContext` fields onto a span as attributes.
 
 Safe to call when there is no active request context (no-op).
 
-### `trace_span(name: str, attributes: dict[str, Any] | None = None)`
+### `trace_span(name: str, attributes: dict[str, Any] | None = None) -> Callable[[F], F]`
 
 Decorator that wraps an async function in a span.

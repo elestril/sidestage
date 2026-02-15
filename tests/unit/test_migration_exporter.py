@@ -1,3 +1,4 @@
+from datetime import datetime
 """Tests for migration/exporter.py -- backup campaign to markdown directory."""
 
 import json
@@ -80,7 +81,7 @@ def sample_entities() -> list[EntityModel]:
             body="The door swings open.",
             scene_id="scene_01",
             gametime=50,
-            walltime="2024-01-01T12:00:00",
+            walltime=datetime.fromisoformat("2024-01-01T12:00:00"),
             event_type=EventType.CHAT_MESSAGE,
         ),
     ]
@@ -208,7 +209,7 @@ async def test_retrieves_chat_logs_for_scenes(mock_campaign: MagicMock, sample_e
         body="Hello there!",
         scene_id="scene_chat",
         gametime=10,
-        walltime="2024-01-01T12:00:00",
+        walltime=datetime.fromisoformat("2024-01-01T12:00:00"),
         character_id="char_eldric",
         event_type=EventType.CHAT_MESSAGE,
     )
@@ -294,7 +295,7 @@ async def test_writes_chatlog_to_scene_dot_d(mock_campaign: MagicMock, tmp_path:
         body="Hello!",
         scene_id="scene_chat",
         gametime=10,
-        walltime="2024-01-01T12:00:00",
+        walltime=datetime.fromisoformat("2024-01-01T12:00:00"),
         character_id="char_eldric",
         event_type=EventType.CHAT_MESSAGE,
     )

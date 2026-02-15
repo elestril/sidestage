@@ -1,3 +1,4 @@
+from datetime import datetime
 import pytest
 from sidestage.models import CharacterModel, LocationModel, ItemModel
 from sidestage.entities import entity_to_markdown, markdown_to_entity
@@ -65,7 +66,7 @@ def test_event_model_markdown_roundtrip():
         body="Hello world",
         scene_id="scene_1",
         gametime=3600,
-        walltime="2024-06-15T10:30:00Z",
+        walltime=datetime.fromisoformat("2024-06-15T10:30:00Z"),
         event_type=EventType.CHAT_MESSAGE,
         character_id="char_alice",
     )

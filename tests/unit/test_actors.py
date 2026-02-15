@@ -1,5 +1,7 @@
 """Tests for the Actor hierarchy: Actor ABC, NPCActor, User."""
 
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone
@@ -9,9 +11,9 @@ from sidestage.event import Event
 from sidestage.models import EventModel, EventType, Visibility
 
 
-def _make_event(**overrides) -> Event:
+def _make_event(**overrides: Any) -> Event:
     """Helper to create an Event with sensible defaults."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         id="evt_test",
         name="Test",
         body="hello",
@@ -30,7 +32,7 @@ def _make_event(**overrides) -> Event:
 def test_actor_is_abstract():
     """Actor is abstract, cannot be instantiated directly."""
     with pytest.raises(TypeError):
-        Actor(actor_id="test")
+        Actor(actor_id="test")  # type: ignore[abstract]
 
 
 def test_actor_requires_process():
@@ -39,13 +41,13 @@ def test_actor_requires_process():
         pass
 
     with pytest.raises(TypeError):
-        IncompleteActor(actor_id="test")
+        IncompleteActor(actor_id="test")  # type: ignore[abstract]
 
 
 def test_actor_concrete_subclass_stores_actor_id():
     """Concrete subclass stores actor_id."""
     class ConcreteActor(Actor):
-        async def process(self, event):
+        async def process(self, event: Event) -> None:
             pass
 
     actor = ConcreteActor(actor_id="test-123")

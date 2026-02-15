@@ -1,3 +1,4 @@
+from datetime import datetime
 """Tests for migration/serialization.py -- canonical frontmatter serialization."""
 
 import pytest
@@ -84,7 +85,7 @@ def test_entity_to_frontmatter_dict_event_includes_event_type():
     """entity_to_frontmatter_dict for EventModel includes event_type in frontmatter."""
     event = EventModel(
         id="evt_1", name="Chat", body="hi", scene_id="s1",
-        gametime=100, walltime="2026-01-15T14:30:00Z",
+        gametime=100, walltime=datetime.fromisoformat("2026-01-15T14:30:00Z"),
         event_type=EventType.CHAT_MESSAGE, character_id="c1",
     )
     fm, body = entity_to_frontmatter_dict(event)
@@ -212,7 +213,7 @@ def test_entity_roundtrip_flattened_event():
     """Full roundtrip: EventModel -> frontmatter_dict -> EventModel preserves event_type."""
     original = EventModel(
         id="evt_rt", name="Roundtrip", body="Content",
-        scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z",
+        scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"),
         event_type=EventType.JOIN, actor_id="a1",
     )
     fm, body = entity_to_frontmatter_dict(original)
@@ -321,11 +322,11 @@ def test_entity_roundtrip_all_types():
         LocationModel(id="l1", name="L", body="B", connected_locations=["l2"]),
         ItemModel(id="i1", name="I", body="B"),
         SceneModel(id="s1", name="S", body="B", location_id="l1"),
-        EventModel(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.CHAT_MESSAGE),
-        EventModel(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.JOIN, actor_id="a1"),
-        EventModel(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.LEAVE, actor_id="a1"),
-        EventModel(id="ag1", name="Adjust", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.ADJUST_GAMETIME),
-        EventModel(id="er1", name="Error", body="B", scene_id="s1", gametime=0, walltime="2026-01-01T00:00:00Z", event_type=EventType.ERROR),
+        EventModel(id="e1", name="E", body="B", scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.CHAT_MESSAGE),
+        EventModel(id="j1", name="J", body="B", scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.JOIN, actor_id="a1"),
+        EventModel(id="le1", name="Leave", body="B", scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.LEAVE, actor_id="a1"),
+        EventModel(id="ag1", name="Adjust", body="B", scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.ADJUST_GAMETIME),
+        EventModel(id="er1", name="Error", body="B", scene_id="s1", gametime=0, walltime=datetime.fromisoformat("2026-01-01T00:00:00Z"), event_type=EventType.ERROR),
     ]
     for original in entities:
         fm, body = entity_to_frontmatter_dict(original)

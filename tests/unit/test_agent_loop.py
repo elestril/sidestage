@@ -38,6 +38,7 @@ async def test_agent_responds_to_user():
     await actor.process(event)
 
     assert actor.agent.arun.called
+    assert event.scene is not None
     event.scene.process.assert_awaited_once()
 
 
@@ -53,6 +54,7 @@ async def test_agent_puts_reply_on_scene():
     await actor.process(event)
 
     # Verify the reply was routed through scene.process with the agent's actor_id
+    assert event.scene is not None
     event.scene.process.assert_awaited_once()
     reply_event = event.scene.process.call_args[0][0]
     assert reply_event.model.actor_id == "agent:c1"
