@@ -91,48 +91,85 @@ class Campaign:
 
     def _ensure_defaults(self) -> None:
         """Ensure that necessary default entities (scenes, characters) exist in the database."""
-        self.reload_defaults()
+        self._load_defaults_to_storage()
 
-    def reload_defaults(self) -> None:
+    def _parse_defaults(self) -> list[EntityModel]:
+        """Parse default entities from data/campaign_defaults/markdown/.
+
+        Returns the parsed entity list (may be empty). Logs errors/warnings.
         """
-        Load default entities from data/campaign_defaults/markdown/.
+        project_root = Path(__file__).parent.parent.parent
+        defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
 
-        Uses the migration parser to read all entity types (characters, scenes,
-        locations, items, events) and upserts them into the database.
+        if not defaults_dir.exists():
+            self.campaign_log.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
+            return []
+
+        result = parse_directory(defaults_dir)
+
+        for issue in result.errors:
+            self.campaign_log.error(f"Error loading default: {issue.message} ({issue.file_path})")
+        for issue in result.warnings:
+            self.campaign_log.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
+
+        return list(result.entities)
+
+    def _store_entity(self, entity: EntityModel) -> None:
+        """Write a single entity to SQLite storage."""
+        if isinstance(entity, CharacterModel):
+            self.storage.add_character(entity)
+        elif isinstance(entity, LocationModel):
+            self.storage.add_location(entity)
+        elif isinstance(entity, ItemModel):
+            self.storage.add_item(entity)
+        elif isinstance(entity, SceneModel):
+            self.storage.add_scene(entity)
+        elif isinstance(entity, EventModel):
+            self.storage.add_event(entity)
+
+    def _load_defaults_to_storage(self) -> None:
+        """Load default entities into SQLite only (used at init before graph is ready)."""
+        self.campaign_log.info("Reloading default content from data directory...")
+        entities = self._parse_defaults()
+        count = 0
+        for entity in entities:
+            try:
+                self._store_entity(entity)
+                count += 1
+                self.campaign_log.info(f"Loaded default {entity.entity_type}: {entity.name} ({entity.id})")
+            except Exception as e:
+                self.campaign_log.error(f"Error loading default entity {entity.id}: {e}")
+
+    async def reload_defaults(self) -> None:
+        """Load default entities into both SQLite storage and the graph.
+
+        Called via the /v1/campaign/reload-defaults endpoint or after import.
         """
         with tracer.start_as_current_span("campaign.reload_defaults") as span:
             span.set_attribute("sidestage.scene.id", "campaign_planning")
 
             self.campaign_log.info("Reloading default content from data directory...")
+            entities = self._parse_defaults()
 
-            project_root = Path(__file__).parent.parent.parent
-            defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
-
-            if not defaults_dir.exists():
-                self.campaign_log.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
+            if not entities:
                 span.set_attribute("entities.loaded_count", 0)
                 return
 
-            result = parse_directory(defaults_dir)
-
-            for issue in result.errors:
-                self.campaign_log.error(f"Error loading default: {issue.message} ({issue.file_path})")
-            for issue in result.warnings:
-                self.campaign_log.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
-
             count = 0
-            for entity in result.entities:
+            for entity in entities:
                 try:
-                    if isinstance(entity, CharacterModel):
-                        self.storage.add_character(entity)
-                    elif isinstance(entity, LocationModel):
-                        self.storage.add_location(entity)
-                    elif isinstance(entity, ItemModel):
-                        self.storage.add_item(entity)
-                    elif isinstance(entity, SceneModel):
-                        self.storage.add_scene(entity)
-                    elif isinstance(entity, EventModel):
-                        self.storage.add_event(entity)
+                    self._store_entity(entity)
+
+                    if self.graph_client is not None:
+                        try:
+                            existing = await graph_get_entity(self.graph_client, entity.id)
+                            if existing is None:
+                                await graph_create_entity(self.graph_client, entity)
+                        except Exception as ge:
+                            self.campaign_log.warning(
+                                f"Failed to upsert default entity {entity.id} to graph: {ge}"
+                            )
+
                     count += 1
                     self.campaign_log.info(f"Loaded default {entity.entity_type}: {entity.name} ({entity.id})")
                 except Exception as e:

@@ -110,7 +110,7 @@ def frontmatter_dict_to_entity(
 
 def memory_to_frontmatter_dict(memory: Memory) -> tuple[dict[str, Any], str]:
     """Convert memory to (frontmatter_dict, content_body)."""
-    data = memory.model_dump()
+    data = memory.model_dump(mode="json")
     content = data.pop("content")
     data.pop("embedding", None)
     return data, content

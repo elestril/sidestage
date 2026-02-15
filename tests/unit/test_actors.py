@@ -74,20 +74,115 @@ def test_npc_actor_system_actor_true():
 
 
 @pytest.mark.anyio
-async def test_npc_actor_process_ignores_non_user_events():
-    """NPCActor.process() returns without action for non-User-originated events."""
-    npc = NPCActor(actor_id="agent:char_1")
-    event = _make_event()
-    # No character set on event, so it should return without error
-    await npc.process(event)
-
-
-@pytest.mark.anyio
 async def test_npc_actor_process_ignores_non_chat_events():
     """NPCActor.process() returns without action for non-CHAT_MESSAGE events."""
     npc = NPCActor(actor_id="agent:char_1")
-    event = _make_event(event_type=EventType.JOIN)
+    npc.agent = AsyncMock()
+    event = _make_event(event_type=EventType.JOIN, actor_id="user")
     await npc.process(event)
+    npc.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_npc_actor_process_ignores_own_events():
+    """NPCActor.process() skips events it sent itself."""
+    npc = NPCActor(actor_id="agent:char_1")
+    npc.agent = AsyncMock()
+    event = _make_event(actor_id="agent:char_1")
+    await npc.process(event)
+    npc.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_npc_actor_process_ignores_other_npc_events():
+    """NPCActor.process() skips CHAT_MESSAGE events from other NPCs."""
+    npc = NPCActor(actor_id="agent:char_1")
+    npc.agent = AsyncMock()
+    event = _make_event(actor_id="agent:char_2")
+    await npc.process(event)
+    npc.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_npc_actor_process_ignores_none_actor_id():
+    """NPCActor.process() skips events with actor_id=None (unknown source)."""
+    npc = NPCActor(actor_id="agent:char_1")
+    npc.agent = AsyncMock()
+    event = _make_event()  # actor_id defaults to None
+    assert event.model.actor_id is None
+    await npc.process(event)
+    npc.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_npc_actor_process_responds_to_user_events():
+    """NPCActor.process() calls the LLM agent for User-originated events."""
+    npc = NPCActor(actor_id="agent:char_1")
+    npc.agent = AsyncMock()
+    npc.agent.arun.return_value = MagicMock(content="")
+
+    event = _make_event(actor_id="user")
+    await npc.process(event)
+    npc.agent.arun.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_npc_actor_process_enqueues_response():
+    """NPCActor.process() enqueues a response event when the LLM replies."""
+    npc = NPCActor(actor_id="agent:char_1")
+    char = MagicMock()
+    char.name = "Alice"
+    char.id = "char_1"
+    npc.character = char
+    npc.agent = AsyncMock()
+    npc.agent.arun.return_value = MagicMock(content="Hello traveler!")
+
+    mock_scene = AsyncMock()
+    event = _make_event(actor_id="user")
+    event.scene = mock_scene
+
+    await npc.process(event)
+
+    mock_scene.process.assert_called_once()
+    response_event = mock_scene.process.call_args[0][0]
+    assert response_event.model.actor_id == "agent:char_1"
+    assert response_event.model.body == "Hello traveler!"
+    assert response_event.model.event_type == EventType.CHAT_MESSAGE
+
+
+@pytest.mark.anyio
+async def test_npc_does_not_respond_to_other_npc_response():
+    """Two NPCs: NPC B must not respond when NPC A's response is dispatched."""
+    npc_a = NPCActor(actor_id="agent:char_a")
+    npc_b = NPCActor(actor_id="agent:char_b")
+    npc_b.agent = AsyncMock()
+
+    # Simulate NPC A's response event being dispatched to NPC B
+    event_from_a = _make_event(actor_id="agent:char_a", body="I am NPC A!")
+    await npc_b.process(event_from_a)
+    npc_b.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_system_actor_does_not_respond_to_npc():
+    """System actor (co-author) must not respond to regular NPC events."""
+    co_author = NPCActor(actor_id="agent:char_co_author", system_actor=True)
+    co_author.agent = AsyncMock()
+
+    event_from_npc = _make_event(actor_id="agent:char_alice")
+    await co_author.process(event_from_npc)
+    co_author.agent.arun.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_npc_does_not_respond_to_system_actor():
+    """Regular NPC must not respond to system actor (co-author) events."""
+    npc = NPCActor(actor_id="agent:char_alice")
+    npc.agent = AsyncMock()
+
+    event_from_coauthor = _make_event(actor_id="agent:char_co_author")
+    await npc.process(event_from_coauthor)
+    npc.agent.arun.assert_not_called()
 
 
 # --- User ---

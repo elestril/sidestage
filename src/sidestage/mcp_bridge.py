@@ -106,7 +106,7 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
     @mcp.tool()
     async def reload_defaults() -> str:
         """Reload default entities from the data directory into the campaign."""
-        orchestrator.campaign.reload_defaults()
+        await orchestrator.campaign.reload_defaults()
         await orchestrator.campaign.user.send({"type": "entities_updated"})
         return "Defaults reloaded successfully"
 

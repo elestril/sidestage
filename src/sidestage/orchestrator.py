@@ -119,12 +119,17 @@ class SidestageOrchestrator:
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:
-        """Write PID file on startup, init tracing, run MCP session manager, remove on shutdown."""
+        """Startup: connect graph, init tracing, run MCP. Shutdown: cleanup."""
+        await self.campaign.start_graph()
         self._init_tracing()
         try:
             async with self._mcp_server.session_manager.run():
                 yield
         finally:
+            try:
+                await self.campaign.shutdown()
+            except Exception:
+                logger.exception("Error during campaign shutdown")
             try:
                 shutdown_tracing()
             except Exception:
@@ -288,7 +293,7 @@ class SidestageOrchestrator:
         @self.fastapi_app.post("/v1/campaign/reload-defaults")
         async def reload_defaults() -> Dict[str, str]:
             """Reload default characters and prompts from the data directory."""
-            self.campaign.reload_defaults()
+            await self.campaign.reload_defaults()
             await self.campaign.user.send({"type": "entities_updated"})
             return {"status": "ok"}
 

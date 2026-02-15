@@ -163,11 +163,10 @@ class NPCActor(Actor):
         # Guard: only react to CHAT_MESSAGE events
         if event.model.event_type != EventType.CHAT_MESSAGE:
             return
-        # Don't respond to our own events or other NPC events
-        actor_id = event.model.actor_id or ""
-        if actor_id == self.actor_id:
-            return
-        if actor_id.startswith("agent:"):
+        # Only respond to events from human users — never to other NPCs,
+        # our own messages, or events with no actor_id.
+        actor_id = event.model.actor_id
+        if not actor_id or actor_id.startswith("agent:"):
             return
 
         if not self.agent:

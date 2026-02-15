@@ -106,9 +106,8 @@ async def _migrate_v1(client: GraphClient) -> None:
         try:
             await client.graph.query(query)
         except Exception as exc:
-            raise SchemaError(
-                f"Failed to create index on {label}.{prop}: {exc}"
-            ) from exc
+            # Index may already exist from a previous run without SchemaVersion.
+            logger.warning("Index on %s.%s not created (non-fatal): %s", label, prop, exc)
 
     for label, prop, constraint_type in CONSTRAINTS:
         if constraint_type == "unique":
@@ -121,9 +120,12 @@ async def _migrate_v1(client: GraphClient) -> None:
         try:
             await client.graph.query(query)
         except Exception as exc:
-            raise SchemaError(
-                f"Failed to create {constraint_type} constraint on {label}.{prop}: {exc}"
-            ) from exc
+            # FalkorDB constraint syntax varies by version; treat failures as
+            # non-fatal so the server can still start.
+            logger.warning(
+                "Constraint %s on %s.%s not created (non-fatal): %s",
+                constraint_type, label, prop, exc,
+            )
 
 
 async def _migrate_v2(client: GraphClient, vector_dimension: int | None = None) -> None:
@@ -134,9 +136,7 @@ async def _migrate_v2(client: GraphClient, vector_dimension: int | None = None) 
         try:
             await client.graph.query(query)
         except Exception as exc:
-            raise SchemaError(
-                f"Failed to create index on {label}.{prop}: {exc}"
-            ) from exc
+            logger.warning("Index on %s.%s not created (non-fatal): %s", label, prop, exc)
 
     if vector_dimension is not None:
         if not isinstance(vector_dimension, int) or vector_dimension <= 0:

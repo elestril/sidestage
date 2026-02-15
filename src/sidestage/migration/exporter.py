@@ -267,7 +267,7 @@ def _write_entity_file(
     filename = stem + ".md"
 
     file_path = base_dir / subdir / filename
-    content = "---\n" + yaml.dump(fm_dict, sort_keys=False, allow_unicode=True, default_flow_style=False) + "---\n"
+    content = "---\n" + yaml.safe_dump(dict(fm_dict), sort_keys=False, allow_unicode=True, default_flow_style=False) + "---\n"
     if body:
         content += "\n" + body + "\n"
     file_path.write_text(content)
@@ -298,7 +298,7 @@ def _write_memory_file(
     filename = sanitize_filename(memory.id) + ".md"
     file_path = dot_d_dir / filename
 
-    content = "---\n" + yaml.dump(fm_dict, sort_keys=False, allow_unicode=True, default_flow_style=False) + "---\n"
+    content = "---\n" + yaml.safe_dump(dict(fm_dict), sort_keys=False, allow_unicode=True, default_flow_style=False) + "---\n"
     if content_body:
         content += "\n" + content_body + "\n"
     file_path.write_text(content)
