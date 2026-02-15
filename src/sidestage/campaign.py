@@ -16,7 +16,7 @@ from sidestage.entities import entity_to_markdown, markdown_to_entity
 from sidestage.migration.parser import parse_directory
 from sidestage.graph import GraphConfig, GraphClient, connect, close
 from sidestage.health import CampaignHealth, HealthStatus
-from sidestage.logging import getSidestageLogger
+from sidestage.logging import initCampaignLogging
 from sidestage.graph import create_entity as graph_create_entity
 from sidestage.graph import get_entity as graph_get_entity
 from sidestage.graph import update_entity as graph_update_entity
@@ -24,7 +24,6 @@ from sidestage.graph import list_entities as graph_list_entities
 from sidestage.config import LLMConfig, SidestageConfig
 from sidestage import config
 
-logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("sidestage.campaign")
 
 class Campaign:
@@ -49,7 +48,7 @@ class Campaign:
         self.name = name
         self.base_dir = base_dir
         self.campaign_dir = self.base_dir / name
-        self._ensure_campaign_dir()
+        self.campaign_dir.mkdir(parents=True, exist_ok=True)
         self.config = config.get_config()
         
         # Storage handles SQLite connection
@@ -64,10 +63,8 @@ class Campaign:
         self.user = User(actor_id="user")
 
         # loggers
-        self.campaign_log = getSidestageLogger(
-            self.name, self.campaign_dir / 'campaign.log') 
-        self.actor_log = getSidestageLogger(
-            f'{self.name}.actor', self.campaign_dir / 'actor.log'
+        self.campaign_log, self.chat_log = initCampaignLogging(
+            self.name, self.campaign_dir
         )
 
         # Ensure LLM is available before proceeding
@@ -78,11 +75,6 @@ class Campaign:
 
     def _ensure_campaign_dir(self) -> None:
         """Create the campaign directory if it doesn't exist."""
-        if not self.campaign_dir.exists():
-            logger.info(f"Creating new campaign directory: {self.campaign_dir}")
-            self.campaign_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            logger.info(f"Loading campaign from: {self.campaign_dir}")
 
     def get_llm_config(self, name: str = "default") -> LLMConfig:
         """Get a named LLM configuration.
@@ -111,22 +103,22 @@ class Campaign:
         with tracer.start_as_current_span("campaign.reload_defaults") as span:
             span.set_attribute("sidestage.scene.id", "campaign_planning")
 
-            logger.info("Reloading default content from data directory...")
+            self.campaign_log.info("Reloading default content from data directory...")
 
             project_root = Path(__file__).parent.parent.parent
             defaults_dir = project_root / "data" / "campaign_defaults" / "markdown"
 
             if not defaults_dir.exists():
-                logger.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
+                self.campaign_log.warning(f"Defaults directory not found at {defaults_dir}. Skipping.")
                 span.set_attribute("entities.loaded_count", 0)
                 return
 
             result = parse_directory(defaults_dir)
 
             for issue in result.errors:
-                logger.error(f"Error loading default: {issue.message} ({issue.file_path})")
+                self.campaign_log.error(f"Error loading default: {issue.message} ({issue.file_path})")
             for issue in result.warnings:
-                logger.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
+                self.campaign_log.warning(f"Warning loading default: {issue.message} ({issue.file_path})")
 
             count = 0
             for entity in result.entities:
@@ -142,9 +134,9 @@ class Campaign:
                     elif isinstance(entity, EventModel):
                         self.storage.add_event(entity)
                     count += 1
-                    logger.info(f"Loaded default {entity.entity_type}: {entity.name} ({entity.id})")
+                    self.campaign_log.info(f"Loaded default {entity.entity_type}: {entity.name} ({entity.id})")
                 except Exception as e:
-                    logger.error(f"Error loading default entity {entity.id}: {e}")
+                    self.campaign_log.error(f"Error loading default entity {entity.id}: {e}")
 
             span.set_attribute("entities.loaded_count", count)
 
@@ -171,7 +163,7 @@ class Campaign:
         # 1. Health check
         health_url = f"{server_root}/health"
         try:
-            logger.info(f"Checking LLM health at {health_url}...")
+            self.campaign_log.info(f"Checking LLM health at {health_url}...")
             resp = httpx.get(health_url, timeout=10.0)
             resp.raise_for_status()
         except httpx.RequestError as e:
@@ -183,7 +175,7 @@ class Campaign:
         models_url = f"{base_url}/models"
         target_model = llm.model
         try:
-            logger.info(f"Checking model '{target_model}' at {models_url}...")
+            self.campaign_log.info(f"Checking model '{target_model}' at {models_url}...")
             resp = httpx.get(models_url, timeout=10.0)
             resp.raise_for_status()
 
@@ -196,7 +188,7 @@ class Campaign:
                     f"Model '{target_model}' not found at {models_url}. Available: {available_ids}"
                 )
 
-            logger.info(f"LLM verified: '{target_model}' is online.")
+            self.campaign_log.info(f"LLM verified: '{target_model}' is online.")
 
         except httpx.RequestError as e:
             raise RuntimeError(f"Failed to query models at {models_url}: {e}") from e
@@ -204,7 +196,7 @@ class Campaign:
         # 3. Completions probe — catches dead backend workers behind a proxy
         completions_url = f"{base_url}/chat/completions"
         try:
-            logger.info(f"Probing completions endpoint at {completions_url}...")
+            self.campaign_log.info(f"Probing completions endpoint at {completions_url}...")
             resp = httpx.post(
                 completions_url,
                 json={
@@ -216,7 +208,7 @@ class Campaign:
                 timeout=30.0,
             )
             resp.raise_for_status()
-            logger.info("Completions probe succeeded.")
+            self.campaign_log.info("Completions probe succeeded.")
         except httpx.RequestError as e:
             raise RuntimeError(
                 f"LLM completions probe failed at {completions_url} (server may have a dead worker): {e}"
@@ -243,12 +235,12 @@ class Campaign:
             dimension = await validate_embed_config(embed_llm)
             if dimension is not None:
                 config.vector_dimension = dimension
-                logger.info("Embedding validated: dimension=%d", dimension)
+                self.campaign_log.info("Embedding validated: dimension=%d", dimension)
             else:
-                logger.warning("Embedding validation failed")
+                self.campaign_log.warning("Embedding validation failed")
                 await self.health.set_status(HealthStatus.DEGRADED, "Embedding unavailable")
 
-        logger.info("Graph connection established for campaign '%s'", self.name)
+        self.campaign_log.info("Graph connection established for campaign '%s'", self.name)
 
     async def shutdown(self) -> None:
         """Shut down the campaign, closing graph connections."""
@@ -257,7 +249,7 @@ class Campaign:
             await close(self.graph_client)
             self.graph_client = None
             self.world_tools.graph_client = None
-            logger.info("Graph connection closed for campaign '%s'", self.name)
+            self.campaign_log.info("Graph connection closed for campaign '%s'", self.name)
 
     # --- Character Registry ---
 
@@ -327,7 +319,7 @@ class Campaign:
                     self.storage.update_scene(entity)
             return True
         except Exception as e:
-            logger.error(f"Error updating entity {entity_id}: {e}")
+            self.campaign_log.error(f"Error updating entity {entity_id}: {e}")
             return False
 
     async def update_entity(self, entity_id: str, data: Dict[str, Any]) -> bool:
@@ -361,12 +353,12 @@ class Campaign:
                 self.storage.update_character(obj)
             return True
         except Exception as e:
-            logger.error(f"Error updating entity {entity_id}: {e}")
+            self.campaign_log.error(f"Error updating entity {entity_id}: {e}")
             return False
 
     async def export_entities(self) -> int:
         """Export all entities to markdown files in the campaign directory."""
-        logger.info("Exporting entities...")
+        self.campaign_log.info("Exporting entities...")
         entities_dir = self.campaign_dir / "entities"
         entities_dir.mkdir(parents=True, exist_ok=True)
         if self.graph_client is not None:
@@ -383,7 +375,7 @@ class Campaign:
 
     async def import_entities(self) -> int:
         """Import all entities from markdown files in the campaign directory."""
-        logger.info("Importing entities...")
+        self.campaign_log.info("Importing entities...")
         entities_dir = self.campaign_dir / "entities"
         if not entities_dir.exists():
             return 0
@@ -407,7 +399,7 @@ class Campaign:
                         self.storage.add_event(entity)
                 count += 1
             except Exception as e:
-                logger.error(f"Error importing {md_file.name}: {e}")
+                self.campaign_log.error(f"Error importing {md_file.name}: {e}")
         return count
 
     async def list_scenes(self) -> List[Dict[str, Any]]:

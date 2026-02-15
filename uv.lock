@@ -1100,6 +1100,18 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown-it-py"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mdurl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz", hash = "sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3", size = 73070, upload-time = "2025-08-11T12:57:52.854Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1200,6 +1212,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/de/c4/4bebd40791275d8ca11b1a741f71f7a9e4f2f68df1c01f7a4954dc1f0f32/mcp_server_git-2026.1.14.tar.gz", hash = "sha256:2cd74704c7b271ab1ed7be266120c20ae8ae7cc01e52dc6c549790402bad2b44", size = 30892, upload-time = "2026-01-14T16:03:29.205Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4f/10/8daf56907fc57d4ab495e88028025e616a3095e2460afd5acf978d8a3bde/mcp_server_git-2026.1.14-py3-none-any.whl", hash = "sha256:5972e2f5698035fd6a4b4ee896d983409d5d8d1fe23e266c7d34dee3e88f11d1", size = 10418, upload-time = "2026-01-14T16:03:27.609Z" },
+]
+
+[[package]]
+name = "mdurl"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
 
 [[package]]
@@ -2000,6 +2021,19 @@ wheels = [
 ]
 
 [[package]]
+name = "rich"
+version = "14.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/99/a4cab2acbb884f80e558b0771e97e21e939c5dfb460f488d19df485e8298/rich-14.3.2.tar.gz", hash = "sha256:e712f11c1a562a11843306f5ed999475f09ac31ffb64281f73ab29ffdda8b3b8", size = 230143, upload-time = "2026-02-01T16:20:47.908Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/45/615f5babd880b4bd7d405cc0dc348234c5ffb6ed1ea33e152ede08b2072d/rich-14.3.2-py3-none-any.whl", hash = "sha256:08e67c3e90884651da3239ea668222d19bea7b589149d8014a21c633420dbb69", size = 309963, upload-time = "2026-02-01T16:20:46.078Z" },
+]
+
+[[package]]
 name = "rpds-py"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2118,6 +2152,7 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "pyjwt" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
@@ -2151,6 +2186,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = ">=1.39.1,<2.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1,<3.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },
+    { name = "rich", specifier = ">=14.3.2" },
     { name = "sqlalchemy", specifier = ">=2.0.46,<3.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40.0,<0.41.0" },
     { name = "websockets", specifier = ">=16.0,<17.0" },

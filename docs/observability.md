@@ -38,17 +38,41 @@ if ctx:
 ### Response correlation
 The `X-Request-ID` header is echoed back on HTTP responses for client-side correlation.
 
-## Server Logging
+## Logging
 
-Every campaign maintains its own dedicated log file.
+All log files are volatile debugging output. Campaign state lives in SQLite.
 
-- **Location:** `~/.sidestage/<campaign_name>/server.log`
-- **Format:** `%(asctime)s [%(request_id)s] %(user)s - %(name)s - %(levelname)s - %(message)s`
-- **Contents:**
-    - Agent thought process and turn history.
-    - Tool execution logs and return values.
-    - WebSocket connection events.
-    - API request/response metadata.
+### Global logs (in `SIDESTAGE_DIR`)
+
+| File | Logger(s) | Contents |
+|------|-----------|----------|
+| `server.log` | root, `sidestage.*`, `uvicorn` | System messages, module logs, uvicorn startup/errors |
+| `request.log` | `uvicorn.access` | HTTP access logs with request context (`request_id`, `user`) |
+
+### Per-campaign logs (in `SIDESTAGE_DIR/<campaign>`)
+
+| File | Logger | Contents |
+|------|--------|----------|
+| `campaign.log` | `sidestage.campaign.<name>` | Campaign operational messages (entity loads, graph connections, imports/exports) |
+| `chat.log` | `sidestage.chat.<name>` | Chat event debug trace (who said what, when) |
+
+### Configuration
+
+Logging is configured in `config.yml` under the `logging:` key:
+
+```yaml
+logging:
+  level: INFO    # Root log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+```
+
+### Rich console output
+
+Stdout logs use Rich with the `SIDESTAGE_THEME` for colored output. The themed `Console` instance is importable:
+
+```python
+from sidestage.logging import console
+console.print("[entity]Gandalf[/entity] entered [scene]The Prancing Pony[/scene]")
+```
 
 ## Campaign Health
 

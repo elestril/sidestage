@@ -5,6 +5,7 @@ at each instrumentation point.
 """
 
 import json
+import logging
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from opentelemetry import trace
@@ -797,6 +798,7 @@ class TestReloadDefaultsTracing:
             campaign.storage.add_location = MagicMock()
             campaign.storage.add_item = MagicMock()
             campaign.storage.add_event = MagicMock()
+            campaign.campaign_log = logging.getLogger("test.campaign")
 
             from sidestage.migration.parser import ParseResult
             mock_result = ParseResult(entities=[], memories=[], chatlogs={}, errors=[], warnings=[])
@@ -819,6 +821,7 @@ class TestReloadDefaultsTracing:
             campaign.storage.add_location = MagicMock()
             campaign.storage.add_item = MagicMock()
             campaign.storage.add_event = MagicMock()
+            campaign.campaign_log = logging.getLogger("test.campaign")
 
             char = _make_character()
             from sidestage.migration.parser import ParseResult

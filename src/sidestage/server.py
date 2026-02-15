@@ -97,7 +97,8 @@ def main():
         uvicorn.run("sidestage.server:get_app",
                     host=args.host, port=args.port,
                     reload=True, reload_dirs=[str(Path(__file__).parent)],
-                    factory=True)
+                    factory=True,
+                    log_config=None)
     finally:
         _remove_pid_file()
 

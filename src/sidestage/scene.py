@@ -195,6 +195,12 @@ class Scene:
                 if event.model.event_type == EventType.ADJUST_GAMETIME:
                     self.data.current_gametime = event.model.gametime
                     self.storage.update_scene(self.data)
+                elif event.model.event_type == EventType.CHAT_MESSAGE:
+                    self.campaign.chat_log.debug(
+                        "[%s] %s: %s",
+                        self.id, event.model.character_id, event.model.body,
+                        extra={"actor": event.model.actor_id or "-"},
+                    )
 
                 # 3. Dispatch to all present actors
                 await self._dispatch(event)

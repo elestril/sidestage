@@ -2,6 +2,7 @@
 
 import copy
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -429,6 +430,7 @@ class TestCampaignHealthWiring:
         )
         campaign.graph_client = None
         campaign.world_tools = MagicMock()
+        campaign.campaign_log = logging.getLogger("test.campaign")
 
         from sidestage.health import CampaignHealth
         campaign.health = CampaignHealth()
@@ -462,6 +464,7 @@ class TestCampaignHealthWiring:
         )
         campaign.graph_client = None
         campaign.world_tools = MagicMock()
+        campaign.campaign_log = logging.getLogger("test.campaign")
         campaign.health = CampaignHealth()
 
         await campaign.start_graph()
@@ -487,6 +490,7 @@ class TestCampaignHealthWiring:
         )
         campaign.graph_client = None
         campaign.world_tools = MagicMock()
+        campaign.campaign_log = logging.getLogger("test.campaign")
         campaign.health = CampaignHealth()
 
         await campaign.start_graph()

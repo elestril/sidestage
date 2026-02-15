@@ -1,53 +1,74 @@
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-def test_logging_to_campaign_server_log(tmp_path: Path):
-    # Use a temporary directory for the test to avoid side effects
-    os.chdir(tmp_path)
-    
-    campaign_name = "test_campaign"
-    sidestage_dir = tmp_path / ".sidestage"
-    log_file = sidestage_dir / "server.log"
-    
-    project_root = Path(__file__).parent.parent.parent
-    src_dir = project_root / "src"
-    
-    # Create a small script that initializes Orchestrator and logs a message
-    script_content = f"""
 import logging
-import sys
-import os
 from pathlib import Path
-from unittest.mock import patch
-# Ensure src is in path
-sys.path.insert(0, "{src_dir}")
-from sidestage.orchestrator import SidestageOrchestrator
-from sidestage import config as sidestage_config
 
-base_dir = Path("{tmp_path}") / ".sidestage"
-sidestage_config.init(base_dir)
+from sidestage.logging import LogConfig, initLogging, initCampaignLogging
 
-with patch("sidestage.campaign.Campaign._ensure_llm_availability"):
-    orchestrator = SidestageOrchestrator(campaign_name="{campaign_name}")
 
-logger = logging.getLogger("test_logger")
-logger.info("Integration test message in campaign dir")
-logging.shutdown()
-"""
-    script_path = tmp_path / "test_log_script.py"
-    with open(script_path, "w") as f:
-        f.write(script_content)
-    
-    # Run the script in a subprocess
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH', '')}"
-    
-    result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True)
-    
-    assert log_file.exists(), f"server.log should be created in {campaign_dir}. Stdout: {result.stdout}, Stderr: {result.stderr}"
-    
-    with open(log_file, "r") as f:
-        content = f.read()
-        assert "Integration test message in campaign dir" in content
+def test_init_logging_creates_server_and_request_logs(tmp_path: Path):
+    """initLogging creates server.log and request.log in sidestage_dir."""
+    initLogging(tmp_path, LogConfig())
+
+    assert (tmp_path / "server.log").exists()
+    assert (tmp_path / "request.log").exists()
+
+
+def test_root_logger_writes_to_server_log(tmp_path: Path):
+    """Messages from the root logger land in server.log."""
+    initLogging(tmp_path, LogConfig())
+
+    test_logger = logging.getLogger("test_root_logger_writes")
+    test_logger.info("hello from test")
+    logging.shutdown()
+
+    content = (tmp_path / "server.log").read_text()
+    assert "hello from test" in content
+
+
+def test_root_logger_does_not_write_to_request_log(tmp_path: Path):
+    """Non-access messages should not appear in request.log."""
+    initLogging(tmp_path, LogConfig())
+
+    test_logger = logging.getLogger("test_root_not_in_request")
+    test_logger.info("should not appear in request log")
+    logging.shutdown()
+
+    content = (tmp_path / "request.log").read_text()
+    assert "should not appear" not in content
+
+
+def test_campaign_logging_creates_log_files(tmp_path: Path):
+    """initCampaignLogging creates campaign.log and chat.log."""
+    initLogging(tmp_path, LogConfig())
+
+    campaign_dir = tmp_path / "test_campaign"
+    campaign_dir.mkdir()
+
+    campaign_log, chat_log = initCampaignLogging("test", campaign_dir)
+
+    campaign_log.info("campaign message")
+    chat_log.debug("chat debug message")
+    logging.shutdown()
+
+    assert (campaign_dir / "campaign.log").exists()
+    assert (campaign_dir / "chat.log").exists()
+
+    campaign_content = (campaign_dir / "campaign.log").read_text()
+    assert "campaign message" in campaign_content
+
+    chat_content = (campaign_dir / "chat.log").read_text()
+    assert "chat debug message" in chat_content
+
+
+def test_campaign_log_does_not_propagate_to_server(tmp_path: Path):
+    """Campaign logger messages stay out of server.log."""
+    initLogging(tmp_path, LogConfig())
+
+    campaign_dir = tmp_path / "test_campaign"
+    campaign_dir.mkdir()
+
+    campaign_log, _ = initCampaignLogging("test_no_prop", campaign_dir)
+    campaign_log.info("campaign only message")
+    logging.shutdown()
+
+    server_content = (tmp_path / "server.log").read_text()
+    assert "campaign only message" not in server_content

@@ -23,6 +23,7 @@ dependencies = [
     "httpx (>=0.28.1,<0.29.0)",
     "falkordb (>=1.4.0,<2.0.0)",
     "mcp (>=1.26.0,<2.0.0)",
+    "rich>=14.3.2",
 ]
 
 [project.scripts]
