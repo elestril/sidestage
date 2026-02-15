@@ -21,6 +21,8 @@
 | `src/sidestage/character.py` | `docs/api/sidestage.character.md` | Character-specific logic |
 | `src/sidestage/time.py` | `docs/api/sidestage.time.md` | Gametime formatting and tracking |
 | `src/sidestage/tools.py` | `docs/api/sidestage.tools.md` | Agent tool definitions (entity queries, memory updates) |
+| `src/sidestage/request_context.py` | `docs/api/sidestage.request_context.md` | Ambient request context via contextvars, propagates through async call chains |
+| `src/sidestage/request_context_middleware.py` | `docs/api/sidestage.request_context_middleware.md` | FastAPI middleware populating RequestContext from HTTP headers |
 
 ### Graph subpackage (`src/sidestage/graph/`)
 
@@ -74,7 +76,10 @@ server.py → orchestrator.py → campaign.py → agent.py
                                           → health.py
 orchestrator.py → sync.py (WebSocket manager)
 orchestrator.py → mcp_bridge.py (MCP endpoint)
+orchestrator.py → request_context.py + request_context_middleware.py
 server.py → tracing/* (middleware)
+tracing/middleware.py → request_context.py (stamps spans with request context)
+logging.py → request_context.py (injects fields into log records)
 campaign.py → config.py
 campaign.py → bus.py (EventQueue)
 scene.py → memory/context.py (context assembly)

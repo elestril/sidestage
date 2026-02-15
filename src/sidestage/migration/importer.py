@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
 from sidestage.graph.entities import create_entity, list_entities
@@ -301,14 +302,14 @@ def _parse_chatlog_lines(scene_id: str, lines: list[str]) -> list[EventModel]:
         if not match:
             logger.warning("Unparseable chatlog line: %s", line)
             continue
-        walltime, character_id, name, message = match.groups()
+        walltime_str, character_id, name, message = match.groups()
         evt = EventModel(
             name=f"{name.strip()} Message",
             body=message,
             id=f"evt_{scene_id}_{len(events)}",
             scene_id=scene_id,
             gametime=0,
-            walltime=walltime,
+            walltime=datetime.fromisoformat(walltime_str),
             character_id=character_id,
             event_type=EventType.CHAT_MESSAGE,
         )

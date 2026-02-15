@@ -50,7 +50,8 @@ class MemoryTools:
 
     def _fire_embed(self, memory_id: str, content: str) -> None:
         """Fire background embedding task with trace context propagation."""
-        if self.embed_config is not None:
+        embed_config = self.embed_config
+        if embed_config is not None:
             ctx = context.get_current()
 
             async def _embed_with_context():
@@ -60,7 +61,7 @@ class MemoryTools:
                         span.set_attribute("memory.id", memory_id)
                         try:
                             await embed_and_update(
-                                self.client, self.embed_config, memory_id, content, self.health
+                                self.client, embed_config, memory_id, content, self.health
                             )
                         except Exception as exc:
                             record_error(span, exc)
@@ -154,7 +155,8 @@ class DmMemoryTools:
 
     def _fire_embed(self, memory_id: str, content: str) -> None:
         """Fire background embedding task with trace context propagation."""
-        if self.embed_config is not None:
+        embed_config = self.embed_config
+        if embed_config is not None:
             ctx = context.get_current()
 
             async def _embed_with_context():
@@ -164,7 +166,7 @@ class DmMemoryTools:
                         span.set_attribute("memory.id", memory_id)
                         try:
                             await embed_and_update(
-                                self.client, self.embed_config, memory_id, content, self.health
+                                self.client, embed_config, memory_id, content, self.health
                             )
                         except Exception as exc:
                             record_error(span, exc)

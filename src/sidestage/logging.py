@@ -3,8 +3,25 @@ import sys
 from pathlib import Path
 from pydantic import BaseModel, Field, BeforeValidator, PlainSerializer
 from typing import Annotated, Optional, TYPE_CHECKING
+from sidestage.request_context import get_request_context
 
 _sidestage_loggers: dict[str, logging.Logger] = {}
+
+
+class RequestContextFilter(logging.Filter):
+    """Logging filter that injects request context fields into every log record.
+
+    Adds ``request_id``, ``user``, and ``origin`` attributes so they can be
+    referenced in format strings (e.g. ``%(request_id)s``).  When no request
+    context is active the fields default to ``"-"``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        ctx = get_request_context()
+        record.request_id = ctx.request_id if ctx else "-"  # type: ignore[attr-defined]
+        record.user = ctx.user if ctx else "-"  # type: ignore[attr-defined]
+        record.origin = ctx.origin if ctx else "-"  # type: ignore[attr-defined]
+        return True
 
 def _parse_log_level(v: str | int) -> int:
     if isinstance(v, int):
@@ -29,8 +46,11 @@ def initLogging(sidestage_dir: Path, config: LogConfig) -> None:
   logging.basicConfig(
     level=config.level,
     filename=sidestage_dir / "server.log",
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s [%(request_id)s] %(user)s - %(name)s - %(levelname)s - %(message)s",
   )
+  ctx_filter = RequestContextFilter()
+  for handler in logging.getLogger().handlers:
+    handler.addFilter(ctx_filter)
 
 def getSidestageLogger(
     name: str, 

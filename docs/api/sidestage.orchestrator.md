@@ -13,7 +13,7 @@ The Orchestrator is responsible for:
 4. Routing API requests to the appropriate Campaign or Scene components.
 5. Serving the frontend static assets.
 
-#### `__init__(campaign_name: str, base_dir: Path | None = None)`
+#### `__init__(campaign_name: str)`
 
 Initialize the Orchestrator.
 
@@ -25,7 +25,7 @@ Args:
 
 Helper to access the currently active campaign.
 
-#### `get_active_scene(scene_id: str) -> Any | None` *async*
+#### `get_active_scene(scene_id: str) -> Scene | None` *async*
 
 Retrieve or activate a scene by ID.
 
@@ -36,4 +36,4 @@ Args:
     scene_id (str): The ID of the scene.
 
 Returns:
-    Optional[Any]: The active Scene instance, or None if not found.
+    Optional[Scene]: The active Scene instance, or None if not found.

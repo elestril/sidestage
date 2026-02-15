@@ -1,6 +1,7 @@
 import atexit
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Union, Callable, AsyncIterator, MutableMapping
 from pathlib import Path
@@ -15,6 +16,8 @@ import asyncio
 from sidestage.campaign import Campaign
 from sidestage import config
 from sidestage.health import HealthStatus
+from sidestage.request_context import RequestContext, set_request_context, reset_request_context
+from sidestage.request_context_middleware import RequestContextMiddleware
 from sidestage.tracing import (
     init_tracing,
     toggle_tracing,
@@ -109,6 +112,7 @@ class SidestageOrchestrator:
             lifespan=self._lifespan,
         )
         
+        self.fastapi_app.add_middleware(RequestContextMiddleware)
         self._setup_routes()
         self._setup_mcp()
         self._mount_frontend()
@@ -178,6 +182,19 @@ class SidestageOrchestrator:
 
     async def _handle_ws_message(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
         """Handle incoming WebSocket messages from clients."""
+        ctx = RequestContext(
+            user=message.get("actor", "user"),
+            request_id=message.get("request_id", uuid.uuid4().hex[:8]),
+            origin="ws",
+        )
+        token = set_request_context(ctx)
+        try:
+            await self._dispatch_ws_message(websocket, message)
+        finally:
+            reset_request_context(token)
+
+    async def _dispatch_ws_message(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
+        """Dispatch a WebSocket message after request context is set."""
         msg_type = message.get("type")
         scene_id = message.get("scene_id")
 

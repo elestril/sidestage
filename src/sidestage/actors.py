@@ -255,7 +255,7 @@ class User(Actor):
         }
         await self.send(payload)
 
-    async def send(self, message: dict, exclude: Any = None) -> None:
+    async def send(self, message: dict[str, Any], exclude: Any = None) -> None:
         """Send to all connections, optionally excluding one."""
         broken: list[Any] = []
         for ws in self.connections:

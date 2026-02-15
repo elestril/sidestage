@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import Any, TYPE_CHECKING, Awaitable, Callable, Optional
 
 from opentelemetry import trace
 
@@ -28,7 +28,7 @@ class Event:
 
     model: EventModel
     span_context: SpanContext | None = None
-    scene: object | None = field(default=None, repr=False)
+    scene: Any | None = field(default=None, repr=False)
 
     @property
     def character(self):

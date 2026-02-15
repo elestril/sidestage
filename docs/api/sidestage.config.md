@@ -21,7 +21,7 @@ Configuration model for Sidestage settings.
 
 | Field | Type | Default |
 |-------|------|---------|
-| `loglevel` | `str` | 'INFO' |
+| `logging` | `LogConfig` | *factory* |
 | `llms` | `dict[str, LLMConfig]` | *factory* |
 | `graph` | `GraphConfig` | *factory* |
 | `tracing` | `TraceConfig` | *factory* |
@@ -41,15 +41,12 @@ Configuration for the tracing subsystem.
 
 ## Functions
 
-### `get() -> SidestageConfig`
-
-Get the global config singleton.
-
-Raises:
-    RuntimeError: If init() has not been called yet.
-
-### `init(sidestage_dir: Path) -> SidestageConfig`
+### `get_config() -> SidestageConfig`
 
 Load config from sidestage_dir/config.yml and set as global singleton.
 
 Creates the config file with defaults if it doesn't exist.
+
+### `init(sidestage_dir: Path) -> SidestageConfig`
+
+Initialize the configuration with a specific directory.

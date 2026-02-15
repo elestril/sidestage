@@ -2,11 +2,48 @@
 
 Sidestage provides transparency into agent behavior, prompt logging, and tool execution primarily through structured file logging.
 
+## Request Context
+
+Every HTTP request, WebSocket message, and MCP call is tagged with an ambient `RequestContext` that propagates automatically through the entire async call stack via Python's `contextvars`.
+
+### What it carries
+- **`request_id`** — unique per-request identifier (from `X-Request-ID` header, or auto-generated).
+- **`user`** — who made the request (from `X-Actor` header, defaults to `"anonymous"`).
+- **`origin`** — entry point: `"http"`, `"ws"`, `"mcp"`, or `"internal"`.
+- **`annotations`** — free-form debug tags from `X-Debug-*` headers (e.g. `X-Debug-Tag: test-memory-recall`).
+
+### How it's set
+- **HTTP** — `RequestContextMiddleware` (Starlette middleware on the FastAPI app) extracts headers and sets context before route handlers run.
+- **WebSocket** — Context is set in `orchestrator._handle_ws_message()` before dispatching.
+- **Internal/background** — `get_or_create_context()` lazily creates a context with `origin="internal"`.
+
+### Integration with logging
+A `RequestContextFilter` is installed on the root log handlers. Every log line automatically includes `request_id` and `user` fields:
+```
+2025-01-15 10:00:00 [a1b2c3d4] alice - sidestage.scene - INFO - Scene activated
+```
+
+### Integration with tracing
+`stamp_span_with_request_context()` copies the context fields onto OTel span attributes (`sidestage.request_id`, `sidestage.user`, `sidestage.origin`, `sidestage.annotation.*`). This is called automatically by the `@trace_span` decorator.
+
+### Reading it in code
+```python
+from sidestage.request_context import get_request_context
+
+ctx = get_request_context()
+if ctx:
+    log.info("processing for user=%s", ctx.user)
+```
+
+### Response correlation
+The `X-Request-ID` header is echoed back on HTTP responses for client-side correlation.
+
 ## Server Logging
 
 Every campaign maintains its own dedicated log file.
 
 - **Location:** `~/.sidestage/<campaign_name>/server.log`
+- **Format:** `%(asctime)s [%(request_id)s] %(user)s - %(name)s - %(levelname)s - %(message)s`
 - **Contents:**
     - Agent thought process and turn history.
     - Tool execution logs and return values.

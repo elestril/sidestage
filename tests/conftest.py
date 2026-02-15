@@ -48,6 +48,15 @@ def _reset_otel_provider():
     trace._TRACER_PROVIDER = None
 
 
+@pytest.fixture(autouse=True)
+def _reset_request_context():
+    """Ensure request context is clean between tests."""
+    from sidestage.request_context import _request_ctx
+    token = _request_ctx.set(None)
+    yield
+    _request_ctx.reset(token)
+
+
 @pytest.fixture
 def llm_base_url():
     """Base URL of the LLM server for tests."""

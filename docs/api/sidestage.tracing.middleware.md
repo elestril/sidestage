@@ -19,6 +19,12 @@ Get the current trace_id as a hex string, or None if no active span.
 
 Set span status to ERROR and record the exception.
 
+### `stamp_span_with_request_context(span: trace.Span) -> None`
+
+Copy ambient :class:`RequestContext` fields onto a span as attributes.
+
+Safe to call when there is no active request context (no-op).
+
 ### `trace_span(name: str, attributes: dict[str, Any] | None = None)`
 
 Decorator that wraps an async function in a span.
