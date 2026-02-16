@@ -1,7 +1,9 @@
 import json
 import logging
 import inspect
-from typing import List, Callable, Optional, Dict, Any, Union, cast
+import re
+import types
+from typing import List, Callable, Optional, Dict, Any, Union, cast, get_args, get_origin
 from pydantic import BaseModel
 import litellm
 
@@ -38,52 +40,101 @@ class LiteLLMAgent:
         self.tool_schemas = [self._function_to_schema(t) for t in self.tools]
         self.tool_map = {t.__name__: t for t in self.tools}
 
+    @staticmethod
+    def _resolve_json_type(annotation: Any) -> str:
+        """Map a Python type annotation to a JSON Schema type string."""
+        # Unwrap Optional / union types (e.g. int | None, Optional[str])
+        origin = get_origin(annotation)
+        if origin is Union or origin is types.UnionType:
+            args = [a for a in get_args(annotation) if a is not type(None)]
+            if args:
+                annotation = args[0]
+
+        if annotation is int:
+            return "integer"
+        if annotation is float:
+            return "number"
+        if annotation is bool:
+            return "boolean"
+        return "string"
+
+    @staticmethod
+    def _parse_docstring_args(doc: str) -> Dict[str, str]:
+        """Parse Google-style Args section from a docstring.
+
+        Returns a mapping of parameter name → description.
+        """
+        params: Dict[str, str] = {}
+        in_args = False
+        current_name: str | None = None
+        current_desc: list[str] = []
+
+        for line in doc.splitlines():
+            stripped = line.strip()
+            # Detect start of Args block
+            if stripped in ("Args:", "Arguments:"):
+                in_args = True
+                continue
+            # Detect end of Args block (next section header)
+            if in_args and stripped and not stripped.startswith(" ") and stripped.endswith(":"):
+                if re.match(r"^[A-Z][a-z]+:$", stripped):
+                    break
+
+            if not in_args:
+                continue
+
+            # New parameter line: "name: description" or "name (type): description"
+            m = re.match(r"^(\w+)(?:\s*\([^)]*\))?\s*:\s*(.*)", stripped)
+            if m:
+                if current_name is not None:
+                    params[current_name] = " ".join(current_desc).strip()
+                current_name = m.group(1)
+                current_desc = [m.group(2)] if m.group(2) else []
+            elif current_name is not None and stripped:
+                # Continuation line
+                current_desc.append(stripped)
+
+        if current_name is not None:
+            params[current_name] = " ".join(current_desc).strip()
+        return params
+
     def _function_to_schema(self, func: Callable[..., Any]) -> Dict[str, Any]:
-        """
-        Converts a function to an OpenAI tool schema.
-        This is a simplified implementation and might need robustness.
-        """
+        """Converts a function to an OpenAI tool schema."""
         sig = inspect.signature(func)
         doc = inspect.getdoc(func) or ""
-        
-        # Parse docstring for description
+
+        # First paragraph is the tool description
         description = doc.split("\n\n")[0] if doc else ""
-        
-        parameters = {
+        arg_docs = self._parse_docstring_args(doc)
+
+        parameters: Dict[str, Any] = {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
         }
-        
+
         for name, param in sig.parameters.items():
             if name == "self":
                 continue
-                
-            param_type = "string" # Default
-            if param.annotation == int:
-                param_type = "integer"
-            elif param.annotation == bool:
-                param_type = "boolean"
-            # We treat Optional[...] as string usually unless specific check
-            
-            # Simple description extraction from docstring could be complex, 
-            # here we skip detailed param descriptions for brevity unless we parse Google-style args
-            
+
+            param_type = self._resolve_json_type(param.annotation)
+            param_desc = arg_docs.get(name, f"Parameter {name}")
+
             parameters["properties"][name] = {
                 "type": param_type,
-                "description": f"Parameter {name}" 
+                "description": param_desc,
             }
-            
+
             if param.default == inspect.Parameter.empty:
                 parameters["required"].append(name)
-                
+
         return {
             "type": "function",
             "function": {
                 "name": func.__name__,
                 "description": description,
-                "parameters": parameters
-            }
+                "parameters": parameters,
+            },
         }
 
     async def arun(self, message: str, context: str | None = None, stream: bool = False) -> AgentResponse:

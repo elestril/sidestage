@@ -34,6 +34,13 @@ def _node_to_memory(node: Any) -> Memory:
     # FalkorDB may store embedding as a special vector type; convert if needed
     if "embedding" in props and props["embedding"] is not None:
         props["embedding"] = list(props["embedding"])
+    # Sanitize gametime: must be int or None (LLM may write strings)
+    gt = props.get("gametime")
+    if gt is not None and not isinstance(gt, int):
+        try:
+            props["gametime"] = int(gt)
+        except (ValueError, TypeError):
+            props["gametime"] = None
     return Memory(**props)
 
 
@@ -60,6 +67,13 @@ async def upsert_memory(
     sublabel = _TYPE_TO_SUBLABEL[memory_type]
     now = time.time()
     mem_id = str(uuid.uuid4())
+
+    # Sanitize gametime: must be int or None (LLM may pass strings)
+    if gametime is not None and not isinstance(gametime, int):
+        try:
+            gametime = int(gametime)  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            gametime = None
 
     params: dict = {
         "id": mem_id,

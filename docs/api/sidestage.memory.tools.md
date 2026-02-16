@@ -39,6 +39,8 @@ can see this. Use it to record the true events behind the scenes.
 Args:
     scene_id: The scene this memory is about.
     content: The canonical account of events.
+    gametime: In-game time as an integer (seconds since game epoch),
+              or omit to leave unchanged.
 
 Returns:
     JSON confirmation with memory ID.
@@ -53,6 +55,8 @@ characters can access common scene memories.
 Args:
     scene_id: The scene this memory is about.
     content: The common understanding of events in this scene.
+    gametime: In-game time as an integer (seconds since game epoch),
+              or omit to leave unchanged.
 
 Returns:
     JSON confirmation with memory ID.
@@ -76,6 +80,8 @@ interacting with. This replaces your previous memory about them.
 Args:
     about_character_id: The ID of the character this memory is about.
     content: Your updated impression/knowledge of this character.
+    gametime: In-game time as an integer (seconds since game epoch),
+              or omit to leave unchanged.
 
 Returns:
     JSON confirmation with memory ID.
@@ -91,6 +97,8 @@ everything important, as this replaces your previous scene memory.
 Args:
     content: Your updated memory of this scene. Include key events,
              decisions, and anything you want to remember.
+    gametime: In-game time as an integer (seconds since game epoch),
+              or omit to leave unchanged.
 
 Returns:
     JSON confirmation with memory ID.

@@ -186,7 +186,7 @@ class Scene:
                     try:
                         await create_entity(self.graph_client, event.model)
                         await link(self.graph_client, self.data.id, "HAS_EVENT", event.model.id)
-                        if event.model.character_id:
+                        if event.model.character_id and event.model.character_id != "user":
                             await link(self.graph_client, event.model.id, "INVOLVES", event.model.character_id)
                     except Exception:
                         logger.exception("Failed to persist event %s to graph", event.model.id)

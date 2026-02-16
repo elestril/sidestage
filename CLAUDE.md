@@ -10,7 +10,6 @@ Follow this order strictly:
 
 1. **Read `docs/architecture.md`** — source-to-doc map, module overview
 2. **Read the relevant `docs/*.md`** — domain context for the area you're working in
-3. **Read `docs/api/<module>.md`** — function signatures for modules you'll touch
 4. **Use the code-index MCP** to locate symbols, files, and call sites before reading source
 5. **Only then** read actual source code
 
@@ -71,15 +70,7 @@ See `docs/architecture.md` for the complete source file to documentation file ma
 
 ## Dev Instance
 
-See `docs/dev_instance.md` for full setup and usage. Quick reference:
+There is a dev instance, with working directory `./sidestage.dev/` , which uses uvicorn's `reload=true` and thus always has the current state of the repository running. Your mcp server grants direct access to this instance, and you should read it's logs as appropriate.
 
-```
-scripts/run-dev.sh
-```
-
-This starts Sidestage on `http://localhost:8000` with hot-reload from the `sidestage.dev/` working directory. The MCP endpoint at `/v1/mcp` is registered in `.mcp.json` for agent debugging.
-
-- **Server log**: `sidestage.dev/dev/server.log` — check here first for any server errors
-- **Working directory**: `sidestage.dev/` — campaign data, config, and logs live here
-- **Config**: `sidestage.dev/config.yml` — LLM and graph database settings
-- **IMPORTANT**: When interacting with the running dev server, always use the Sidestage MCP tools (list_entities, send_chat_message, etc.) instead of curl or direct HTTP calls.
+- Constantly monitor the dev instannce for unexpected behavior everytime you change anything.
+- If the mcp server isn't responding, you must ask the user to start the dev instance.
