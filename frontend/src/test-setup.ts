@@ -8,6 +8,9 @@ import { MockWebSocket } from './__mocks__/MockWebSocket'
 // Replace globalThis.WebSocket with MockWebSocket
 globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
 
+// jsdom doesn't implement scrollIntoView
+Element.prototype.scrollIntoView = vi.fn()
+
 // Mock marked to avoid pulling in the full library in tests
 vi.mock('marked', () => ({
   marked: {

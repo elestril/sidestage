@@ -110,7 +110,7 @@ const EntitiesPage: React.FC = () => {
   );
 };
 
-const AppContent: React.FC = () => {
+export const AppContent: React.FC = () => {
   console.log('AppContent mounting...');
   return (
     <Layout>
