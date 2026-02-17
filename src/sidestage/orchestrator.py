@@ -451,6 +451,11 @@ class SidestageOrchestrator:
                 "error": get_tracing_error(),
             }
 
+        # Test-only routes (mock agent configuration)
+        if os.environ.get("SIDESTAGE_MOCK_AGENT"):
+            from sidestage.testing.routes import register_test_routes
+            register_test_routes(self.fastapi_app, self)
+
         # Redirect root to /sidestage
         @self.fastapi_app.get("/")
         async def root_redirect() -> RedirectResponse:

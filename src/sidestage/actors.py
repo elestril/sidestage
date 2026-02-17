@@ -72,6 +72,13 @@ class NPCActor(Actor):
 
     def _update_prompt(self) -> None:
         """Load the appropriate prompt template and instantiate the LiteLLMAgent."""
+        import os
+        if os.environ.get("SIDESTAGE_MOCK_AGENT"):
+            from sidestage.testing.mock_actor import MockLLMAgent
+            char_name = self.character.name if self.character else "NPC"
+            self.agent = MockLLMAgent(name=char_name)  # type: ignore[assignment]
+            return
+
         from sidestage.agent import LiteLLMAgent
 
         project_root = Path(__file__).parent.parent.parent

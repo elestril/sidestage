@@ -328,3 +328,15 @@ It then checks `response.content` and creates an `EventModel` from it. The mock 
 - The `event_type` and `actor_id` fields on `MockResponse` are included for future use by the configure endpoint, but `NPCActor.process()` currently always creates the response `EventModel` with `EventType.CHAT_MESSAGE` and uses its own `self.actor_id`. To support custom event types (e.g., `Error`), the mock response's `event_type` would need to be plumbed through differently. For this section, the `MockResponse.body` is what matters -- it becomes `AgentResponse.content`.
 - When `SIDESTAGE_MOCK_AGENT` is not set, the test routes (`/v1/test/mock-agent/*`) should not exist at all. Any request to those paths will naturally return 404 because the routes were never registered. No explicit 404 handler is needed.
 - The `response_delay` should be kept short in tests (0.1s default) to avoid slow test runs, but non-zero to exercise the async timing behavior that the thinking indicator depends on.
+
+## Implementation Notes
+
+- Used `anyio.sleep()` instead of `asyncio.sleep()` for trio test backend compatibility (project tests run under both asyncio and trio via pytest-anyio).
+- Added `# type: ignore[assignment]` on the duck-typed MockLLMAgent assignment in `_update_prompt()` since `self.agent` is typed as `LiteLLMAgent | None`.
+- Moved `SIDESTAGE_PORT` resolution in `server.py` before the startup log message so the logged port is accurate.
+
+## Tests
+
+- `tests/unit/test_mock_actor.py`: 7 tests (MockLLMAgent unit tests)
+- `tests/unit/test_mock_actor_integration.py`: 3 tests (NPCActor integration)
+- `tests/unit/test_mock_actor_routes.py`: 5 tests (API route tests including 404 contract test)

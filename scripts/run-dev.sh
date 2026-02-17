@@ -16,5 +16,10 @@ if [ ! -d "./$CAMPAIGN" ]; then
   cp -rp ../data/dev_campaign/ "$CAMPAIGN"
 fi
 
-exec uv run sidestage --sidestage_dir . "$CAMPAIGN"
+PORT_ARGS=""
+if [ -n "${SIDESTAGE_PORT:-}" ]; then
+  PORT_ARGS="--port $SIDESTAGE_PORT"
+fi
+
+exec uv run sidestage --sidestage_dir . $PORT_ARGS "$CAMPAIGN"
 

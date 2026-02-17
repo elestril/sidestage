@@ -92,7 +92,9 @@ def main():
     logger = logging.getLogger(__name__)
     # Start the AgentOS server using the import string and factory mode
     use_reload = not args.no_reload
-    logger.info(f"Starting Sidestage Server on {args.host}:{args.port} (reload={'enabled' if use_reload else 'disabled'})...")
+    port = int(os.environ.get("SIDESTAGE_PORT", str(args.port)))
+
+    logger.info(f"Starting Sidestage Server on {args.host}:{port} (reload={'enabled' if use_reload else 'disabled'})...")
     logger.info(f"Campaign data: {os.path.abspath(os.path.join(args.sidestage_dir, args.campaign))}")
 
     reload_kwargs: dict[str, object] = {}
@@ -102,7 +104,7 @@ def main():
 
     try:
         uvicorn.run("sidestage.server:get_app",
-                    host=args.host, port=args.port,
+                    host=args.host, port=port,
                     factory=True,
                     log_config=None,
                     **reload_kwargs)
