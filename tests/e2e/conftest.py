@@ -314,3 +314,25 @@ def log_observer() -> Any:
     observer = LogObserver(logs)
     observer.mark()
     return observer
+
+
+# ---------------------------------------------------------------------------
+# Per-test: Scene activation and mock agent cleanup
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def activate_scene(e2e_client: httpx.Client):
+    """Activate the default scene so mock agents exist for configuration.
+
+    Scenes activate lazily when a chat message is sent. This fixture
+    sends a throwaway message to ensure mock agents are created, then
+    resets the mock agent after the test completes.
+    """
+    e2e_client.post(
+        "/v1/chat",
+        json={"message": "init", "scene_id": "campaign_planning"},
+    )
+    time.sleep(1.0)
+    yield
+    e2e_client.post("/v1/test/mock-agent/reset")
