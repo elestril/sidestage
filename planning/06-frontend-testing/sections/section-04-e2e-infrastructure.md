@@ -518,14 +518,32 @@ uv run pytest tests/e2e/test_canary.py -v
 
 Expected result: all three canary tests pass. The server starts on port 8001 (or the next available port), the frontend builds if needed, and Playwright successfully navigates to the SPA.
 
+## Implementation Notes
+
+**Deviations from plan:**
+
+1. **Separate E2E working directory:** Uses `sidestage.e2e/` instead of `sidestage.dev/` to avoid conflicts with the dev instance (PID files, FalkorDB, SQLite). Added to `.gitignore`.
+
+2. **`--no-reload` flag added to server.py:** The server always ran with `reload=True`, causing watcher/worker process complications for E2E tests. Added `--no-reload` CLI argument; E2E fixture passes it.
+
+3. **Frontend build fixes:** `tsconfig.app.json` was including test files (`.test.ts`, `.test.tsx`) that use vitest globals, causing `tsc -b` to fail. Added exclude patterns. Also added `/// <reference types="vitest/config" />` to `vite.config.ts` for the vitest `test` property.
+
+4. **Server stdout/stderr:** Changed from `subprocess.PIPE` to writing to `sidestage.e2e/server_stdout.log` to avoid potential pipe buffer deadlocks on long-running sessions.
+
+5. **Dist freshness check:** Uses `dist/index.html` mtime (not directory mtime) for accurate staleness detection.
+
 ## Files Created/Modified
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `/home/harald/src/sidestage/pyproject.toml` | Modify | Add `pytest-playwright` dep, add `e2e` marker |
-| `/home/harald/src/sidestage/tests/e2e/__init__.py` | Create | Package marker (empty file) |
-| `/home/harald/src/sidestage/tests/e2e/conftest.py` | Create | All E2E fixtures: server, build, campaign reset, client, log observer |
-| `/home/harald/src/sidestage/tests/e2e/test_canary.py` | Create | Canary tests validating the infrastructure works |
+| `pyproject.toml` | Modify | Add `pytest-playwright` dep, add `e2e` marker |
+| `src/sidestage/server.py` | Modify | Add `--no-reload` CLI argument |
+| `frontend/tsconfig.app.json` | Modify | Exclude test files from build |
+| `frontend/vite.config.ts` | Modify | Add vitest/config reference type |
+| `.gitignore` | Modify | Add `sidestage.e2e/` |
+| `tests/e2e/__init__.py` | Create | Package marker (empty file) |
+| `tests/e2e/conftest.py` | Create | All E2E fixtures: server, build, campaign reset, client, log observer |
+| `tests/e2e/test_canary.py` | Create | Canary tests validating the infrastructure works |
 
 ## Dependencies
 

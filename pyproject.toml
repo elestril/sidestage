@@ -47,6 +47,7 @@ dev = [
     "pytest-anyio (>=0.0.0)",
     "uv (>=0.10.0,<0.11.0)",
     "pdoc (>=15.0.0,<16.0.0)",
+    "pytest-playwright",
 ]
 
 [tool.pytest.ini_options]
@@ -54,4 +55,5 @@ pythonpath = "src"
 testpaths = ["tests"]
 markers = [
     "llm: tests requiring a live LLM instance at localhost:8080",
+    "e2e: end-to-end browser tests requiring Playwright",
 ]

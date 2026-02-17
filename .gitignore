@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .workdir/
+sidestage.e2e/
 
 *.db
 *.log

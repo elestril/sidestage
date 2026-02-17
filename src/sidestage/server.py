@@ -75,6 +75,7 @@ def main():
     parser.add_argument("--sidestage_dir", default=str(Path.home() / ".sidestage"), help="Directory where campaign data is stored")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind the server to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind the server to")
+    parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload (for testing)")
     args = parser.parse_args()
 
     # Set environment variable so the reloaded process knows which campaign to use
@@ -89,16 +90,22 @@ def main():
     config.get_config()
 
     logger = logging.getLogger(__name__)
-    # Start the AgentOS server using the import string and factory mode to enable reload
-    logger.info(f"Starting Sidestage Server on {args.host}:{args.port} with reload enabled...")
+    # Start the AgentOS server using the import string and factory mode
+    use_reload = not args.no_reload
+    logger.info(f"Starting Sidestage Server on {args.host}:{args.port} (reload={'enabled' if use_reload else 'disabled'})...")
     logger.info(f"Campaign data: {os.path.abspath(os.path.join(args.sidestage_dir, args.campaign))}")
-    
+
+    reload_kwargs: dict[str, object] = {}
+    if use_reload:
+        reload_kwargs["reload"] = True
+        reload_kwargs["reload_dirs"] = [str(Path(__file__).parent)]
+
     try:
         uvicorn.run("sidestage.server:get_app",
                     host=args.host, port=args.port,
-                    reload=True, reload_dirs=[str(Path(__file__).parent)],
                     factory=True,
-                    log_config=None)
+                    log_config=None,
+                    **reload_kwargs)
     finally:
         _remove_pid_file()
 
