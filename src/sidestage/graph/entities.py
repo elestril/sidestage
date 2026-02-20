@@ -55,6 +55,7 @@ MODEL_TO_LABELS: dict[type[EntityModel], list[str]] = {
 # Fields that should NOT be stored as graph node properties.
 EXCLUDED_FIELDS: dict[type[EntityModel], set[str]] = {
     LocationModel: {"connected_locations"},
+    SceneModel: {"character_ids"},
 }
 
 # Valid property key pattern for Cypher safety.

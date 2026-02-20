@@ -31,7 +31,9 @@ The primary interface for running a game session or planning.
         - **Message History:** Scrollable list of user and agent messages.
             - **Widgets:** Interactive cards embedded in messages (e.g., Entity Previews).
         - **Input Area:** Text input for interacting with the Co-Author agent.
-    - **Right Sidebar (Actors):** (Planned) For managing active NPCs in the scene.
+    - **Right Sidebar (Scene Cast):** Manages which characters participate in the scene.
+        - **Scene Cast:** Shows characters currently in the scene. Each entry has a hover-reveal remove button (✕).
+        - **Available:** Shows characters not in the scene. Click to add (+). Only visible when there are characters not yet in the scene.
 
 ### 2. Entities View (`/entities/:entityId`)
 The database management interface for the campaign world.

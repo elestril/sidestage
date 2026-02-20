@@ -26,6 +26,8 @@ Streamable HTTP transport endpoint for MCP-compatible AI clients (e.g. Claude Co
 | `create_scene` | Create a new scene |
 | `get_scene_messages` | Get message history for a scene |
 | `send_chat_message` | Send a chat message to the AI co-author |
+| `join_scene` | Add a character to a scene's cast |
+| `leave_scene` | Remove a character from a scene's cast |
 
 ### Client Configuration
 
@@ -295,6 +297,45 @@ Returns `409 Conflict` if campaign health is DEGRADED.
 
 ### Scenes
 
+#### List Scene Characters
+**GET** `/v1/scenes/{scene_id}/characters`
+
+Returns characters participating in the scene (via `PARTICIPATES_IN` edges).
+
+**Response:** `List[CharacterModel]`
+```json
+[
+  {
+    "id": "char_co_author",
+    "name": "Co-Author",
+    "body": "The AI co-author.",
+    "type": "Character",
+    "location_id": null,
+    "inventory": []
+  }
+]
+```
+
+#### Add Character to Scene
+**POST** `/v1/scenes/{scene_id}/characters/{character_id}`
+
+Creates a `PARTICIPATES_IN` edge from the character to the scene. Broadcasts a `scene_updated` WebSocket event.
+
+**Response (201):**
+```json
+{ "status": "ok" }
+```
+
+#### Remove Character from Scene
+**DELETE** `/v1/scenes/{scene_id}/characters/{character_id}`
+
+Removes the `PARTICIPATES_IN` edge from the character to the scene. Broadcasts a `scene_updated` WebSocket event.
+
+**Response:**
+```json
+{ "status": "ok" }
+```
+
 #### List Scenes
 **GET** `/v1/scenes`
 
@@ -449,6 +490,7 @@ Enable or disable tracing at runtime. Validates the OTLP endpoint is reachable b
 | `current_gametime` | int? | Gametime in seconds |
 | `location_id` | string? | Primary location ID |
 | `events` | string[] | List of event IDs |
+| `character_ids` | string[] | IDs of characters participating in this scene (via `PARTICIPATES_IN` edges) |
 ### EventModel
 All events use a single flattened model with an `event_type` discriminator.
 

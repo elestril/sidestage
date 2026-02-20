@@ -94,6 +94,7 @@ Token budgeting splits the context window between memory sections and chat histo
 
 ### Scene Management
 - **Multiple Scenes:** Organize the campaign into distinct scenes (e.g., "Tavern", "Dungeon", "Flashback").
+- **Scene Membership:** Each scene has an explicit character cast managed via `PARTICIPATES_IN` graph edges. Only characters added to a scene participate in it — scenes with no members load zero characters. Characters can be added and removed via REST API, MCP tools, or the frontend UI.
 - **Prose View:** A dedicated area for the static description of the current scene.
 
 ### Gametime Tracking

@@ -17,3 +17,6 @@ Args:
 
 Returns:
     MigrationImportResult with counts of processed entities and memories.
+
+Handles `PARTICIPATES_IN` edges: for each `SceneModel` with `character_ids`,
+creates `PARTICIPATES_IN` edges from each character to the scene.

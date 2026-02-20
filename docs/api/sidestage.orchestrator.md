@@ -25,6 +25,14 @@ Args:
 
 Helper to access the currently active campaign.
 
+#### Endpoints
+
+In addition to the standard entity and scene endpoints, registers:
+
+- `GET /v1/scenes/{scene_id}/characters` — List characters in a scene
+- `POST /v1/scenes/{scene_id}/characters/{character_id}` — Add character to scene (201)
+- `DELETE /v1/scenes/{scene_id}/characters/{character_id}` — Remove character from scene
+
 #### `get_active_scene(scene_id: str) -> Scene | None` *async*
 
 Retrieve or activate a scene by ID.

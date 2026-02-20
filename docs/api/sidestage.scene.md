@@ -20,6 +20,10 @@ event-type-specific logic, and dispatches to all present Actors.
 
 Activate the scene: start event queue, load and activate characters.
 
+Characters are loaded based on scene membership (`PARTICIPATES_IN` edges in the graph).
+Only characters explicitly added to the scene are activated. If no graph client is
+available, falls back to loading all characters from storage.
+
 #### `chat(actor_id: str, text: str, character_id: str | None = None) -> Event | None` *async*
 
 Entry point for user chat. Creates event and enqueues it.

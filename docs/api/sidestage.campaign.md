@@ -77,9 +77,22 @@ List all entities as dictionaries with an added 'type' field.
 
 List all scenes in the campaign.
 
+#### `add_character_to_scene(scene_id: str, character_id: str) -> None` *async*
+
+Add a character to a scene by creating a `PARTICIPATES_IN` edge. Broadcasts `scene_updated`.
+
+#### `remove_character_from_scene(scene_id: str, character_id: str) -> None` *async*
+
+Remove a character from a scene by deleting the `PARTICIPATES_IN` edge. Broadcasts `scene_updated`.
+
+#### `list_scene_characters(scene_id: str) -> list[CharacterModel]` *async*
+
+List characters participating in a scene via `PARTICIPATES_IN` edges.
+
 #### `reload_defaults() -> None` *async*
 
 Load default entities into both SQLite storage and the graph.
+Creates default `PARTICIPATES_IN` edges (e.g., co-author → campaign_planning scene).
 
 Called via the /v1/campaign/reload-defaults endpoint or after import.
 

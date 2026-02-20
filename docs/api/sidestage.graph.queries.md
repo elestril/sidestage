@@ -29,6 +29,13 @@ Returns a dict with:
     - "entity": the center Entity model (or None if not found)
     - "related": list of Entity models within the given depth
 
+### `characters_in_scene(client: GraphClient, scene_id: str) -> list[CharacterModel]` *async*
+
+All characters participating in a scene (via PARTICIPATES_IN).
+
+Returns a list of Character models. Returns empty list if no characters
+are in the scene or if the scene does not exist.
+
 ### `scene_events(client: GraphClient, scene_id: str, since_gametime: int | None = None) -> list[EventModel]` *async*
 
 Events in a scene, optionally filtered by gametime.

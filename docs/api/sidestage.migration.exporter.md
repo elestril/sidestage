@@ -16,3 +16,6 @@ Args:
 
 Returns:
     MigrationBackupResult with counts of written entities, memories, and chatlogs.
+
+Exports `PARTICIPATES_IN` edges: for each Scene, queries incoming `PARTICIPATES_IN`
+relationships and populates the `character_ids` field in the Scene's frontmatter.

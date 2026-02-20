@@ -19,3 +19,10 @@ Args:
 
 Returns:
     A configured FastMCP server ready to be mounted.
+
+### MCP Tools
+
+In addition to entity, scene, and chat tools, exposes:
+
+- `join_scene(scene_id, character_id)` — Add a character to a scene's cast
+- `leave_scene(scene_id, character_id)` — Remove a character from a scene's cast
