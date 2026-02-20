@@ -16,6 +16,9 @@ interface AppContextType {
   messages: EventModel[];
   thinkingActors: Set<string>;
   activeScene: Scene | undefined;
+  sceneCharacters: Entity[];
+  joinScene: (sceneId: string, characterId: string) => Promise<void>;
+  leaveScene: (sceneId: string, characterId: string) => Promise<void>;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
   tracingError: string | null;
@@ -29,6 +32,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [entities, setEntities] = useState<Entity[]>([]);
   const [messages, setMessages] = useState<EventModel[]>([]);
   const [thinkingActors, setThinkingActors] = useState<Set<string>>(new Set());
+  const [sceneCharacters, setSceneCharacters] = useState<Entity[]>([]);
 
   const loadScenes = useCallback(async () => {
     try {
@@ -65,6 +69,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error('Failed to load messages:', error);
     }
   }, []);
+
+  const loadSceneCharacters = useCallback(async (sceneId: string) => {
+    try {
+      const response = await fetch(`/v1/scenes/${sceneId}/characters`);
+      if (response.ok) {
+        const data = await response.json();
+        setSceneCharacters(data);
+      }
+    } catch (error) {
+      console.error('Failed to load scene characters:', error);
+    }
+  }, []);
+
+  const joinScene = async (sceneId: string, characterId: string) => {
+    try {
+      await fetch(`/v1/scenes/${sceneId}/characters/${characterId}`, { method: 'POST' });
+      await loadSceneCharacters(sceneId);
+    } catch (error) {
+      console.error('Error joining scene:', error);
+    }
+  };
+
+  const leaveScene = async (sceneId: string, characterId: string) => {
+    try {
+      await fetch(`/v1/scenes/${sceneId}/characters/${characterId}`, { method: 'DELETE' });
+      await loadSceneCharacters(sceneId);
+    } catch (error) {
+      console.error('Error leaving scene:', error);
+    }
+  };
 
   const sendMessage = async (text: string) => {
     try {
@@ -135,7 +169,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     loadMessages(currentSceneId);
-  }, [currentSceneId, loadMessages]);
+    loadSceneCharacters(currentSceneId);
+  }, [currentSceneId, loadMessages, loadSceneCharacters]);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -176,6 +211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         } else if (data.type === 'scene_updated') {
           loadScenes();
+          loadSceneCharacters(currentSceneId);
         } else if (data.type === 'entity_content_sync') {
           syncListeners.current.forEach((listener: (data: any) => void) => listener(data));
         }
@@ -211,6 +247,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       messages,
       thinkingActors,
       activeScene,
+      sceneCharacters,
+      joinScene,
+      leaveScene,
       debugMode,
       setDebugMode,
       tracingError,

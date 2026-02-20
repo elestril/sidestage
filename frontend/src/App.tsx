@@ -19,7 +19,7 @@ const renderMarkdown = (text: string) => {
 
 const ScenesPage: React.FC = () => {
   const { sceneId } = useParams<{ sceneId: string }>();
-  const { setCurrentSceneId, activeScene, entities } = useAppContext();
+  const { setCurrentSceneId, activeScene, entities, sceneCharacters, joinScene, leaveScene } = useAppContext();
   const [scenesSplitterPos, setScenesSplitterPos] = useState(40); // Percentage for prose vs chat
   const [isResizingScenes, setIsResizingScenes] = useState(false);
 
@@ -70,15 +70,15 @@ const ScenesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right Bar: Actor Selector */}
+      {/* Right Bar: Scene Cast */}
       <aside className="w-64 bg-black p-4 flex flex-col gap-4 overflow-y-auto">
-        <h3 className="text-[10px] uppercase tracking-wider text-[#666] font-bold">Cast</h3>
+        <h3 className="text-[10px] uppercase tracking-wider text-[#666] font-bold">Scene Cast</h3>
         <div className="flex flex-col gap-2">
-          {characters.map(char => (
-            <div 
-              key={char.id} 
+          {sceneCharacters.map(char => (
+            <div
+              key={char.id}
               className={cn(
-                "p-2 rounded bg-[#1e1e1e] flex items-center gap-2",
+                "p-2 rounded bg-[#1e1e1e] flex items-center gap-2 group",
                 char.unseen ? "opacity-50 border border-dashed border-[#444]" : "border border-transparent hover:border-[#bb86fc]"
               )}
             >
@@ -87,10 +87,39 @@ const ScenesPage: React.FC = () => {
                 <div className="text-sm font-bold truncate">{char.name}</div>
                 {char.unseen && <div className="text-[10px] uppercase text-[#888]">Unseen</div>}
               </div>
+              {sceneId && (
+                <button
+                  onClick={() => leaveScene(sceneId, char.id)}
+                  className="opacity-0 group-hover:opacity-100 text-[#666] hover:text-red-400 text-xs transition-opacity"
+                  title="Remove from scene"
+                >✕</button>
+              )}
             </div>
           ))}
-          {characters.length === 0 && <div className="text-xs text-[#444] italic">No characters found.</div>}
+          {sceneCharacters.length === 0 && <div className="text-xs text-[#444] italic">No characters in scene.</div>}
         </div>
+
+        {/* Available Characters */}
+        {characters.filter(c => !sceneCharacters.some(sc => sc.id === c.id)).length > 0 && (
+          <>
+            <h3 className="text-[10px] uppercase tracking-wider text-[#666] font-bold mt-2">Available</h3>
+            <div className="flex flex-col gap-2">
+              {characters.filter(c => !sceneCharacters.some(sc => sc.id === c.id)).map(char => (
+                <div
+                  key={char.id}
+                  className="p-2 rounded bg-[#1e1e1e]/50 flex items-center gap-2 border border-dashed border-[#333] hover:border-[#bb86fc] cursor-pointer"
+                  onClick={() => sceneId && joinScene(sceneId, char.id)}
+                >
+                  <div className="w-2 h-2 rounded-full bg-gray-600" />
+                  <div className="flex-1 overflow-hidden">
+                    <div className="text-sm text-[#888] truncate">{char.name}</div>
+                  </div>
+                  <span className="text-[#666] text-xs">+</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </aside>
     </div>
   );

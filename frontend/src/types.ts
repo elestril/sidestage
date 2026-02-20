@@ -16,6 +16,7 @@ export interface Scene {
   body: string;
   current_gametime: number | null;
   events: string[];
+  character_ids: string[];
 }
 
 export type EventType = 'ChatMessage' | 'JoinEvent' | 'LeaveEvent' | 'AdjustGametime' | 'Error';
