@@ -42,6 +42,29 @@ async def characters_at_location(client: GraphClient, location_id: str) -> list[
     return characters
 
 
+async def characters_in_scene(client: GraphClient, scene_id: str) -> list[CharacterModel]:
+    """All characters participating in a scene (via PARTICIPATES_IN).
+
+    Returns a list of Character models. Returns empty list if no characters
+    are in the scene or if the scene does not exist.
+    """
+    cypher = (
+        "MATCH (c:Character)-[:PARTICIPATES_IN]->(s:Scene {id: $scene_id}) "
+        "RETURN c"
+    )
+
+    logger.debug("characters_in_scene id=%s", scene_id)
+
+    try:
+        result = await client.graph.query(cypher, params={"scene_id": scene_id})
+    except Exception as exc:
+        raise QueryError(f"Failed to query characters in scene '{scene_id}': {exc}") from exc
+
+    characters = cast(list[CharacterModel], [node_to_entity(row[0].labels, row[0].properties) for row in result.result_set])
+    logger.debug("characters_in_scene returned %d characters", len(characters))
+    return characters
+
+
 async def connected_locations(client: GraphClient, location_id: str) -> list[LocationModel]:
     """All locations connected to a given location (CONNECTS_TO, both directions).
 

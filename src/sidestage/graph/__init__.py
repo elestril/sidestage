@@ -16,6 +16,7 @@ from sidestage.graph.entities import (
 from sidestage.graph.relationships import link, unlink, get_related, get_relationships
 from sidestage.graph.queries import (
     characters_at_location,
+    characters_in_scene,
     connected_locations,
     scene_events,
     entity_graph,
@@ -49,6 +50,7 @@ __all__ = [
     "get_relationships",
     # Queries
     "characters_at_location",
+    "characters_in_scene",
     "connected_locations",
     "scene_events",
     "entity_graph",

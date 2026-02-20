@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sidestage.graph.errors import QueryError
 from sidestage.graph.queries import (
     characters_at_location,
+    characters_in_scene,
     connected_locations,
     scene_events,
     entity_graph,
@@ -74,6 +75,69 @@ async def test_characters_at_location_query_error(mock_client: MagicMock) -> Non
 
     with pytest.raises(QueryError):
         await characters_at_location(mock_client, "loc_tavern")
+
+
+# --- characters_in_scene ---
+
+
+@pytest.mark.anyio
+async def test_characters_in_scene_returns_members(mock_client: MagicMock) -> None:
+    """characters_in_scene returns only characters with PARTICIPATES_IN edges."""
+    node = _make_node_mock(
+        ["Entity", "Character"],
+        {"id": "char_1", "name": "Alice", "body": "A warrior", "unseen": False, "inventory": []},
+    )
+    mock_client.graph.query.return_value = MagicMock(result_set=[[node]])
+
+    result = await characters_in_scene(mock_client, "scene_01")
+
+    assert len(result) == 1
+    assert isinstance(result[0], CharacterModel)
+    assert result[0].id == "char_1"
+
+    cypher = mock_client.graph.query.call_args[0][0]
+    assert "PARTICIPATES_IN" in cypher
+    assert ":Character" in cypher
+
+
+@pytest.mark.anyio
+async def test_characters_in_scene_empty_scene(mock_client: MagicMock) -> None:
+    """characters_in_scene returns empty list when scene has no membership edges."""
+    mock_client.graph.query.return_value = MagicMock(result_set=[])
+
+    result = await characters_in_scene(mock_client, "scene_empty")
+
+    assert result == []
+
+
+@pytest.mark.anyio
+async def test_characters_in_scene_multiple_scenes_isolation(mock_client: MagicMock) -> None:
+    """characters_in_scene queries with the correct scene_id parameter."""
+    mock_client.graph.query.return_value = MagicMock(result_set=[])
+
+    await characters_in_scene(mock_client, "scene_a")
+
+    params = mock_client.graph.query.call_args[1].get("params") or mock_client.graph.query.call_args[0][1] if len(mock_client.graph.query.call_args[0]) > 1 else mock_client.graph.query.call_args[1]["params"]
+    assert params["scene_id"] == "scene_a"
+
+
+@pytest.mark.anyio
+async def test_characters_in_scene_nonexistent_scene(mock_client: MagicMock) -> None:
+    """characters_in_scene returns empty list for a nonexistent scene (not an error)."""
+    mock_client.graph.query.return_value = MagicMock(result_set=[])
+
+    result = await characters_in_scene(mock_client, "scene_nonexistent")
+
+    assert result == []
+
+
+@pytest.mark.anyio
+async def test_characters_in_scene_query_error(mock_client: MagicMock) -> None:
+    """characters_in_scene raises QueryError on failure."""
+    mock_client.graph.query.side_effect = Exception("network timeout")
+
+    with pytest.raises(QueryError):
+        await characters_in_scene(mock_client, "scene_01")
 
 
 # --- connected_locations ---

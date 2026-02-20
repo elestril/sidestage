@@ -399,7 +399,7 @@ async def test_activate_starts_queue(scene: Scene, mock_campaign: MagicMock):
     scene.queue.start = AsyncMock()
 
     # Mock character loading to return empty
-    with patch("sidestage.graph.list_entities", new_callable=AsyncMock, return_value=[]):
+    with patch("sidestage.graph.queries.characters_in_scene", new_callable=AsyncMock, return_value=[]):
         scene.graph_client = MagicMock()
         await scene.activate()
 

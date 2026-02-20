@@ -123,11 +123,16 @@ class Scene:
 
         await self.queue.start(self._process_event)
 
-        # Load characters: prefer graph when available, fall back to Storage
+        # Load characters assigned to this scene via PARTICIPATES_IN edges
         if self.graph_client is not None:
-            from sidestage.graph import list_entities
-            all_chars = await list_entities(self.graph_client, entity_type="Character")
+            from sidestage.graph.queries import characters_in_scene
+            all_chars = await characters_in_scene(self.graph_client, self.data.id)
         else:
+            logger.warning(
+                "Scene %s: no graph client — falling back to loading all characters "
+                "(membership filtering not supported without graph)",
+                self.id,
+            )
             all_chars = self.storage.list_characters()
 
         present_character_ids = [c.id for c in all_chars]
