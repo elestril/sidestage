@@ -38,6 +38,11 @@
       "inputs": ["python-source", "{workspaceRoot}/pyrightconfig.json"],
       "outputs": [],
       "cache": true
+    },
+    "serve": {
+      "command": "scripts/run-dev.sh",
+      "cache": false,
+      "persistent": true
     }
   }
 }

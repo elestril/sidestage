@@ -1,0 +1,36 @@
+{
+  "name": "frontend",
+  "root": "frontend",
+  "sourceRoot": "frontend/src",
+  "projectType": "application",
+  "tags": ["lang:typescript"],
+  "targets": {
+    "build": {
+      "command": "npm run build",
+      "options": { "cwd": "frontend" },
+      "inputs": ["{projectRoot}/**/*", "!{projectRoot}/dist/**/*", "!{projectRoot}/node_modules/**/*"],
+      "outputs": ["{projectRoot}/dist"],
+      "cache": true
+    },
+    "dev": {
+      "command": "npm run dev",
+      "options": { "cwd": "frontend" },
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "command": "npm run lint",
+      "options": { "cwd": "frontend" },
+      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/eslint.config.js"],
+      "outputs": [],
+      "cache": true
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "options": { "cwd": "frontend" },
+      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/tsconfig*.json"],
+      "outputs": [],
+      "cache": true
+    }
+  }
+}

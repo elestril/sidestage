@@ -1,0 +1,15 @@
+{
+  "name": "e2e",
+  "root": "tests/e2e",
+  "projectType": "library",
+  "tags": ["scope:e2e"],
+  "targets": {
+    "e2e": {
+      "command": "uv run pytest tests/e2e/",
+      "inputs": ["python-source", "{projectRoot}/**/*.py"],
+      "outputs": [],
+      "cache": false,
+      "dependsOn": ["backend:test", "frontend:build"]
+    }
+  }
+}

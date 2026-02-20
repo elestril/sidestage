@@ -8,6 +8,6 @@
     "format": "uv run ruff format",
     "typecheck": "uv run pyright",
     "install": "uv sync",
-    "build": "cd frontend && npm run build"
+    "build": "npx nx build frontend"
   }
 }
