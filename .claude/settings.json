@@ -13,7 +13,5 @@
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "sidestage",
-    "code-index",
-    "plugins:code_deep:code_deep"
   ]
 }
