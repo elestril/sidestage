@@ -13,8 +13,9 @@ agent-project/
 # agent-project artifacts
 .claude/settings.local.json
 .claude/commands/
-.gemini/settings.json
+.gemini/settings.local.json
 .gemini/skills/
 .mcp.json
 CLAUDE.md
 GEMINI.md
+.gemini/settings.json

@@ -2,16 +2,11 @@
   "enabledPlugins": {},
   "permissions": {
     "allow": [
-      "Bash(ss:*)",
-      "Bash(uv run pytest:*)",
-      "Bash(uv run pyright:*)",
-      "mcp__code-index__*",
-      "mcp__plugin_deep-code_deep-code__*",
       "mcp__sidestage__*"
     ]
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
-    "sidestage",
+    "sidestage"
   ]
 }
