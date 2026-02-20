@@ -7,6 +7,7 @@
     "lint": "uv run ruff check",
     "format": "uv run ruff format",
     "typecheck": "uv run pyright",
-    "install": "uv sync"
+    "install": "uv sync",
+    "build": "cd frontend && npm run build"
   }
 }
