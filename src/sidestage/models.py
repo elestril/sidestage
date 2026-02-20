@@ -106,6 +106,9 @@ class SceneModel(EntityModel):
     events: List[str] = Field(
         default_factory=list, description="IDs of events in this scene"
     )
+    character_ids: List[str] = Field(
+        default_factory=list, description="IDs of characters participating in this scene"
+    )
 
 
 # Backward-compat aliases for modules not yet migrated (scene.py, memory/context.py).

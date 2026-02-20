@@ -180,6 +180,14 @@ class Campaign:
 
             span.set_attribute("entities.loaded_count", count)
 
+            # Create default PARTICIPATES_IN edges (co-author → campaign_planning)
+            if self.graph_client is not None:
+                try:
+                    await graph_link(self.graph_client, "char_co_author", "PARTICIPATES_IN", "campaign_planning")
+                    self.campaign_log.info("Linked char_co_author -> PARTICIPATES_IN -> campaign_planning")
+                except Exception as e:
+                    self.campaign_log.warning(f"Failed to create default PARTICIPATES_IN edge: {e}")
+
     def _ensure_llm_availability(self) -> None:
         """
         Verify that the default LLM endpoint is reachable and the model exists.

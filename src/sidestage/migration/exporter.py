@@ -243,6 +243,9 @@ async def _enrich_entity_relationships(client: GraphClient, entity: EntityModel)
         related = await get_related(client, entity.id, "AT_LOCATION", "outgoing")
         if related:
             entity.location_id = related[0].id
+        # Populate scene cast from PARTICIPATES_IN edges (incoming: characters -> scene)
+        participants = await get_related(client, entity.id, "PARTICIPATES_IN", "incoming")
+        entity.character_ids = [p.id for p in participants]
 
 
 def _format_chatlog(events: list[EventModel]) -> str:

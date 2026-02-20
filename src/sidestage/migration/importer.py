@@ -202,6 +202,13 @@ async def _create_relationships(
         except Exception as exc:
             errors.append(f"AT_LOCATION failed for '{entity.id}': {exc}")
 
+        if isinstance(entity, SceneModel):
+            for char_id in entity.character_ids:
+                try:
+                    await link(client, char_id, "PARTICIPATES_IN", entity.id)
+                except Exception as exc:
+                    errors.append(f"PARTICIPATES_IN failed for '{char_id}' -> '{entity.id}': {exc}")
+
         try:
             if isinstance(entity, EventModel):
                 await link(client, entity.scene_id, "HAS_EVENT", entity.id)
