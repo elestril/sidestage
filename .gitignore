@@ -7,3 +7,14 @@ sidestage.e2e/
 
 *.db
 *.log
+.agent-project/
+agent-project/
+
+# agent-project artifacts
+.claude/settings.local.json
+.claude/commands/
+.gemini/settings.json
+.gemini/skills/
+.mcp.json
+CLAUDE.md
+GEMINI.md

@@ -1,0 +1,12 @@
+{
+  "project_name": "sidestage",
+  "default_branch": "main",
+  "plugins": ["python-project"],
+  "tools": {
+    "test": "uv run pytest",
+    "lint": "uv run ruff check",
+    "format": "uv run ruff format",
+    "typecheck": "uv run pyright",
+    "install": "uv sync"
+  }
+}

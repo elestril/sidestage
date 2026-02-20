@@ -1,0 +1,3 @@
+[submodule "agent-project"]
+	path = agent-project
+	url = ./agent-project
