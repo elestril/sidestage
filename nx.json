@@ -7,9 +7,7 @@
       "{workspaceRoot}/pyproject.toml",
       "{workspaceRoot}/uv.lock"
     ],
-    "python-tests": [
-      "{workspaceRoot}/tests/**/*.py"
-    ]
+    "python-tests": ["{workspaceRoot}/tests/**/*.py"]
   },
   "targetDefaults": {
     "build": { "dependsOn": ["^build"], "cache": true },
@@ -17,5 +15,5 @@
     "lint": { "cache": true },
     "typecheck": { "cache": true }
   },
-  "defaultProject": "frontend"
+  "defaultBase": "main"
 }
