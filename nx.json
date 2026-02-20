@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "!{projectRoot}/**/*.md"],
+    "python-source": [
+      "{workspaceRoot}/src/**/*.py",
+      "{workspaceRoot}/pyproject.toml",
+      "{workspaceRoot}/uv.lock"
+    ],
+    "python-tests": [
+      "{workspaceRoot}/tests/**/*.py"
+    ]
+  },
+  "targetDefaults": {
+    "build": { "dependsOn": ["^build"], "cache": true },
+    "test": { "cache": true },
+    "lint": { "cache": true },
+    "typecheck": { "cache": true }
+  },
+  "defaultProject": "frontend"
+}

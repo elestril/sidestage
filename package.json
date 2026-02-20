@@ -1,0 +1,15 @@
+{
+  "name": "sidestage",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npx nx build frontend",
+    "test": "npx nx run-many --target=test",
+    "lint": "npx nx run-many --target=lint",
+    "typecheck": "npx nx run-many --target=typecheck",
+    "dev": "npx nx serve dev-instance"
+  },
+  "devDependencies": {
+    "nx": "^20.8.1"
+  }
+}
