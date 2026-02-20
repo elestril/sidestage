@@ -72,6 +72,8 @@ def test_expected_tools_registered(mcp: FastMCP):
         "list_scenes",
         "create_scene",
         "get_scene_messages",
+        "join_scene",
+        "leave_scene",
         "send_chat_message",
     }
     assert expected == tool_names

@@ -399,6 +399,24 @@ class SidestageOrchestrator:
             await self.campaign.user.send({"type": "scene_updated"})
             return scene.model_dump()
 
+        @self.fastapi_app.get("/v1/scenes/{scene_id}/characters")
+        async def get_scene_characters(scene_id: str) -> List[Dict[str, Any]]:
+            """List characters in a scene."""
+            chars = await self.campaign.list_scene_characters(scene_id)
+            return [c.model_dump() for c in chars]
+
+        @self.fastapi_app.post("/v1/scenes/{scene_id}/characters/{character_id}", status_code=201)
+        async def add_character_to_scene(scene_id: str, character_id: str) -> Dict[str, str]:
+            """Add a character to a scene."""
+            await self.campaign.add_character_to_scene(scene_id, character_id)
+            return {"status": "ok"}
+
+        @self.fastapi_app.delete("/v1/scenes/{scene_id}/characters/{character_id}")
+        async def remove_character_from_scene(scene_id: str, character_id: str) -> Dict[str, str]:
+            """Remove a character from a scene."""
+            await self.campaign.remove_character_from_scene(scene_id, character_id)
+            return {"status": "ok"}
+
         @self.fastapi_app.get("/v1/scenes/{scene_id}/messages")
         async def get_scene_messages(scene_id: str) -> List[EventModel]:
             """Get message history for a scene."""

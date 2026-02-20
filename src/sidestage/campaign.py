@@ -21,6 +21,9 @@ from sidestage.graph import create_entity as graph_create_entity
 from sidestage.graph import get_entity as graph_get_entity
 from sidestage.graph import update_entity as graph_update_entity
 from sidestage.graph import list_entities as graph_list_entities
+from sidestage.graph import link as graph_link
+from sidestage.graph import unlink as graph_unlink
+from sidestage.graph.queries import characters_in_scene
 from sidestage.config import LLMConfig, SidestageConfig
 from sidestage import config
 
@@ -462,6 +465,26 @@ class Campaign:
         else:
             self.storage.add_scene(scene)
         return scene
+
+    async def add_character_to_scene(self, scene_id: str, character_id: str) -> None:
+        """Add a character to a scene by creating a PARTICIPATES_IN edge."""
+        if self.graph_client is None:
+            raise RuntimeError("Graph client required for scene membership")
+        await graph_link(self.graph_client, character_id, "PARTICIPATES_IN", scene_id)
+        await self.user.send({"type": "scene_updated"})
+
+    async def remove_character_from_scene(self, scene_id: str, character_id: str) -> None:
+        """Remove a character from a scene by deleting the PARTICIPATES_IN edge."""
+        if self.graph_client is None:
+            raise RuntimeError("Graph client required for scene membership")
+        await graph_unlink(self.graph_client, character_id, "PARTICIPATES_IN", scene_id)
+        await self.user.send({"type": "scene_updated"})
+
+    async def list_scene_characters(self, scene_id: str) -> List[CharacterModel]:
+        """List characters participating in a scene."""
+        if self.graph_client is None:
+            raise RuntimeError("Graph client required for scene membership")
+        return await characters_in_scene(self.graph_client, scene_id)
 
     def get_scene_messages(self, scene_id: str) -> Optional[List[EventModel]]:
         """Get all events for a specific scene (chat messages, errors, etc.)."""

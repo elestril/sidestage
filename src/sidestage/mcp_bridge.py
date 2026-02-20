@@ -220,6 +220,36 @@ def create_mcp_server(orchestrator: SidestageOrchestrator) -> FastMCP:
             raise ValueError(f"Scene '{scene_id}' not found")
         return [m.model_dump() for m in messages]
 
+    # --- Scene membership tools ---
+
+    @mcp.tool()
+    async def join_scene(scene_id: str, character_id: str) -> dict[str, str]:
+        """Add a character to a scene's cast.
+
+        Creates a PARTICIPATES_IN relationship so the character
+        participates when the scene is active.
+
+        Args:
+            scene_id: The ID of the scene.
+            character_id: The ID of the character to add.
+        """
+        await orchestrator.campaign.add_character_to_scene(scene_id, character_id)
+        return {"status": "ok", "scene_id": scene_id, "character_id": character_id}
+
+    @mcp.tool()
+    async def leave_scene(scene_id: str, character_id: str) -> dict[str, str]:
+        """Remove a character from a scene's cast.
+
+        Removes the PARTICIPATES_IN relationship so the character
+        no longer participates when the scene is active.
+
+        Args:
+            scene_id: The ID of the scene.
+            character_id: The ID of the character to remove.
+        """
+        await orchestrator.campaign.remove_character_from_scene(scene_id, character_id)
+        return {"status": "ok", "scene_id": scene_id, "character_id": character_id}
+
     # --- Chat tool ---
 
     @mcp.tool()
