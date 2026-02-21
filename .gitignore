@@ -23,3 +23,11 @@ agent-project/
 CLAUDE.md
 GEMINI.md
 .gemini/settings.json
+.gemini/skills/implement/
+.gemini/skills/improve/
+.gemini/skills/new-track/
+.gemini/skills/plan/
+.gemini/skills/pytest-runner/
+.gemini/skills/revert/
+.gemini/skills/selftest/
+.gemini/skills/status/
