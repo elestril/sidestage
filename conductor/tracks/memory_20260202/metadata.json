@@ -1,8 +1,0 @@
-{
-  "id": "memory_20260202",
-  "name": "Memory & Graph Database",
-  "description": "Migrate entity storage to FalkorDB and implement semantic memory.",
-  "status": "planned",
-  "created_at": "2026-02-02",
-  "owner": "harald"
-}

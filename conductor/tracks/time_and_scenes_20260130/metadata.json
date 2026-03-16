@@ -1,8 +1,0 @@
-{
-  "track_id": "time_and_scenes_20260130",
-  "type": "feature",
-  "status": "completed",
-  "created_at": "2026-01-30T22:15:00Z",
-  "updated_at": "2026-01-30T22:45:00Z",
-  "description": "Implement Gametime tracking and Scene-based orchestration. Every interaction happens within a Scene, which has its own local Gametime and chat log."
-}
