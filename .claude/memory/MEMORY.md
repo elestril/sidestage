@@ -1,0 +1,3 @@
+- [feedback_specs_no_content.md](feedback_specs_no_content.md) — Specs must be technical behavior only, no product names/branding/flavor
+- [feedback_dm_vs_privileged.md](feedback_dm_vs_privileged.md) — "DM" is a user role (use cases); "privileged actor" is the technical permission concept
+- [feedback_use_worktrees.md](feedback_use_worktrees.md) — Always use worktree isolation for implementation work

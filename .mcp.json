@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "code-index": {
+      "type": "stdio",
+      "command": "code-index-mcp",
+      "args": [
+        "--project-path", ".", "--indexer-path", ".tmp/"
+      ],
+      "env": {}
+    }
+  }
+}

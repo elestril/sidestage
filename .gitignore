@@ -11,5 +11,7 @@ sidestage.e2e/
 
 *.db
 *.log
+.tmp/
+planning/
 
 # agent-project artifacts
