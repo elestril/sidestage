@@ -11,23 +11,5 @@ sidestage.e2e/
 
 *.db
 *.log
-.agent-project/
-agent-project/
 
 # agent-project artifacts
-.claude/settings.local.json
-.claude/commands/
-.gemini/settings.local.json
-.gemini/skills/
-.mcp.json
-CLAUDE.md
-GEMINI.md
-.gemini/settings.json
-.gemini/skills/implement/
-.gemini/skills/improve/
-.gemini/skills/new-track/
-.gemini/skills/plan/
-.gemini/skills/pytest-runner/
-.gemini/skills/revert/
-.gemini/skills/selftest/
-.gemini/skills/status/
