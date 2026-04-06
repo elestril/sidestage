@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)"
+    ]
+  },
+  "autoMemoryDirectory": ".claude/memory", 
+  "plansDirectory": ".claude/plans"
+}
