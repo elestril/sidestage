@@ -4,9 +4,11 @@ Agentic ttRPG assistant.
 
 ## Principles
 
-- All work must be traceable via UNAMBIGUOUS REFERENCES: CUJ → design doc → external docs → test invariants → code.
+- All work must be traceable via UNAMBIGUOUS REFERENCES: CUJ → design doc →
+  external docs → test invariants → code.
 - NEVER guess. Resolve ambiguity in dialogue.
 - Do exactly what was asked, then STOP.
+- ALL tool calls MUST use paths relative to the workspace root.
 
 ## TDD Workflow
 
@@ -17,7 +19,3 @@ All production code goes through red-green via subagents:
 3. **Refactor**: Only if explicitly requested.
 
 The orchestrator MUST NOT write tests or production code directly.
-
-## File Organization
-
-Planning docs, design docs, and memory files go in `.claude/`.
