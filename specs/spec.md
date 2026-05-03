@@ -8,6 +8,12 @@ journeys down to testable invariants and ultimately the actual implementation.
 
 - spec-prose: A spec document starts with a prose section briefly describing
   the intent of the spec.
+- spec-current: Specs describe what is implemented now. They do not describe
+  future plans, aspirations, or out-of-scope features. If it is not in the
+  code, it is not in the spec. Specs and code are kept in sync.
+- spec-length: Spec files must not exceed ~1000 words. This allows agents to
+  load specs incrementally without overwhelming their context window. If a spec
+  grows beyond this, split it into focused sub-files.
 
 ## spec-format: How specs are formatted in markdown
 

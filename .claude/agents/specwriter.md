@@ -1,7 +1,7 @@
 ---
 name: specwriter
 description: Writes specifications
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 model: opus
 color: blue
 ---
