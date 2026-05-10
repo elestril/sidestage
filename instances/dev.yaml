@@ -1,0 +1,9 @@
+name: dev
+port: 8000
+config_dir: configs/
+reload: true
+dependencies:
+  - name: vite
+    health_url: http://localhost:5173/__vite_ping
+    start_cmd: npm run dev
+    start_cwd: frontend/

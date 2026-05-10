@@ -48,20 +48,28 @@ without needing a topological sort.
 
 1. fs-dataflow-config: Read `<path>/config.yaml`; parse `name` and `active_scene_id`.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 2. fs-dataflow-walk: Walk `<path>` recursively, enumerating every entity file or directory per `entity-disk-format`.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 3. fs-dataflow-classify: Determine each entity's concrete type (`Character`, `Scene`, generic `Entity`, …) from its location and directory structure.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 4. fs-dataflow-parse: Parse YAML frontmatter and markdown body into the entity's `Model`.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 5. fs-dataflow-resolve-refs: For each `EntityId` field encountered during parse, call `factory.ghost(id, type)` to register an unresolved ghost if the target is not yet loaded.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 6. fs-dataflow-deserialize: Call `EntityClass.deserialize(model)` to produce a hydrated entity instance.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 7. fs-dataflow-add: Call `factory.add(entity)`; this registers the entity and hydrates any matching ghost in place.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 8. fs-dataflow-finalize: After the walk completes, look up `active_scene_id` in the factory and assign it to `Campaign.scene`. Log a warning for any ghost that remains unresolved; leave it in place — access raises `UnresolvedEntityError` per `entity-ghost-unresolved`.
    - .implements: cuj-startup-load
+   - .implemented-by: Campaign.load
 
 ## campaign-impl: Campaign class
 

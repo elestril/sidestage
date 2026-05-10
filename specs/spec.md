@@ -48,23 +48,42 @@ journeys down to testable invariants and ultimately the actual implementation.
 
 - spec-links: Specs reference each other using dotted relationship lines as
   sub-bullets. These are not spec labels — the leading `.` marks them as
-  metadata:
+  metadata. Both directions are independently maintained; having both makes
+  reviews robust to drift on either axis:
   ```
   - spec-foo: Description.
-    - .implements: parent-spec
-    - .implemented-by: child-spec-a, child-spec-b
+    - .implements: parent-spec, OtherClass.method
+    - .implemented-by: child-spec-a, ConcreteClass.method
   ```
+  - spec-links-implements: Upward link — "this spec point implements the named target."
+  - spec-links-implemented-by: Downward link — "this spec point is implemented by the named target."
+  - spec-links-both: When the same edge exists, BOTH ends carry the link. If
+    `A.implements: B`, then `B.implemented-by: A` should also appear. Adding
+    code does not drop the spec link; refactoring the spec hierarchy does not
+    drop the code link.
+
+- spec-link-targets: A link target is either a labeled bullet spec
+  (`scene-append-history`) OR the name of a public class, method, or
+  attribute (`SimpleScene.dispatch`, `Scene.messages`).
+  - spec-link-targets-public-are-specs: All public classes, methods, and
+    attributes ARE first-class specs. Their signature and invariant bullets
+    ARE the spec text. They can appear as `.implements` / `.implemented-by`
+    targets without any additional label.
+  - spec-link-targets-private: Private members (leading underscore) are
+    implementation detail and are NOT spec targets. Reference the public
+    surface instead.
 
 - spec-class-format: Class and method specs use a single preformatted signature
   line followed by labeled invariant bullets. Each invariant is a first-class
-  spec label and implicitly defines a unit test case. `.implements` links appear
-  as a final bullet:
+  spec label and implicitly defines a unit test case. Link bullets appear at
+  the end:
 
   `dispatch(self, message: Message) -> list[Message]`
   - scene-dispatch-appends: Appends incoming message to history.
   - scene-dispatch-responds: Calls character.respond() on each Character.
   - scene-dispatch-returns: Returns the list of non-None responses.
   - .implements: cuj-hello-send
+  - .implemented-by: SimpleScene.dispatch
 
 ### spec-chain: The traceability chain
 

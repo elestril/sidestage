@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from sidestage.actor import Actor
 from sidestage.campaign import Campaign
@@ -21,34 +22,17 @@ class ServerState(Enum):
     SERVING = "serving"
 
 
-class InitEvent:
-    def __init__(self, scene_id: EntityId, characters: list[Character.Model]) -> None:
-        self.scene_id = scene_id
-        self.characters = characters
-
-    def model_dump(self) -> dict:
-        return {
-            "type": "init",
-            "scene_id": self.scene_id,
-            "characters": [c.model_dump() for c in self.characters],
-        }
+class InitEvent(BaseModel):
+    type: Literal["init"] = "init"
+    scene_id: EntityId
+    characters: list[Character.Model]
+    player_character_ids: list[EntityId]
 
 
-class MessageEvent:
-    def __init__(self, sender_id: EntityId, body: str) -> None:
-        self.sender_id = sender_id
-        self.body = body
-
-    def model_dump(self) -> dict:
-        return {
-            "type": "message",
-            "sender_id": self.sender_id,
-            "body": self.body,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> MessageEvent:
-        return cls(sender_id=EntityId(data["sender_id"]), body=data["body"])
+class MessageEvent(BaseModel):
+    type: Literal["message"] = "message"
+    sender_id: EntityId
+    body: str
 
 
 class UserActor(Actor):
@@ -62,7 +46,7 @@ class UserActor(Actor):
 
     async def run(self) -> None:
         async for data in self.websocket.iter_json():
-            event = MessageEvent.from_dict(data)
+            event = MessageEvent.model_validate(data)
             message = Message(sender=self._character, body=event.body)
             self.scene.dispatch(message)
 
@@ -122,6 +106,7 @@ class App:
             init_event = InitEvent(
                 scene_id=scene.id,
                 characters=[c.serialize() for c in scene.characters],
+                player_character_ids=[c.id for c in scene.characters if c.actor_type == "user"],
             )
             await websocket.send_json(init_event.model_dump())
 

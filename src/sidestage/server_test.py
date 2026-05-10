@@ -53,18 +53,18 @@ class TestServerState:
 
 class TestInitEvent:
     def test_init_event_has_scene_id(self):
-        event = InitEvent(scene_id=EntityId("s1"), characters=[])
+        event = InitEvent(scene_id=EntityId("s1"), characters=[], player_character_ids=[])
         assert event.scene_id == "s1"
 
     def test_init_event_has_characters(self):
         char = make_character("c1")
         model = char.serialize()
-        event = InitEvent(scene_id=EntityId("s1"), characters=[model])
+        event = InitEvent(scene_id=EntityId("s1"), characters=[model], player_character_ids=[])
         assert len(event.characters) == 1
         assert event.characters[0] is model
 
     def test_init_event_model_dump(self):
-        event = InitEvent(scene_id=EntityId("s1"), characters=[])
+        event = InitEvent(scene_id=EntityId("s1"), characters=[], player_character_ids=[])
         data = event.model_dump()
         assert data["scene_id"] == "s1"
         assert data["type"] == "init"
@@ -84,9 +84,9 @@ class TestMessageEvent:
         assert data["body"] == "Hello"
         assert data["type"] == "message"
 
-    def test_message_event_from_dict(self):
+    def test_message_event_model_validate(self):
         data = {"sender_id": "c1", "body": "Hello"}
-        event = MessageEvent.from_dict(data)
+        event = MessageEvent.model_validate(data)
         assert event.sender_id == "c1"
         assert event.body == "Hello"
 
