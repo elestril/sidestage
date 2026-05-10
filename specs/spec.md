@@ -55,6 +55,17 @@ journeys down to testable invariants and ultimately the actual implementation.
     - .implemented-by: child-spec-a, child-spec-b
   ```
 
+- spec-class-format: Class and method specs use a single preformatted signature
+  line followed by labeled invariant bullets. Each invariant is a first-class
+  spec label and implicitly defines a unit test case. `.implements` links appear
+  as a final bullet:
+
+  `dispatch(self, message: Message) -> list[Message]`
+  - scene-dispatch-appends: Appends incoming message to history.
+  - scene-dispatch-responds: Calls character.respond() on each Character.
+  - scene-dispatch-returns: Returns the list of non-None responses.
+  - .implements: cuj-hello-send
+
 ### spec-chain: The traceability chain
 
 The chain runs: product goal → CUJ → class/method invariants.
@@ -78,10 +89,20 @@ The chain runs: product goal → CUJ → class/method invariants.
 
   Inserting a new step only renumbers — existing labels are unaffected.
 
+- spec-chain-indirect: Chains may be indirect. Intermediate spec layers may
+  be inserted between any two levels — for example, a dataflow spec between a
+  CUJ step and class-level invariants. Each intermediate spec implements the
+  level above it, and is implemented-by the level below. The full chain remains
+  unbroken as long as every leaf is traceable to a CUJ step.
+
+- spec-chain-dataflow: Any data flow that crosses a process boundary MUST have
+  a comprehensive dataflow spec with every step explicitly labelled. Process
+  boundaries include: WebSocket, HTTP, database, filesystem, and remote RPC.
+  Dataflow steps are first-class specs and must be traceable in both directions.
+
 - spec-chain-invariant: Class and method level specs are the leaves of the
-  chain. Each one names the class/method and its exact behavior, and references
-  the CUJ step it delivers.
-  - .implements: the specific cuj step label
+  chain. Each references the nearest spec above it in the chain.
+  - .implements: the specific parent spec label
 
 ### spec-process: How specifications are written
 

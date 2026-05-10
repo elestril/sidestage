@@ -4,8 +4,15 @@ A Character represents a person in the game world — a player character, NPC,
 or meta-character such as the GM. Characters store world-state and delegate
 response generation to their associated Actor.
 
-## character-impl: Implementation specs
+## character-impl: Character class
 
-- character-actor: A Character has an associated Actor
-- character-respond: Delegates to `actor.respond()` — a pure pass-through
-  - .implements: cuj-hello-respond
+### character-class: Character(Entity)
+
+`_actor: Actor`
+
+`respond(self, message: Message) -> Optional[Message]`
+- character-respond-passthrough: Pure pass-through to `_actor.respond(message, self)`.
+- .implements: message-dataflow-route
+
+`has_human_actor(self) -> bool`
+- character-has-human-actor: Returns `_actor.is_human()`.

@@ -1,19 +1,28 @@
 # scene: The active game scene
 
-A scene is the active context for a game session. It holds the characters
-present and the full message history.
+A scene is an Entity representing the active context for a game session. It
+holds the characters present and the full message history. Scene is abstract;
+SimpleScene is the scaffold concrete implementation.
 
-## scene-impl: Implementation specs
+## scene-impl: Scene and SimpleScene classes
 
-- scene-characters: Holds the list of Characters present in the scene
-- scene-messages: Maintains an ordered list of all Messages exchanged in the scene
-- scene-dispatch: Appends the incoming Message to the history, calls
-  `character.respond()` on each Character, appends and returns their responses
-  - .implements: cuj-hello-send, cuj-hello-respond
+### scene-class: Scene(Entity) _(abstract)_
 
-## scene-message: The Message object
+- `characters: list[Character]` The characters in the scene
+- `messages: list[Message]` A ordered list of all chat messages in the scene.
 
-A Message is the unit of communication between participants in a scene.
+`dispatch(self, message: Message) -> None` _(abstract)_
 
-- message-sender: A Message has a sender (a Character)
-- message-body: A Message has a text body
+### simple-scene: SimpleScene(Scene)
+
+Assumes exactly one UserActor character and one StubActor character.
+
+`dispatch(self, message: Message) -> None`
+
+1. simple-scene-dispatch-appends: Appends message to history.
+2. simple-scene-dispatch-forwards: Calls respond() on the non-sender character.
+3. simple-scene-dispatch-response-appends: If a response is returned, appends it
+   to history.
+4. simple-scene-dispatch-response-delivers: Calls respond() on the sender's
+   character with the response.
+5. .implements: message-dataflow-route, message-dataflow-recurse, message-dataflow-return
