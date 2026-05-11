@@ -7,14 +7,11 @@ Agentic-AI tabletop-RPG assistant. Spec-driven; see `specs/`.
 One-time after `git clone`:
 
 ```bash
-# Python deps + dev tooling
-uv sync
-
-# Frontend deps
-cd frontend && npm install && cd -
-
-# Task runner
+# Task runner — needed first; everything else is `just …`.
 cargo install just   # or `brew install just`, etc. — see https://github.com/casey/just
+
+# Python deps + frontend deps + Playwright (+ Chromium) + git pre-commit hook.
+just setup
 ```
 
 ## Running
@@ -34,14 +31,21 @@ Stop with `Ctrl-C`. Vite keeps running — `just stop-vite` to kill it.
 ## Tasks
 
 ```bash
-just            # list available tasks
-just test       # Python + frontend
-just test-py    # pytest only
-just test-fe    # vitest only
-just build      # bundle SPA
-just spec       # regenerate specs/generated/api.md
-just clean      # drop caches and build outputs
+just              # list available tasks
+just setup        # one-shot install (deps + hooks); idempotent
+just test         # lint + Python + frontend (parallel, ~3s)
+just test-all     # adds browser e2e — what the pre-commit hook runs
+just test-browser # Playwright + Chromium against the built SPA
+just lint         # ruff + pyright + tsc, all linters & type checks
+just format       # apply ruff fixes + formatter
+just build        # bundle SPA into src/sidestage/static/
+just spec         # regenerate specs/generated/api.md
+just clean        # drop caches and build outputs
 ```
+
+A `pre-commit` hook runs `just test-all` before every commit (installed
+by `just setup`). Skip with `git commit --no-verify` only when you
+genuinely need to.
 
 ## Specs
 

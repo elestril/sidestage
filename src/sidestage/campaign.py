@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import frontmatter
 import yaml
@@ -128,17 +127,22 @@ class Campaign:
 
         App.factory = factory
 
+        # `frontmatter.load` returns metadata typed as `dict[str, Any]` at
+        # runtime but pyright surfaces values as `object`. Pydantic validates
+        # the model fields, so we let it cast at the boundary.
         chars_dir = path / "characters"
         if chars_dir.exists():
             for md_file in chars_dir.glob("*.md"):
                 char_id = md_file.stem
                 post = frontmatter.load(str(md_file))
-                model = Character.Model(
-                    id=EntityId(char_id),
-                    name=post.metadata.get("name", char_id),
-                    type=EntityType.CHARACTER,
-                    body=post.content,
-                    owner=post.metadata.get("owner", "stub"),
+                model = Character.Model.model_validate(
+                    {
+                        "id": EntityId(char_id),
+                        "name": post.metadata.get("name", char_id),
+                        "type": EntityType.CHARACTER,
+                        "body": post.content,
+                        "owner": post.metadata.get("owner", "stub"),
+                    }
                 )
                 character = Character.deserialize(model)
                 factory.add(character)
@@ -148,24 +152,31 @@ class Campaign:
             for md_file in scenes_dir.glob("*.md"):
                 scene_id = md_file.stem
                 post = frontmatter.load(str(md_file))
-                raw_chars = post.metadata.get("characters", [])
-                char_ids = [EntityId(cid) for cid in raw_chars]
+                raw_chars = post.metadata.get("characters") or []
+                if not isinstance(raw_chars, list):
+                    raise ValueError(
+                        f"{md_file}: `characters` must be a list, "
+                        f"got {type(raw_chars).__name__}"
+                    )
+                char_ids = [EntityId(str(cid)) for cid in raw_chars]
                 for cid in char_ids:
                     if factory.get(cid) is None:
                         factory.ghost(cid, EntityType.CHARACTER)
-                model = SimpleScene.Model(
-                    id=EntityId(scene_id),
-                    name=post.metadata.get("name", scene_id),
-                    type=EntityType.SCENE,
-                    body=post.content,
-                    characters=char_ids,
+                model = SimpleScene.Model.model_validate(
+                    {
+                        "id": EntityId(scene_id),
+                        "name": post.metadata.get("name", scene_id),
+                        "type": EntityType.SCENE,
+                        "body": post.content,
+                        "characters": char_ids,
+                    }
                 )
                 scene = SimpleScene.deserialize(model)
                 factory.add(scene)
 
         dangling = [
-            eid
-            for eid, entity in factory._entities.items()
+            entity.id
+            for entity in factory.entities()
             if not object.__getattribute__(entity, "_loaded")
         ]
         if dangling:
@@ -191,9 +202,9 @@ class Campaign:
 
         .implements: rest-api-get-scenes
         """
-        return [e for e in self.factory._entities.values() if isinstance(e, Scene)]
+        return [e for e in self.factory.entities() if isinstance(e, Scene)]
 
-    def scene(self, scene_id: EntityId) -> Optional[Scene]:
+    def scene(self, scene_id: EntityId) -> Scene | None:
         """campaign-scene: Look up a scene by id; `None` if unknown or if the
         id resolves to a non-Scene entity.
 

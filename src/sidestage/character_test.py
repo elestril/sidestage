@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,13 +12,12 @@ from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import Scene
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _patch_get_actor(actor: object | None = None):
+def _patch_get_actor(actor: object | None = None) -> AbstractContextManager[MagicMock]:
     """Patch sidestage.server.App.get_actor to return `actor` (default: MagicMock).
 
     `create=True` because App.get_actor is added by a parallel agent; tests
@@ -32,7 +33,7 @@ def make_character(
     id: str = "c1",
     name: str = "Alice",
     body: str = "a body",
-    owner: str = "stub",
+    owner: Literal["user", "stub"] = "stub",
     actor: object | None = None,
 ) -> Character:
     """Construct a Character with App.get_actor patched to return `actor`."""
@@ -53,7 +54,7 @@ def make_character(
 class TestCharacterClass:
     """character-class: Character(Entity)."""
 
-    def test_character_is_entity(self):
+    def test_character_is_entity(self) -> None:
         char = make_character()
         assert isinstance(char, Entity)
 
@@ -66,26 +67,26 @@ class TestCharacterClass:
 class TestCharacterInitStoresOwner:
     """character-init-stores-owner: Stores owner as an attribute."""
 
-    def test_stores_owner_user(self):
+    def test_stores_owner_user(self) -> None:
         char = make_character(owner="user")
         assert char.owner == "user"
 
-    def test_stores_owner_npc(self):
+    def test_stores_owner_npc(self) -> None:
         char = make_character(owner="stub")
         assert char.owner == "stub"
 
-    def test_stores_owner_stub(self):
+    def test_stores_owner_stub(self) -> None:
         char = make_character(owner="stub")
         assert char.owner == "stub"
 
-    def test_stores_other_init_fields(self):
+    def test_stores_other_init_fields(self) -> None:
         char = make_character(id="c42", name="Bob", body="some body", owner="user")
         assert char.id == "c42"
         assert char.name == "Bob"
         assert char.body == "some body"
         assert char.type == EntityType.CHARACTER
 
-    def test_loaded_true_after_init(self):
+    def test_loaded_true_after_init(self) -> None:
         # The Entity ghost guard must allow free attribute access — i.e. the
         # newly-constructed Character is a real (non-ghost) entity.
         char = make_character(owner="stub")
@@ -102,7 +103,7 @@ class TestCharacterInitBindsActor:
     """character-init-binds-actor: Calls App.get_actor(self.owner) and stores
     the returned Actor as self._actor."""
 
-    def test_get_actor_called_with_owner(self):
+    def test_get_actor_called_with_owner(self) -> None:
         sentinel_actor = MagicMock(name="actor")
         with _patch_get_actor(sentinel_actor) as mock_get_actor:
             Character(
@@ -113,12 +114,12 @@ class TestCharacterInitBindsActor:
             )
         mock_get_actor.assert_called_once_with("stub")
 
-    def test_stores_returned_actor_as_underscore_actor(self):
+    def test_stores_returned_actor_as_underscore_actor(self) -> None:
         sentinel_actor = MagicMock(name="actor")
         char = make_character(owner="user", actor=sentinel_actor)
         assert char._actor is sentinel_actor
 
-    def test_get_actor_called_with_user_owner(self):
+    def test_get_actor_called_with_user_owner(self) -> None:
         with _patch_get_actor() as mock_get_actor:
             Character(
                 id=EntityId("c1"),
@@ -128,7 +129,7 @@ class TestCharacterInitBindsActor:
             )
         mock_get_actor.assert_called_once_with("user")
 
-    def test_get_actor_called_with_stub_owner(self):
+    def test_get_actor_called_with_stub_owner(self) -> None:
         with _patch_get_actor() as mock_get_actor:
             Character(
                 id=EntityId("c1"),
@@ -148,7 +149,7 @@ class TestCharacterRespondPassthrough:
     """character-respond-passthrough: Pure pass-through —
     `await self._actor.respond(message, self)`."""
 
-    async def test_respond_delegates_to_actor_with_self(self):
+    async def test_respond_delegates_to_actor_with_self(self) -> None:
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
@@ -161,7 +162,7 @@ class TestCharacterRespondPassthrough:
         actor.respond.assert_awaited_once_with(msg, char)
         assert result is None
 
-    async def test_respond_returns_actor_result(self):
+    async def test_respond_returns_actor_result(self) -> None:
         actor = MagicMock()
         char = make_character(actor=actor)
         expected = Message(sender=char, body="response")
@@ -174,7 +175,7 @@ class TestCharacterRespondPassthrough:
 
         assert result is expected
 
-    async def test_respond_is_a_coroutine(self):
+    async def test_respond_is_a_coroutine(self) -> None:
         # Sanity: Character.respond must be an async function.
         import inspect
 
@@ -209,7 +210,7 @@ class TestCharacterNotifyReact:
     not self; on pass, await actor.respond(latest, self) and append non-None
     response back to event.entity."""
 
-    async def test_notify_filters_non_scene_emitter(self):
+    async def test_notify_filters_non_scene_emitter(self) -> None:
         # event.entity is a non-Scene Entity → no actor.respond, no append
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
@@ -224,7 +225,7 @@ class TestCharacterNotifyReact:
         actor.respond.assert_not_called()
         non_scene.append.assert_not_called()
 
-    async def test_notify_filters_non_messages_attribute(self):
+    async def test_notify_filters_non_messages_attribute(self) -> None:
         # attributes = ["body"] → no actor.respond
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
@@ -239,7 +240,7 @@ class TestCharacterNotifyReact:
         actor.respond.assert_not_called()
         scene.append.assert_not_called()
 
-    async def test_notify_filters_own_message(self):
+    async def test_notify_filters_own_message(self) -> None:
         # Latest message's sender IS this character → no actor.respond
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
@@ -253,7 +254,7 @@ class TestCharacterNotifyReact:
         actor.respond.assert_not_called()
         scene.append.assert_not_called()
 
-    async def test_notify_calls_actor_respond_with_latest(self):
+    async def test_notify_calls_actor_respond_with_latest(self) -> None:
         # Happy path: await actor.respond(latest, self) is invoked
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
@@ -268,7 +269,7 @@ class TestCharacterNotifyReact:
 
         actor.respond.assert_awaited_once_with(latest, char)
 
-    async def test_notify_appends_non_none_response(self):
+    async def test_notify_appends_non_none_response(self) -> None:
         # Actor returns Message → event.entity.append(response) called
         actor = MagicMock()
         char = make_character(actor=actor)
@@ -283,7 +284,7 @@ class TestCharacterNotifyReact:
 
         scene.append.assert_called_once_with(response)
 
-    async def test_notify_skips_append_when_response_none(self):
+    async def test_notify_skips_append_when_response_none(self) -> None:
         # Actor returns None → no append
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
@@ -308,19 +309,19 @@ class TestCharacterHasHumanActor:
     """character-has-human-actor: Returns self.owner == "user". Checks the
     persistent role, NOT the live actor."""
 
-    def test_returns_true_when_owner_is_user(self):
+    def test_returns_true_when_owner_is_user(self) -> None:
         char = make_character(owner="user")
         assert char.has_human_actor() is True
 
-    def test_returns_false_when_owner_is_npc(self):
+    def test_returns_false_when_owner_is_npc(self) -> None:
         char = make_character(owner="stub")
         assert char.has_human_actor() is False
 
-    def test_returns_false_when_owner_is_stub(self):
+    def test_returns_false_when_owner_is_stub(self) -> None:
         char = make_character(owner="stub")
         assert char.has_human_actor() is False
 
-    def test_does_not_query_actor(self):
+    def test_does_not_query_actor(self) -> None:
         # The check is on the persistent owner field; it must NOT consult the
         # actor's is_human() method.
         actor = MagicMock()
@@ -339,7 +340,7 @@ class TestCharacterHasHumanActor:
 class TestCharacterModel:
     """character-model: Inner Pydantic Model with `owner` Literal field."""
 
-    def test_model_accepts_user(self):
+    def test_model_accepts_user(self) -> None:
         m = Character.Model(
             id=EntityId("c1"),
             name="Alice",
@@ -349,7 +350,7 @@ class TestCharacterModel:
         )
         assert m.owner == "user"
 
-    def test_model_accepts_npc(self):
+    def test_model_accepts_npc(self) -> None:
         m = Character.Model(
             id=EntityId("c1"),
             name="Alice",
@@ -359,7 +360,7 @@ class TestCharacterModel:
         )
         assert m.owner == "stub"
 
-    def test_model_accepts_stub(self):
+    def test_model_accepts_stub(self) -> None:
         m = Character.Model(
             id=EntityId("c1"),
             name="Alice",
@@ -369,7 +370,7 @@ class TestCharacterModel:
         )
         assert m.owner == "stub"
 
-    def test_model_rejects_unknown_owner(self):
+    def test_model_rejects_unknown_owner(self) -> None:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -378,18 +379,18 @@ class TestCharacterModel:
                 name="Alice",
                 type=EntityType.CHARACTER,
                 body="body",
-                owner="alien",
+                owner="alien",  # type: ignore[arg-type]
             )
 
-    def test_model_has_no_actor_type_field(self):
+    def test_model_has_no_actor_type_field(self) -> None:
         # The obsolete `actor_type` field has been removed.
         assert "actor_type" not in Character.Model.model_fields
 
-    def test_model_has_no_model_field(self):
+    def test_model_has_no_model_field(self) -> None:
         # The obsolete `model: str | None` field has been removed.
         assert "model" not in Character.Model.model_fields
 
-    def test_model_owner_field_present(self):
+    def test_model_owner_field_present(self) -> None:
         assert "owner" in Character.Model.model_fields
 
 
@@ -402,7 +403,7 @@ class TestCharacterDeserialize:
     """Character.deserialize(model) constructs
     Character(id=..., name=..., body=..., owner=model.owner)."""
 
-    def test_deserialize_builds_character_with_owner(self):
+    def test_deserialize_builds_character_with_owner(self) -> None:
         model = Character.Model(
             id=EntityId("c2"),
             name="Bob",
@@ -419,7 +420,7 @@ class TestCharacterDeserialize:
         assert char.owner == "user"
         assert char.type == EntityType.CHARACTER
 
-    def test_deserialize_invokes_get_actor(self):
+    def test_deserialize_invokes_get_actor(self) -> None:
         model = Character.Model(
             id=EntityId("c3"),
             name="Carol",
@@ -434,7 +435,7 @@ class TestCharacterDeserialize:
         mock_get_actor.assert_called_once_with("stub")
         assert char._actor is sentinel
 
-    def test_serialize_roundtrip(self):
+    def test_serialize_roundtrip(self) -> None:
         with _patch_get_actor():
             char = Character(
                 id=EntityId("c4"),

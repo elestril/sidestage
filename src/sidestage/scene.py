@@ -46,7 +46,7 @@ class Scene(Entity):
     tasks to settle before asserting.
     """
 
-    characters: list["Character"]
+    characters: list[Character]
     """scene-characters: All characters present in the scene. Concrete
     subclasses may impose order or count constraints (see SimpleScene)."""
 
@@ -62,7 +62,7 @@ class Scene(Entity):
         id: EntityId,
         name: str,
         body: str,
-        characters: list["Character"],
+        characters: list[Character],
     ) -> None:
         # Bypass Entity.__init__ default (which leaves ghost state) and fully
         # populate as a loaded scene.
@@ -121,7 +121,7 @@ class Scene(Entity):
     # ---------------- query / serialization ------------------------------
 
     @property
-    def user_characters(self) -> list["Character"]:
+    def user_characters(self) -> list[Character]:
         """scene-user-characters: Subset of `characters` with
         `has_human_actor()` True. Single source of truth for "which
         characters can a client send messages as"."""
@@ -149,7 +149,7 @@ class Scene(Entity):
             body=msg.body,
         )
 
-    def to_model(self) -> "Scene.Model":
+    def to_model(self) -> Scene.Model:
         """scene-to-model: Build a `Scene.Model` from current state.
         Drops runtime-only state (messages); inverse of `Scene.deserialize`."""
         return self.Model(
@@ -161,7 +161,7 @@ class Scene(Entity):
         )
 
     @classmethod
-    def deserialize(cls, model: "Scene.Model") -> Self:
+    def deserialize(cls, model: Scene.Model) -> Self:
         """Construct a Scene from its on-disk model.
 
         - scene-deserialize-resolves: Resolves each id in `model.characters`
@@ -172,9 +172,23 @@ class Scene(Entity):
         """
         from sidestage.server import App
 
-        resolved: list["Character"] = [
-            App.factory.get(cid) for cid in model.characters
-        ]
+        if App.factory is None:
+            raise RuntimeError(
+                "Scene.deserialize: App.factory must be set before "
+                "deserializing scenes (see server-run-load)."
+            )
+        factory = App.factory
+        resolved: list[Character] = []
+        for cid in model.characters:
+            entity = factory.get(cid)
+            if entity is None:
+                raise RuntimeError(
+                    f"Scene.deserialize: character {cid!r} not resolved "
+                    "(forward refs should have been ghost-registered)."
+                )
+            # The ghost machinery returns Entity instances; cast at the
+            # boundary — campaign-load guarantees these are Characters.
+            resolved.append(entity)  # type: ignore[arg-type]
         return cls(
             id=model.id,
             name=model.name,
@@ -198,7 +212,7 @@ class SimpleScene(Scene):
         id: EntityId,
         name: str,
         body: str,
-        characters: list["Character"],
+        characters: list[Character],
     ) -> None:
         """Construct a SimpleScene with exactly two characters.
 

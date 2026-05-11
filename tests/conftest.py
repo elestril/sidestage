@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 from sidestage.campaign import Campaign
 from sidestage.server import App, ServerState
 
-
 _TEST_CAMPAIGN_DIR = Path(__file__).parent / "sidestage" / "campaigns" / "test_campaign"
 
 
@@ -54,8 +53,6 @@ def test_app(test_campaign: Campaign):
     """
     app = App()
     app.campaigns[test_campaign.name] = test_campaign
-    # Ergonomic alias for tests that build scenarios via scene_from(...).
-    app.campaign = test_campaign
     App.factory = test_campaign.factory
     app.state = ServerState.SERVING
     try:

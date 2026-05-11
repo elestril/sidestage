@@ -81,16 +81,14 @@ class Sequence:
     .implements: testing-matcher
     """
 
-    matchers: tuple["Matcher", ...]
+    matchers: tuple[Matcher, ...]
 
-    def __init__(self, *matchers: "Matcher") -> None:
+    def __init__(self, *matchers: Matcher) -> None:
         object.__setattr__(self, "matchers", matchers)
 
     def check(self, messages: list[Message]) -> None:
         n = len(self.matchers)
-        assert len(messages) >= n, (
-            f"Sequence: need {n} messages, got {len(messages)}"
-        )
+        assert len(messages) >= n, f"Sequence: need {n} messages, got {len(messages)}"
         tail = messages[-n:] if n > 0 else []
         for i, matcher in enumerate(self.matchers):
             matcher.check(tail[: i + 1])
@@ -103,9 +101,9 @@ class All:
     .implements: testing-matcher
     """
 
-    matchers: tuple["Matcher", ...]
+    matchers: tuple[Matcher, ...]
 
-    def __init__(self, *matchers: "Matcher") -> None:
+    def __init__(self, *matchers: Matcher) -> None:
         object.__setattr__(self, "matchers", matchers)
 
     def check(self, messages: list[Message]) -> None:
@@ -123,9 +121,9 @@ class Any:  # noqa: A001 — intentional shadow of builtins.Any in this module
     .implements: testing-matcher
     """
 
-    matchers: tuple["Matcher", ...]
+    matchers: tuple[Matcher, ...]
 
-    def __init__(self, *matchers: "Matcher") -> None:
+    def __init__(self, *matchers: Matcher) -> None:
         object.__setattr__(self, "matchers", matchers)
 
     def check(self, messages: list[Message]) -> None:
@@ -136,6 +134,4 @@ class Any:  # noqa: A001 — intentional shadow of builtins.Any in this module
                 return
             except AssertionError as exc:
                 errors.append(str(exc))
-        raise AssertionError(
-            "Any: every matcher failed:\n  - " + "\n  - ".join(errors)
-        )
+        raise AssertionError("Any: every matcher failed:\n  - " + "\n  - ".join(errors))

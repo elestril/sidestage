@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import asyncio
 
+from sidestage.character import Character
 from sidestage.scene import SimpleScene
 from sidestage.server import App
-
 from tests.lib.scenarios import Scenario
-
 
 # Bound on the await-cycle wait. The npc cycle is fully in-process and
 # synchronous-ish (StubActor.respond does no real I/O), so 1 s is generous.
@@ -48,7 +47,15 @@ async def run_scenario(scenario: Scenario, app: App) -> None:
     # run-scenario-build-scene.
     campaign = next(iter(app.campaigns.values()))
     factory = campaign.factory
-    characters = [factory.get(cid) for cid in scenario.scene.characters]
+    characters: list[Character] = []
+    for cid in scenario.scene.characters:
+        entity = factory.get(cid)
+        if entity is None:
+            raise RuntimeError(
+                f"run_scenario: scene references unknown character {cid!r}"
+            )
+        # The fixture campaign guarantees these are Characters.
+        characters.append(entity)  # type: ignore[arg-type]
     scene = SimpleScene(
         id=scenario.scene.id,
         name=scenario.scene.name,

@@ -12,8 +12,9 @@ logged, not events.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Awaitable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from sidestage.entity import Entity
@@ -34,7 +35,7 @@ class EntityChanged:
     happens at the boundary in the SSE handler.
     """
 
-    entity: "Entity"
+    entity: Entity
     attributes: list[str] = field(default_factory=list)
 
 

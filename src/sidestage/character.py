@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from sidestage.entity import Entity, EntityId, EntityType
 
 if TYPE_CHECKING:
-    from sidestage.actor import Actor
     from sidestage.events import EntityChanged
     from sidestage.message import Message
 
@@ -18,10 +17,11 @@ class Character(Entity):
     .implements: character
     """
 
-    owner: str
-    """character-owner: Persistent role discriminator — `"user"`, `"npc"`, or
+    owner: Literal["user", "stub"]
+    """character-owner: Persistent role discriminator — `"user"` or
     `"stub"`. Serialized to disk; selects the runtime Actor via
-    `App.get_actor(self.owner)`.
+    `App.get_actor(self.owner)`. Future expansion (e.g. `"npc"` once
+    an LLM-backed actor lands) widens this Literal.
 
     .implements: character
     """
@@ -87,7 +87,7 @@ class Character(Entity):
             owner=self.owner,
         )
 
-    async def respond(self, message: Message) -> Optional[Message]:
+    async def respond(self, message: Message) -> Message | None:
         """character-respond-passthrough: Pure pass-through —
         `await self._actor.respond(message, self)`.
 

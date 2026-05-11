@@ -109,6 +109,25 @@ treats both as failures so they stay quiet.
   `afterEach`. Tests that intentionally exercise error paths declare
   the expected output and `mockClear()` before afterEach runs.
 
+## testing-lint: Lint + type check
+
+Python uses `ruff` (lint + format) and `pyright` (type check). Frontend
+uses `tsc --noEmit` (type check) and Vitest (which integrates Vite for
+import-side checks). All three are gated by `just test-all`.
+
+- testing-lint-ruff: `ruff check` runs the conservative rule set
+  (E/W/F/I/B/UP/SIM) configured in `pyproject.toml`. `ruff format`
+  enforces formatting; `just format` applies it. New rules need a
+  spec-amend, not a CI-amend.
+- testing-lint-pyright: Pyright (the engine Pylance uses in the editor)
+  runs in `basic` mode. Editor and CLI see the same diagnostics — no
+  "passes locally, fails in CI" surprises. Every function — including
+  tests, helpers, and inner closures — carries a return-type annotation
+  so pyright checks the body. `-> None` is the right answer for ~95% of
+  test functions; explicit types catch real bugs the rest of the time.
+- testing-lint-typecheck-fe: `tsc --noEmit` is invoked by `just
+  typecheck` and runs as part of `just test-fe`.
+
 ## testing-fixtures
 
 Shared fixtures live in `tests/conftest.py`. E2E-only fixtures live in

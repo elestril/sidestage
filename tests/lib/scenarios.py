@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from sidestage.campaign import Campaign
+from sidestage.entity import EntityId
 from sidestage.message import Message
 from sidestage.scene import Scene
 
@@ -44,7 +45,7 @@ class Scenario:
     input: Message
     """scenario-input: The Message dispatched by the runner."""
 
-    expect: "Matcher"
+    expect: Matcher
     """scenario-expect: Asserts on the resulting `scene.messages` after
     dispatch + npc cycle."""
 
@@ -63,7 +64,10 @@ def scene_from(campaign: Campaign, scene_id: str, **overrides) -> SceneModel:
 
     .implements: testing-scenario
     """
-    base = campaign.scene(scene_id).to_model()
+    scene = campaign.scene(EntityId(scene_id))
+    if scene is None:
+        raise KeyError(f"scene {scene_id!r} not found in campaign {campaign.name!r}")
+    base = scene.to_model()
     if not overrides:
         return base
     return base.model_copy(update=overrides)

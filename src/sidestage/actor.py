@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sidestage.character import Character
@@ -35,8 +35,8 @@ class Actor(ABC):
 
     @abstractmethod
     async def respond(
-        self, message: "Message", character: "Character"
-    ) -> Optional["Message"]: ...
+        self, message: Message, character: Character
+    ) -> Message | None: ...
 
 
 class StubActor(Actor):
@@ -49,9 +49,7 @@ class StubActor(Actor):
         """stub-actor-is-human: Returns False."""
         return False
 
-    async def respond(
-        self, message: "Message", character: "Character"
-    ) -> Optional["Message"]:
+    async def respond(self, message: Message, character: Character) -> Message | None:
         """stub-actor-respond-returns: Returns
         `Message(sender=character, body=character.body)`.
         """
@@ -80,17 +78,13 @@ class UserActor(Actor):
         """user-actor-is-human: Returns True."""
         return True
 
-    async def respond(
-        self, message: "Message", character: "Character"
-    ) -> Optional["Message"]:
+    async def respond(self, message: Message, character: Character) -> Message | None:
         """user-actor-respond-noop: Returns `None` unconditionally — humans
         respond via REST.
         """
         return None
 
-    def subscribe_to(
-        self, entity: "Entity", queue: asyncio.Queue
-    ) -> None:
+    def subscribe_to(self, entity: Entity, queue: asyncio.Queue) -> None:
         """user-actor-subscribe-to: Wrap `queue` in a `QueueListener`,
         register it on `entity` via `entity.subscribe(listener)`, and
         track the (entity, listener) pair for lifecycle management.
@@ -103,9 +97,7 @@ class UserActor(Actor):
         entity.subscribe(listener)
         self._subscriptions.append((entity, listener))
 
-    def unsubscribe_from(
-        self, entity: "Entity", queue: asyncio.Queue
-    ) -> None:
+    def unsubscribe_from(self, entity: Entity, queue: asyncio.Queue) -> None:
         """user-actor-unsubscribe-from: Find the QueueListener tracking
         `queue` for `entity`, call `entity.unsubscribe(listener)`, and
         drop the tracked pair. No-op if not subscribed.
@@ -156,7 +148,7 @@ class QueueListener:
     def __init__(self, queue: asyncio.Queue) -> None:
         self.queue = queue
 
-    def notify(self, event: "EntityChanged") -> None:
+    def notify(self, event: EntityChanged) -> None:
         """queue-listener-notify: Non-blocking enqueue via `put_nowait`.
         On `asyncio.QueueFull` log a warning and drop the event.
 

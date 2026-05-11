@@ -6,37 +6,64 @@
 default:
     @just --list
 
+_deps-setup:
+    uv sync
+    cd frontend && npm install
+    cd tests/playwright && npm install
+    cd tests/playwright && npm run -s install-chromium
+    @echo "Dependencies installed"
+
+_git-setup:
+    @mkdir -p .git/hooks
+    @ln -sf ../../bin/pre-commit-hook .git/hooks/pre-commit
+    @echo "pre-commit hook installed → .git/hooks/pre-commit"
+
+
+# One-shot setup after `git clone`: deps + git hooks. Idempotent.
+setup: _deps-setup  _git-setup 
+    @echo "Setup complete"
+
+
 # -------- tests --------
 
-# Inner-loop suite: Python + frontend (with typecheck). No browser tier.
-test: test-py test-fe
+# Inner-loop suite: lint + Python tests + frontend tests, all in parallel.
+[parallel]
+test: lint test-py test-fe
 
 # Every tier including browser e2e — pre-commit / CI path.
 test-all: test test-browser
 
-# Python tests.
+# All linters and type checks (ruff + pyright + tsc), parallel sub-tasks.
+[parallel]
+lint: _ruff-check _ruff-format-check _pyright _tsc
+
+_ruff-check:
+    uv run ruff check src/ tests/
+
+_ruff-format-check:
+    uv run ruff format --check src/ tests/
+
+_pyright:
+    uv run pyright src/ tests/
+
+_tsc:
+    cd frontend && npm run typecheck
+
+# Apply ruff fixes + formatter (writes changes).
+format:
+    uv run ruff format src/ tests/
+    uv run ruff check --fix src/ tests/
+
+# Python tests (pytest only — lint runs separately).
 test-py:
     uv run pytest
 
-# Frontend tests (typecheck + vitest, one-shot).
-test-fe: typecheck
+# Frontend tests (vitest only — typecheck runs via `just lint`).
+test-fe:
     cd frontend && npm run test:run
 
-# Frontend TypeScript typecheck (no emit).
-typecheck:
-    cd frontend && npm run typecheck
-
-# Idempotent: install playwright deps + Chromium binary if missing.
-_playwright-install:
-    #!/usr/bin/env bash
-    set -e
-    cd tests/playwright
-    [ -d node_modules ] || npm install
-    # `playwright install chromium` is a no-op if already installed.
-    npm run -s install-chromium >/dev/null
-
 # Browser e2e (Playwright + Chromium against the built SPA, ephemeral port).
-test-browser: build _playwright-install
+test-browser: build
     #!/usr/bin/env bash
     set -e
     cd tests/playwright
@@ -78,8 +105,7 @@ _vite-up:
 stop-vite:
     @pkill -f 'vite' || true
 
-# Dev stack: vite (background) + sidestage (foreground, hot-reload on
-# src/sidestage/ changes). Ctrl-C stops sidestage.
+# Dev stack: vite (background) + sidestage (foreground, hot-reload). Ctrl-C stops.
 run: _vite-up
     uv run sidestage --sidestage-dir sidestage/ --reload
 

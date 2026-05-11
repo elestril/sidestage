@@ -10,7 +10,7 @@ from sidestage.message import Message
 
 
 class TestActorBase:
-    def test_actor_is_abstract(self):
+    def test_actor_is_abstract(self) -> None:
         # actor-base: Actor is abstract — `is_human` and `respond` are
         # abstract methods, instantiation must fail.
         try:
@@ -19,14 +19,14 @@ class TestActorBase:
             return
         raise AssertionError("Actor() should have raised TypeError")
 
-    def test_actor_minimal_concrete_subclass_works(self):
+    def test_actor_minimal_concrete_subclass_works(self) -> None:
         # actor-base: A subclass implementing the two abstract methods
         # instantiates fine and is recognized as an Actor.
         class MinimalActor(Actor):
             def is_human(self) -> bool:
                 return False
 
-            async def respond(self, message, character):
+            async def respond(self, message, character) -> None:
                 return None
 
         actor = MinimalActor()
@@ -35,16 +35,16 @@ class TestActorBase:
 
 
 class TestStubActor:
-    def test_stub_actor_implements_actor(self):
+    def test_stub_actor_implements_actor(self) -> None:
         # stub-actor: StubActor is a concrete Actor.
         assert isinstance(StubActor(), Actor)
 
-    def test_stub_actor_is_human(self):
+    def test_stub_actor_is_human(self) -> None:
         # stub-actor-is-human: Returns False.
         actor = StubActor()
         assert actor.is_human() is False
 
-    async def test_stub_actor_respond_returns_character_body(self):
+    async def test_stub_actor_respond_returns_character_body(self) -> None:
         # stub-actor-respond-returns: Returns Message(sender=character,
         # body=character.body) regardless of message.sender. Body comes
         # from the character, not a hardcoded string.
@@ -70,23 +70,23 @@ class TestStubActor:
 
 
 class TestUserActorBasics:
-    def test_user_actor_implements_actor(self):
+    def test_user_actor_implements_actor(self) -> None:
         # user-actor: UserActor is a concrete Actor.
         actor = UserActor()
         assert isinstance(actor, Actor)
 
-    def test_user_actor_constructor_takes_nothing(self):
+    def test_user_actor_constructor_takes_nothing(self) -> None:
         # user-actor: Constructor takes no arguments.
         actor = UserActor()
         # Internal subscription tracker exists and starts empty.
         assert actor._subscriptions == []
 
-    def test_user_actor_is_human(self):
+    def test_user_actor_is_human(self) -> None:
         # user-actor-is-human: Returns True.
         actor = UserActor()
         assert actor.is_human() is True
 
-    async def test_user_actor_respond_noop(self):
+    async def test_user_actor_respond_noop(self) -> None:
         # user-actor-respond-noop: Returns None unconditionally. Human
         # responses arrive via REST.
         actor = UserActor()
@@ -104,7 +104,7 @@ class TestUserActorBasics:
 
 
 class TestQueueListener:
-    def test_queue_listener_puts_event_on_queue(self):
+    def test_queue_listener_puts_event_on_queue(self) -> None:
         # queue-listener-notify: notify enqueues the event via put_nowait.
         # Same instance lands on the queue.
         queue: asyncio.Queue = asyncio.Queue()
@@ -116,7 +116,7 @@ class TestQueueListener:
         assert queue.qsize() == 1
         assert queue.get_nowait() is event
 
-    def test_queue_listener_drops_on_queue_full(self, caplog):
+    def test_queue_listener_drops_on_queue_full(self, caplog) -> None:
         # events-errors-slow-consumer: when the queue is full, notify
         # swallows the QueueFull and logs a warning. No exception
         # propagates to the emitter.
@@ -141,7 +141,7 @@ class TestQueueListener:
 
 
 class TestUserActorSubscribeTo:
-    def test_subscribe_to_creates_queue_listener_and_subscribes(self):
+    def test_subscribe_to_creates_queue_listener_and_subscribes(self) -> None:
         # user-actor-subscribe-to: wraps queue in a QueueListener, calls
         # entity.subscribe with that listener.
         actor = UserActor()
@@ -155,7 +155,7 @@ class TestUserActorSubscribeTo:
         assert isinstance(passed_listener, QueueListener)
         assert passed_listener.queue is queue
 
-    def test_subscribe_to_tracks_subscription(self):
+    def test_subscribe_to_tracks_subscription(self) -> None:
         # user-actor-subscribe-to: tracks the (entity, listener) pair so
         # later `unsubscribe_from` / `cancel_all` can find it.
         actor = UserActor()
@@ -170,7 +170,7 @@ class TestUserActorSubscribeTo:
         assert isinstance(tracked_listener, QueueListener)
         assert tracked_listener.queue is queue
 
-    def test_subscribe_to_multiple_pairs_each_tracked(self):
+    def test_subscribe_to_multiple_pairs_each_tracked(self) -> None:
         # user-actor-subscribe-to: multiple subscriptions accumulate;
         # each entity gets its own subscribe() call.
         actor = UserActor()
@@ -188,7 +188,7 @@ class TestUserActorSubscribeTo:
 
 
 class TestUserActorUnsubscribeFrom:
-    def test_unsubscribe_from_calls_entity_unsubscribe(self):
+    def test_unsubscribe_from_calls_entity_unsubscribe(self) -> None:
         # user-actor-unsubscribe-from: calls entity.unsubscribe with the
         # SAME QueueListener that was subscribed.
         actor = UserActor()
@@ -202,7 +202,7 @@ class TestUserActorUnsubscribeFrom:
 
         entity.unsubscribe.assert_called_once_with(subscribed_listener)
 
-    def test_unsubscribe_from_drops_tracked_pair(self):
+    def test_unsubscribe_from_drops_tracked_pair(self) -> None:
         # user-actor-unsubscribe-from: drops the (entity, listener) pair
         # from internal tracking.
         actor = UserActor()
@@ -215,7 +215,7 @@ class TestUserActorUnsubscribeFrom:
         actor.unsubscribe_from(entity, queue)
         assert actor._subscriptions == []
 
-    def test_unsubscribe_from_missing_is_noop(self):
+    def test_unsubscribe_from_missing_is_noop(self) -> None:
         # user-actor-unsubscribe-from: no-op if not subscribed. Does not
         # raise, does not call entity.unsubscribe.
         actor = UserActor()
@@ -228,7 +228,7 @@ class TestUserActorUnsubscribeFrom:
         entity.unsubscribe.assert_not_called()
         assert actor._subscriptions == []
 
-    def test_unsubscribe_from_other_queue_is_noop(self):
+    def test_unsubscribe_from_other_queue_is_noop(self) -> None:
         # user-actor-unsubscribe-from: only matches the exact (entity, queue)
         # pair. A different queue on the same entity does not match.
         actor = UserActor()
@@ -243,7 +243,7 @@ class TestUserActorUnsubscribeFrom:
         entity.unsubscribe.assert_not_called()
         assert len(actor._subscriptions) == 1
 
-    def test_unsubscribe_from_only_drops_matching_pair(self):
+    def test_unsubscribe_from_only_drops_matching_pair(self) -> None:
         # user-actor-unsubscribe-from: with several tracked pairs, only
         # the matching (entity, queue) pair is removed.
         actor = UserActor()
@@ -267,7 +267,7 @@ class TestUserActorUnsubscribeFrom:
 
 
 class TestUserActorCancelAll:
-    def test_cancel_all_unsubscribes_each(self):
+    def test_cancel_all_unsubscribes_each(self) -> None:
         # user-actor-cancel-all: every tracked pair is unsubscribed. After
         # the call, internal tracking is empty.
         actor = UserActor()
@@ -289,7 +289,7 @@ class TestUserActorCancelAll:
         entity_c.unsubscribe.assert_called_once()
         assert actor._subscriptions == []
 
-    def test_cancel_all_with_no_subscriptions_is_noop(self):
+    def test_cancel_all_with_no_subscriptions_is_noop(self) -> None:
         # user-actor-cancel-all: empty tracker — no-op, no exception.
         actor = UserActor()
         actor.cancel_all()

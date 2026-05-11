@@ -21,7 +21,6 @@ from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import SimpleScene
 
-
 pytestmark = pytest.mark.integration
 
 

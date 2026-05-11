@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import TYPE_CHECKING, NewType, Optional, Self
+from collections.abc import Iterable
+from enum import StrEnum
+from typing import TYPE_CHECKING, NewType, Self
 
 from pydantic import BaseModel
 
@@ -23,7 +25,7 @@ EntityId = NewType("EntityId", str)
 """
 
 
-class EntityType(str, Enum):
+class EntityType(StrEnum):
     """entity-type: Discriminator enum for serialized Entity subclasses.
 
     Members:
@@ -142,7 +144,7 @@ class Entity:
 
     # ---------------- events: pub/sub (per specs/events.md) ---------------
 
-    def subscribe(self, listener: "Listener") -> None:
+    def subscribe(self, listener: Listener) -> None:
         """entity-subscribe: Register `listener` to receive future
         `EntityChanged` events emitted by this entity.
 
@@ -150,18 +152,16 @@ class Entity:
         """
         self._listeners.append(listener)
 
-    def unsubscribe(self, listener: "Listener") -> None:
+    def unsubscribe(self, listener: Listener) -> None:
         """entity-unsubscribe: Remove `listener` from this entity's
         subscriber list. No-op if `listener` was not subscribed.
 
         .implements: events-pattern-subscription-lifecycle
         """
-        try:
+        with contextlib.suppress(ValueError):
             self._listeners.remove(listener)
-        except ValueError:
-            pass
 
-    def _emit(self, event: "EntityChanged") -> None:
+    def _emit(self, event: EntityChanged) -> None:
         """entity-emit: Fan out `event` by wrapping each listener call in a
         tracked task on this entity (per `events-async-tasks`):
         `for l in self._listeners: self.spawn_task(self._invoke_listener(l, event))`.
@@ -176,7 +176,7 @@ class Entity:
         for listener in list(self._listeners):
             self.spawn_task(self._invoke_listener(listener, event))
 
-    async def _invoke_listener(self, listener: "Listener", event: "EntityChanged") -> None:
+    async def _invoke_listener(self, listener: Listener, event: EntityChanged) -> None:
         """Per-listener task body: invoke `listener.notify`, awaiting if it
         returned a coroutine; log any exception so one bad listener cannot
         abort fanout.
@@ -190,7 +190,7 @@ class Entity:
         except Exception:
             logger.exception("listener %r raised in notify", listener)
 
-    def spawn_task(self, coro) -> "asyncio.Task":
+    def spawn_task(self, coro) -> asyncio.Task:
         """entity-spawn-task: Track `coro` as a task on this entity.
 
         Adds the task to `_pending_tasks`; the done-callback removes it on
@@ -207,7 +207,7 @@ class Entity:
         task.add_done_callback(self._on_task_done)
         return task
 
-    def _on_task_done(self, task: "asyncio.Task") -> None:
+    def _on_task_done(self, task: asyncio.Task) -> None:
         """Done-callback for `spawn_task`: discard from `_pending_tasks` and
         log any non-cancellation exception.
 
@@ -238,7 +238,7 @@ class Entity:
         while self._pending_tasks:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise asyncio.TimeoutError("idle: pending tasks did not settle")
+                raise TimeoutError("idle: pending tasks did not settle")
             # Snapshot to allow new tasks to be added while waiting.
             snapshot = list(self._pending_tasks)
             # asyncio.wait (unlike gather+wait_for) does NOT cancel pending
@@ -250,7 +250,7 @@ class Entity:
             # re-check the loop condition.
             await asyncio.sleep(0)
 
-    def notify(self, event: "EntityChanged") -> None:
+    def notify(self, event: EntityChanged) -> None:
         """entity-notify-default-noop: Default Entity listener — does
         nothing. Subclasses (e.g. `Character`) override to react to events
         from entities they've subscribed to. The emitting entity is
@@ -270,7 +270,7 @@ class EntityFactory(ABC):
     """
 
     @abstractmethod
-    def get(self, id: str) -> Optional[Entity]:
+    def get(self, id: str) -> Entity | None:
         """Look up an entity by id.
 
         - entity-factory-get: Returns the entity for the given id, or None if
@@ -302,6 +302,17 @@ class EntityFactory(ABC):
         """
         pass
 
+    @abstractmethod
+    def entities(self) -> Iterable[Entity]:
+        """Iterate every registered entity (loaded + ghost).
+
+        - entity-factory-entities: Iteration order is implementation-defined;
+          `DictEntityFactory` yields in insertion order.
+
+        .implements: entity-factory-impl
+        """
+        pass
+
 
 class DictEntityFactory(EntityFactory):
     """dict-entity-factory: In-memory `EntityFactory` backed by
@@ -314,7 +325,7 @@ class DictEntityFactory(EntityFactory):
     def __init__(self) -> None:
         self._entities: dict[str, Entity] = {}
 
-    def get(self, id: str) -> Optional[Entity]:
+    def get(self, id: str) -> Entity | None:
         """Look up an entity by id in the backing dict.
 
         - dict-factory-get: Returns entity from the dict, or None if not
@@ -338,9 +349,13 @@ class DictEntityFactory(EntityFactory):
         if existing is not None and not object.__getattribute__(existing, "_loaded"):
             object.__setattr__(existing, "_loaded", True)
             for attr in ("name", "type", "body"):
-                object.__setattr__(existing, attr, object.__getattribute__(entity, attr))
+                object.__setattr__(
+                    existing, attr, object.__getattribute__(entity, attr)
+                )
             for attr in self._extra_attrs(entity):
-                object.__setattr__(existing, attr, object.__getattribute__(entity, attr))
+                object.__setattr__(
+                    existing, attr, object.__getattribute__(entity, attr)
+                )
         else:
             object.__setattr__(entity, "_loaded", True)
             self._entities[entity.id] = entity
@@ -361,6 +376,15 @@ class DictEntityFactory(EntityFactory):
         object.__setattr__(ghost, "_loaded", False)
         self._entities[id] = ghost
         return ghost
+
+    def entities(self) -> Iterable[Entity]:
+        """Yield every registered entity in insertion order.
+
+        - dict-factory-entities: Returns `self._entities.values()`.
+
+        .implements: entity-factory-entities
+        """
+        return self._entities.values()
 
     def _extra_attrs(self, entity: Entity) -> list[str]:
         return []

@@ -4,9 +4,9 @@ import argparse
 import asyncio
 import json
 import logging
+from collections.abc import AsyncGenerator
 from enum import Enum
 from pathlib import Path
-from typing import AsyncIterator, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -15,17 +15,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sidestage.actor import Actor, StubActor, UserActor
-from sidestage.events import EntityChanged
 from sidestage.campaign import Campaign, CampaignResponse
 from sidestage.entity import (
     DictEntityFactory,
+    EntityFactory,
     EntityId,
     UnresolvedEntityError,
 )
+from sidestage.events import EntityChanged
 from sidestage.instance_config import (
-    InstanceConfig,
     from_env as _instance_config_from_env,
+)
+from sidestage.instance_config import (
     resolve as _instance_config_resolve,
+)
+from sidestage.instance_config import (
     serialize_to_env as _instance_config_serialize_to_env,
 )
 from sidestage.message import Message
@@ -122,10 +126,10 @@ _KEEPALIVE_INTERVAL_S = 15.0
 
 async def _sse_event_stream(
     queue: asyncio.Queue,
-    request: Optional[Request] = None,
+    request: Request | None = None,
     on_close=None,
     keepalive_interval_s: float = _KEEPALIVE_INTERVAL_S,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """Yield SSE bytes from a queue of `EntityChanged` events.
 
     rest-api-events-yield + sse-dataflow-event: emits each dequeued event as
@@ -143,7 +147,7 @@ async def _sse_event_stream(
                     queue.get(),
                     timeout=keepalive_interval_s,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield b": keepalive\n\n"
                 continue
             if isinstance(event, EntityChanged):
@@ -157,7 +161,7 @@ async def _sse_event_stream(
                 data = json.dumps(payload)
             else:
                 data = json.dumps(event)
-            yield f"event: entity_changed\ndata: {data}\n\n".encode("utf-8")
+            yield f"event: entity_changed\ndata: {data}\n\n".encode()
     finally:
         if on_close is not None:
             on_close()
@@ -210,7 +214,7 @@ class App:
     .implements: cuj-startup-load
     """
 
-    state: "ServerState"
+    state: ServerState
     """server-app-state: Lifecycle state of this server instance. Starts at
     `LOADING`; flipped to `SERVING` by `App.run` after the campaign is fully
     loaded. Every API route gates on this via `_require_serving`.
@@ -218,20 +222,19 @@ class App:
     .implements: server-state-loading, server-state-serving
     """
 
-    factory: object = None  # actual type: EntityFactory; set by App.run
+    factory: EntityFactory | None = None
     """server-app-factory: Class-level slot holding the active load's
-    `EntityFactory`. Set by `App.run` BEFORE `Campaign.load` so deserialize-time
-    code (e.g. `Scene.deserialize`) can resolve cross-references via
-    `App.factory.get(...)` without the factory being threaded through every
-    call signature. Typed as `object` because the concrete `EntityFactory`
-    type would create an import cycle.
+    `EntityFactory`. Set by `App.run` BEFORE `Campaign.load` so
+    deserialize-time code (e.g. `Scene.deserialize`) can resolve
+    cross-references via `App.factory.get(...)` without the factory being
+    threaded through every call signature. `None` until the first load.
 
     .implements: cuj-startup-load
     """
 
     # server-app: class-level Actor registry. Private (leading underscore) per
     # `spec-link-targets-private`; the public surface is `App.get_actor`.
-    _actors: dict[str, "Actor"] = {}
+    _actors: dict[str, Actor] = {}
 
     def __init__(self, sidestage_dir: str = "sidestage/") -> None:
         # server-run-sidestage-dir: default instance state root is "sidestage/".
@@ -245,7 +248,7 @@ class App:
     # ----------------------- actor registry -----------------------
 
     @classmethod
-    def get_actor(cls, owner: str) -> "Actor":
+    def get_actor(cls, owner: str) -> Actor:
         """server-get-actor: Return the process-wide `Actor` singleton for
         `owner`, lazy-creating it on first call.
 
@@ -312,6 +315,7 @@ class App:
         # absent — when present, the static mount below shadows `/` and
         # provides the SPA fallback (frontend-serve-mount/spa).
         if not _STATIC_DIR.exists():
+
             @app.get("/")
             async def get_root() -> Response:
                 self._require_serving()
@@ -367,8 +371,10 @@ class App:
                 raise HTTPException(status_code=404, detail="entity not found")
             try:
                 model = entity.serialize()
-            except UnresolvedEntityError:
-                raise HTTPException(status_code=404, detail="entity not resolved")
+            except UnresolvedEntityError as exc:
+                raise HTTPException(
+                    status_code=404, detail="entity not resolved"
+                ) from exc
             return JSONResponse(content=model.model_dump(mode="json"))
 
         # rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
@@ -394,10 +400,10 @@ class App:
                 # Default `to` is len(scene.messages) — the half-open upper
                 # bound. Empty scene -> default to=0 -> range(0,0) -> [].
                 to_idx = int(params["to"]) if "to" in params else n
-            except ValueError:
+            except ValueError as exc:
                 raise HTTPException(
                     status_code=422, detail="from/to must be integers"
-                )
+                ) from exc
 
             # rest-api-get-messages-422: negative bounds, from > to, to > len.
             if from_idx < 0 or to_idx < 0:
@@ -416,9 +422,7 @@ class App:
             return JSONResponse(content=payload)
 
         # rest-api-post-message: POST /api/campaigns/{cid}/scenes/{scene_id}/messages
-        @app.post(
-            "/api/campaigns/{cid}/scenes/{scene_id}/messages", status_code=201
-        )
+        @app.post("/api/campaigns/{cid}/scenes/{scene_id}/messages", status_code=201)
         async def post_message(
             cid: str, scene_id: str, body: MessageRequest
         ) -> MessageAccepted:
@@ -473,6 +477,14 @@ class App:
             queue: asyncio.Queue = asyncio.Queue()
             user_id = App._current_user()
             user_actor = App.get_actor(user_id)
+            # The current-user actor is always a UserActor (per
+            # `server-get-actor` mapping). The assertion both narrows the
+            # type for the .subscribe_to / .unsubscribe_from calls below
+            # AND surfaces a clear error if a misconfigured Actor class
+            # ever ends up on the "user" slot.
+            assert isinstance(user_actor, UserActor), (
+                f"current-user actor must be UserActor; got {type(user_actor).__name__}"
+            )
             user_actor.subscribe_to(entity, queue)
 
             # rest-api-events-cleanup: on disconnect, unsubscribe.
@@ -499,7 +511,7 @@ class App:
     # ----------------------- run -----------------------
 
     @classmethod
-    def _build_and_load(cls, sidestage_dir: str) -> "App":
+    def _build_and_load(cls, sidestage_dir: str) -> App:
         """server-build-and-load: shared construction + load path.
 
         Both `App.run` (non-reload entry) and `create_app` (uvicorn reload
@@ -530,17 +542,14 @@ class App:
         # dict[name] -> Campaign.
         campaigns_root = Path(sidestage_dir) / "campaigns"
         if not campaigns_root.is_dir():
-            raise RuntimeError(
-                f"No campaigns/ directory under {sidestage_dir}"
-            )
+            raise RuntimeError(f"No campaigns/ directory under {sidestage_dir}")
         campaign_dirs = sorted(
-            d for d in campaigns_root.iterdir()
+            d
+            for d in campaigns_root.iterdir()
             if d.is_dir() and (d / "config.yaml").exists()
         )
         if not campaign_dirs:
-            raise RuntimeError(
-                f"No campaign with config.yaml in {campaigns_root}"
-            )
+            raise RuntimeError(f"No campaign with config.yaml in {campaigns_root}")
         campaign = Campaign.load(campaign_dirs[0])
         instance.campaigns[campaign.name] = campaign
         # server-run-state-serving.

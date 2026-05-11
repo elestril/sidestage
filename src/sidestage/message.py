@@ -37,7 +37,7 @@ class Message:
     .implemented-by: SimpleScene.serialize_message
     """
 
-    sender: "Character"
+    sender: Character
     body: str
 
     class Model(BaseModel):

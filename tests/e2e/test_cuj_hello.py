@@ -19,7 +19,6 @@ import pytest
 
 from sidestage.server import App
 
-
 pytestmark = pytest.mark.e2e
 
 
@@ -34,9 +33,9 @@ async def _read_entity_changed_frames(response: httpx.Response, n: int) -> list[
     async for raw in response.aiter_lines():
         line = raw.rstrip("\r")
         if line.startswith("event: "):
-            pending_event = line[len("event: "):]
+            pending_event = line[len("event: ") :]
         elif line.startswith("data: ") and pending_event == "entity_changed":
-            frames.append(json.loads(line[len("data: "):]))
+            frames.append(json.loads(line[len("data: ") :]))
             pending_event = None
             if len(frames) >= n:
                 return frames
@@ -44,7 +43,10 @@ async def _read_entity_changed_frames(response: httpx.Response, n: int) -> list[
 
 
 async def test_cuj_hello(test_app: App, test_server: str) -> None:
-    campaign_id = test_app.campaign.name
+    # The test fixture loads exactly one campaign — single entry in
+    # `App.campaigns` keyed by `campaign.name`. Pull the id from the
+    # iteration order rather than threading the Campaign object through.
+    campaign_id = next(iter(test_app.campaigns))
     scene_id = "parlor"
     events_url = f"/api/campaigns/{campaign_id}/entities/{scene_id}/events"
     post_url = f"/api/campaigns/{campaign_id}/scenes/{scene_id}/messages"
@@ -73,8 +75,7 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
         )
 
         assert status == 200, (
-            "sse-dataflow-connect: SSE subscribe MUST return 200; "
-            f"got status={status}"
+            f"sse-dataflow-connect: SSE subscribe MUST return 200; got status={status}"
         )
         assert "text/event-stream" in ctype, (
             "sse-dataflow-connect: response content-type must be "

@@ -20,7 +20,6 @@ from typing import Any
 import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 _ENV_RESOLVED_CONFIG = "SIDESTAGE_INSTANCE_CONFIG"
 
 
