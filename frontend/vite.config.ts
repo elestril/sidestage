@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -36,5 +37,14 @@ export default defineConfig({
         },
       },
     },
+  },
+  // frontend-test: vitest config. jsdom for DOM; setup file wires
+  // @testing-library/jest-dom matchers. Colocated *.test.tsx pattern.
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    css: false,
   },
 });

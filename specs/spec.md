@@ -96,10 +96,14 @@ Specs split across two physical homes:
     class name (`TestDispatchFlow`), or a parametrize id
     (`cuj-hello-send`).
     - spec-links-tested-by-implicit: Every labeled spec invariant
-      `foo-bar-baz` implicitly has `.tested-by: test_foo_bar_baz` — the
-      colocated unit test of the same name, with dashes mapped to
-      underscores. The implicit link is NOT written out. A missing unit
-      test of the expected name is a defect.
+      `foo-bar-baz` implicitly has a colocated unit test named after it.
+      Python: `test_foo_bar_baz` in `*_test.py` (dashes → underscores,
+      because Python identifiers can't contain dashes). TypeScript:
+      `test('foo-bar-baz', …)` in `*.test.tsx` (the test name is a
+      string, so dashes are preserved verbatim). Either spelling is
+      selected by the runner's name-filter flag (`pytest -k foo-bar-baz`
+      OR `vitest -t foo-bar-baz`). The implicit link is NOT written
+      out. A missing unit test of the expected name is a defect.
     - spec-links-tested-by-explicit: Write `.tested-by` only when the
       implicit link does not apply: the test lives outside the colocated
       `*_test.py` (typically an integration test in `tests/integration/`),
@@ -181,6 +185,20 @@ Specs split across two physical homes:
     a defect — flag it during review and either spec it or make it private.
   - spec-public-required-no-orphan-spec: Likewise, a spec describing a public
     symbol that no longer exists in code is a defect — flag and resolve.
+
+- spec-coverage-required: Every labeled spec invariant MUST be proven by
+  at least one test. The link is implicit when a colocated unit test
+  `test_<spec-name>` exists (per `spec-links-tested-by-implicit`); when
+  coverage lives elsewhere — integration or e2e — the spec MUST carry an
+  explicit `.tested-by` pointer (per `spec-links-tested-by-explicit`). A
+  spec with neither is a defect.
+  - spec-coverage-required-no-orphan-spec: A spec invariant lacking both
+    an implicit unit test of the matching name AND an explicit
+    `.tested-by` is a defect — flag during review and either add the
+    test or remove the unjustified spec.
+  - spec-coverage-required-no-orphan-test: Conversely, a `test_<spec-name>`
+    that no longer maps to a real spec invariant is a defect — flag and
+    delete (or rename to match a current invariant).
 
 ### spec-chain: The traceability chain
 

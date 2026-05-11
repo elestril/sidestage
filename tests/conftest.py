@@ -4,6 +4,9 @@ Defines `test_campaign` (session-scoped), `test_app` (function-scoped) and
 `test_client` (function-scoped). The function-scoped fixtures reset
 class-level App state on teardown so tests don't leak across each other.
 
+E2E-tier fixtures (`test_server` — real uvicorn on an ephemeral port)
+live in `tests/e2e/conftest.py`.
+
 .implements: testing-fixtures
 """
 

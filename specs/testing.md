@@ -1,18 +1,21 @@
 # testing: How Sidestage is tested
 
-Three layers — unit (colocated, mocked deps), integration (multi-module
-flows in-process), eval (behavioral; opt-in). Integration is built on a
-small framework — `Scenario` dataclass + PyHamcrest matchers + a runner —
-sized for the multi-agent-scene world that's coming, where dozens of
-scenarios per scene assert varied message-sequence outcomes.
+Four tiers — unit (colocated, mocked deps), integration (multi-module
+domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
+(behavioral; opt-in). Integration and e2e share scenario scaffolding —
+`Scenario` dataclass + PyHamcrest matchers + a runner.
 
 ## testing-categories
 
 - testing-categories-unit: One module, mocked cross-deps. Lives next to
   source as `*_test.py`. Fast (whole suite under one second).
 - testing-categories-integration: Real Scene + Character + Actor + App,
-  no mocking of the domain layer. Routes called via `TestClient`; SSE via
-  `httpx.AsyncClient` + `ASGITransport`. Lives in `tests/integration/`.
+  no API boundary. Asserts on entity-level state via direct method
+  calls. Lives in `tests/integration/`.
+- testing-categories-e2e: Real uvicorn server on an ephemeral port (per
+  `testing-fixture-test-server`), real `httpx.AsyncClient` over TCP.
+  Required for tests crossing the HTTP boundary or exercising streaming
+  responses (SSE). Lives in `tests/e2e/`.
 - testing-categories-eval: Behavioral evals against rubrics. Today every
   actor is deterministic so evals reduce to property checks; once
   LLM-backed actors land, evals slot in as PyHamcrest matchers calling
@@ -21,25 +24,17 @@ scenarios per scene assert varied message-sequence outcomes.
 ## testing-layout
 
 ```
-src/sidestage/*_test.py                 # unit tests, colocated
+src/sidestage/*_test.py     # unit tests, colocated
 tests/
-├── conftest.py                         # shared fixtures
-├── test_campaign/                      # canonical fixture campaign
-│   ├── config.yaml                     # default_scene_id: parlor
-│   ├── characters/
-│   │   ├── alice.md                    # owner: user
-│   │   └── bob.md                      # owner: stub
-│   └── scenes/
-│       └── parlor.md                   # alice + bob
-├── lib/                                # framework code
-│   ├── __init__.py
-│   ├── scenarios.py                    # Scenario dataclass + scene_from()
-│   └── runner.py                       # run_scenario()
-├── integration/test_*.py               # @pytest.mark.integration
-└── eval/test_*.py                      # @pytest.mark.eval, opt-in
+├── conftest.py             # test_campaign, test_app, test_client
+├── test_campaign/          # canonical fixture campaign
+├── lib/                    # Scenario / runner / matcher scaffolding
+├── integration/            # @pytest.mark.integration, no API boundary
+├── e2e/                    # @pytest.mark.e2e, real uvicorn + httpx
+│   └── conftest.py         # test_server
+└── eval/                   # @pytest.mark.eval, opt-in
 ```
 
-- testing-layout-unit-colocated: Existing unit tests stay in `src/sidestage/`.
 - testing-layout-test-campaign: Single canonical fixture campaign at
   `tests/test_campaign/`. Minimal — alice (user) + bob (stub) + parlor scene.
   Scenarios specialize via `scene_from(...)` overrides.
@@ -49,16 +44,12 @@ tests/
 
 ## testing-markers
 
-```toml
-[tool.pytest.ini_options]
-markers = [
-    "integration: in-process multi-module flows",
-    "eval: behavioral evals; opt-in (require EVAL=1)",
-]
-```
+Markers are registered in `pyproject.toml` (`[tool.pytest.ini_options]
+markers`) and used both for tier selection (`pytest -m e2e`) and
+skip-by-default (eval).
 
-- testing-markers-default: `uv run pytest` runs unit + integration; eval
-  skipped.
+- testing-markers-default: `uv run pytest` runs unit + integration + e2e;
+  eval skipped.
 - testing-markers-eval-opt-in: Eval tests carry `@pytest.mark.eval` AND
   `@pytest.mark.skipif(os.environ.get("EVAL") != "1", reason="eval-only")`.
 
@@ -88,38 +79,47 @@ assert len(scene.messages) == 1, (
 
 ## testing-fixtures
 
-Defined in `tests/conftest.py`.
+Shared fixtures live in `tests/conftest.py`. E2E-only fixtures live in
+`tests/e2e/conftest.py`.
 
 - testing-fixture-test-campaign: `test_campaign` (**session-scoped**) —
   loads `tests/test_campaign/` once. Characters and factory are read-only
   and shared across the session.
 - testing-fixture-test-app: `test_app` (function-scoped) — fresh `App`
   with `App.campaigns` and `App.factory` set from `test_campaign`,
-  `state = SERVING`. Resets class-level state on teardown.
+  `state = SERVING`. Resets `App.factory` on teardown.
 - testing-fixture-test-client: `test_client` (function-scoped) — sync
   `TestClient(test_app._fastapi)` for non-streaming routes.
+- testing-fixture-test-server: `test_server` (function-scoped, in
+  `tests/e2e/conftest.py`) — real uvicorn on an ephemeral `127.0.0.1`
+  port; yields the base URL. E2E tests take `test_server: str` and
+  connect via `httpx.AsyncClient(base_url=...)`. Required for streaming
+  responses where httpx's in-process `ASGITransport` would buffer the
+  full body and deadlock against an open SSE stream.
 - testing-fixture-mock-user-actor: `mock_user_actor` (function-scoped) —
   scripted `MagicMock(spec=UserActor)` registered at `App._actors["user"]`.
-  Records `subscribe_to`/`unsubscribe_from`/`cancel_all` calls; returns a
-  controlled `asyncio.Queue` from `subscribe_to` so SSE-handler tests can
-  drive what the response loop reads. Per `testing-mock-user-actor`.
+  Used by **unit** tests of the SSE handler (per
+  `testing-mock-user-actor`); e2e tests use the real UserActor.
 
 ## testing-mock-user-actor
 
-UserActor holds edge state — queues, future auth context. Integration
-tests MUST use a scripted mock instead of the real `UserActor`. Two
-reasons:
+UserActor holds edge state (queue subscriptions). **Unit** tests of the
+SSE handler MUST use a scripted mock instead of the real `UserActor`:
 
-- testing-mock-user-actor-edge: A real `UserActor` would carry process-wide
-  SSE infrastructure across tests. Mocks isolate per-test.
+- testing-mock-user-actor-edge: A real `UserActor` would carry queue
+  subscriptions across tests. Mocks isolate per-test.
 - testing-mock-user-actor-script: Tests drive scripted SSE behavior by
-  controlling what `subscribe_to` returns (which queue) and asserting on
-  `unsubscribe_from` cleanup. Real UserActor's internals aren't reachable
-  this way.
+  controlling which queue `subscribe_to` accepts and asserting on
+  `unsubscribe_from` cleanup.
 
-`StubActor` doesn't need mocking — it's deterministic and stateless. Tests
-can use real `StubActor`. `NpcActor` (future) MUST be mocked the same way
-as `UserActor` — it'll hold an LLM client.
+E2E tests use the real UserActor — its `subscribe_to`/`unsubscribe_from`
+delegation to `entity.subscribe(QueueListener)` is exactly what e2e is
+exercising. Cleanup on disconnect is verified by closing the httpx
+stream and observing that no listeners leak on the entity.
+
+`StubActor` doesn't need mocking — deterministic and stateless. `NpcActor`
+(future) MUST be mocked the same way as `UserActor` — it'll hold an LLM
+client.
 
 ## testing-scenario
 
@@ -177,32 +177,21 @@ async def test_dispatch(scenario, test_app):
 
 ## testing-sse
 
-SSE handler tests use the per-entity URL and the `mock_user_actor` fixture.
-The mock's `subscribe_to(entity, queue)` returns a controlled queue; the
-test puts events on that queue and asserts the response loop yields them.
+SSE tests split by tier:
 
-```python
-@pytest.mark.integration
-async def test_sse_yields_event(test_app, mock_user_actor):
-    queue = asyncio.Queue()
-    mock_user_actor.subscribe_to.return_value = queue
-
-    transport = ASGITransport(app=test_app._fastapi)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        async with c.stream("GET", "/api/campaigns/{cid}/entities/{eid}/events") as r:
-            await queue.put(EntityChanged(entity_id=..., hint=...))
-            line = await anext(aiter(r.aiter_lines()))
-            assert "entity_changed" in line
-```
-
-- testing-sse-mock-user-actor: SSE tests assert that the handler called
-  `mock_user_actor.subscribe_to(entity, queue)` AND
-  `mock_user_actor.unsubscribe_from(...)` on disconnect. The handler's
-  delegation is the test surface — not the QueueListener internals.
-
-## testing-eval-extension
-
-When LLM actors land, eval matchers (LLM-judge, semantic similarity) plug
-in as PyHamcrest `BaseMatcher` subclasses — Scenario shape, runner, and
-fixtures don't change. The integration may pull in DeepEval's `GEval` or
-similar for the LLM scoring; the wrapping is local to the matcher impl.
+- testing-sse-unit: The SSE route handler is unit-tested by driving it
+  directly with a request mock whose `is_disconnected()` flips after a
+  bounded number of polls, and a controlled `asyncio.Queue` injected via
+  patching `sidestage.server.asyncio.Queue`. The handler's call to
+  `mock_user_actor.subscribe_to(entity, queue)` (and matching
+  `unsubscribe_from` on close) is the test surface — not the QueueListener
+  internals.
+- testing-sse-e2e: End-to-end SSE goes through `test_server` (real
+  uvicorn). Open `client.stream("GET", events_url)`, POST concurrently to
+  trigger an emission, read SSE frames from the response. A brief
+  `asyncio.sleep(0.05)` before the POST ensures the SSE handler has
+  reached `subscribe_to` before the emit fires.
+- testing-sse-no-asgi-transport: Do NOT use `httpx.ASGITransport` for SSE.
+  It awaits the ASGI app to completion before returning the response,
+  which deadlocks against an open streaming generator. Use real uvicorn
+  via `test_server` instead.
