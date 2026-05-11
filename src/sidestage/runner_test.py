@@ -267,11 +267,17 @@ class TestCheckDeps:
 
 
 class TestStartDep:
+    def _running_popen(self):
+        """Popen mock whose .poll() returns None (process still running)."""
+        proc = MagicMock()
+        proc.poll.return_value = None
+        return proc
+
     def test_spawns_subprocess_with_cwd(self) -> None:
         runner = Runner(_instance())
         dep = _dep()
         with (
-            patch("subprocess.Popen") as popen,
+            patch("subprocess.Popen", return_value=self._running_popen()) as popen,
             patch.object(runner_mod, "_http_get", return_value=(200, b"")),
         ):
             runner.start_dep(dep)
@@ -286,7 +292,7 @@ class TestStartDep:
         dep = _dep()
         responses = iter([(0, b""), (0, b""), (200, b"")])
         with (
-            patch("subprocess.Popen"),
+            patch("subprocess.Popen", return_value=self._running_popen()),
             patch.object(runner_mod, "_http_get", side_effect=lambda *a, **k: next(responses)),
             patch("time.sleep"),
         ):
@@ -295,15 +301,42 @@ class TestStartDep:
     def test_timeout_raises(self) -> None:
         runner = Runner(_instance())
         dep = _dep()
-        # monotonic returns 0, then a value past the deadline.
         with (
-            patch("subprocess.Popen"),
+            patch("subprocess.Popen", return_value=self._running_popen()),
             patch.object(runner_mod, "_http_get", return_value=(0, b"")),
             patch("time.sleep"),
             patch("time.monotonic", side_effect=[0.0, 0.0, 1000.0]),
         ):
             with pytest.raises(DependencyError, match="did not return 2xx"):
                 runner.start_dep(dep)
+
+    def test_early_exit_raises_with_logged_stderr(self, caplog) -> None:
+        """If the dep process exits before becoming healthy, the runner should
+        log the captured stderr at ERROR level and raise a short DependencyError."""
+        runner = Runner(_instance())
+        dep = _dep()
+        proc = MagicMock()
+        proc.poll.return_value = 1  # already exited
+        proc.returncode = 1
+        # Simulate stderr captured into the temp file by writing through the fd.
+        captured_stderr_lines = "sh: 1: vite: not found\n"
+
+        def fake_popen(*args, **kwargs):
+            stderr_fh = kwargs["stderr"]
+            stderr_fh.write(captured_stderr_lines)
+            return proc
+
+        with (
+            patch("subprocess.Popen", side_effect=fake_popen),
+            patch.object(runner_mod, "_http_get", return_value=(0, b"")),
+            patch("time.sleep"),
+            caplog.at_level("ERROR", logger="sidestage.runner"),
+        ):
+            with pytest.raises(DependencyError, match="exited with code 1"):
+                runner.start_dep(dep)
+        # The captured stderr is logged, NOT crammed into the exception message.
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "vite: not found" in joined
 
 
 # ---------------------------------------------------------------------------
@@ -501,15 +534,16 @@ class TestMain:
         assert kwargs["instance"].name == "dev"
 
     def test_unknown_instance_exits_with_error(
-        self, tmp_path: Path, monkeypatch, capsys
+        self, tmp_path: Path, monkeypatch, caplog
     ) -> None:
         """runner-cli-unknown: unknown instance => non-zero exit."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / "instances").mkdir()
-        rc = main(["run", "ghost"])
+        with caplog.at_level("ERROR", logger="sidestage.runner"):
+            rc = main(["run", "ghost"])
         assert rc != 0
-        err = capsys.readouterr().err
-        assert "unknown instance" in err
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "unknown instance" in joined
 
     def test_force_backends_flag(self, tmp_path: Path, monkeypatch) -> None:
         """runner-cli-force: --force-backends sets Runner.force_backends."""
@@ -534,14 +568,18 @@ class TestMain:
             getattr(runner_inst, cmd).assert_called_once()
 
     def test_dependency_error_exits_nonzero(
-        self, tmp_path: Path, monkeypatch, capsys
+        self, tmp_path: Path, monkeypatch, caplog
     ) -> None:
         monkeypatch.chdir(tmp_path)
         self._write_dev(tmp_path)
-        with patch("sidestage.runner.Runner") as runner_cls:
+        with (
+            patch("sidestage.runner.Runner") as runner_cls,
+            caplog.at_level("ERROR", logger="sidestage.runner"),
+        ):
             inst = MagicMock()
             inst.run.side_effect = DependencyError("vite is on fire")
             runner_cls.return_value = inst
             rc = main(["run"])
         assert rc == 1
-        assert "vite is on fire" in capsys.readouterr().err
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "vite is on fire" in joined

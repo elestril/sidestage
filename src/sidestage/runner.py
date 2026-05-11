@@ -10,6 +10,7 @@ The CLI entry point is `sidestage-ctl` (registered in `pyproject.toml`).
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -23,6 +24,8 @@ from typing import Optional
 
 import yaml
 from pydantic import BaseModel
+
+logger = logging.getLogger("sidestage.runner")
 
 from sidestage.server import App
 
@@ -324,28 +327,54 @@ class Runner:
         background process and poll `dep.health_url` until 2xx or until
         `_HEALTH_TIMEOUT_S` (30 s) elapses.
 
+        Captures the dependency's stderr to a temp file. On early process
+        exit OR health-poll timeout, the captured stderr is logged at ERROR
+        level (so the user sees the real failure — missing setup, bad
+        command, etc.) before a short DependencyError is raised.
+
         Raises:
-            DependencyError: If the health URL does not return 2xx before
-            the timeout expires.
+            DependencyError: If the dependency process exits early or if
+            the health URL does not return 2xx before the timeout expires.
 
         .implements: runner-dep-start, runner-dep-wait
         """
-        print(f"[runner] starting dependency {dep.name!r} ...", file=sys.stderr)
-        subprocess.Popen(  # noqa: S603
+        import tempfile
+
+        logger.info("starting dependency %r", dep.name)
+        stderr_fh = tempfile.TemporaryFile(mode="w+")
+        proc = subprocess.Popen(  # noqa: S603
             dep.start_cmd,
             shell=True,
             cwd=dep.start_cwd or None,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fh,
             start_new_session=True,
         )
+
+        def _log_stderr_and_raise(short_msg: str) -> None:
+            stderr_fh.seek(0)
+            captured = stderr_fh.read()
+            logger.error(
+                "dependency %r failed.\n  start_cmd: %s\n  start_cwd: %s\n  stderr:\n%s",
+                dep.name,
+                dep.start_cmd,
+                dep.start_cwd,
+                captured or "(no stderr captured)",
+            )
+            raise DependencyError(short_msg)
+
         deadline = time.monotonic() + _HEALTH_TIMEOUT_S
         while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                _log_stderr_and_raise(
+                    f"dependency {dep.name!r} exited with code {proc.returncode} "
+                    f"before becoming healthy"
+                )
             status, _ = _http_get(dep.health_url)
             if _is_2xx(status):
                 return
             time.sleep(_HEALTH_POLL_INTERVAL_S)
-        raise DependencyError(
+        _log_stderr_and_raise(
             f"dependency {dep.name!r}: health URL {dep.health_url} "
             f"did not return 2xx within {_HEALTH_TIMEOUT_S:.0f}s"
         )
@@ -358,10 +387,7 @@ class Runner:
         .implements: runner-dep-force-restart
         """
         port = _port_from_url(dep.health_url)
-        print(
-            f"[runner] force-restarting {dep.name!r} on port {port}",
-            file=sys.stderr,
-        )
+        logger.warning("force-restarting %r on port %d", dep.name, port)
         subprocess.run(  # noqa: S603, S607
             ["fuser", "-k", f"{port}/tcp"],
             check=False,
@@ -387,15 +413,18 @@ class Runner:
 
     def start(self) -> None:
         """runner-start-daemonizes: Check dependencies, then daemonize the
-        server process (writing PID to `.sidestage-<name>.pid` and logs to
-        `.sidestage-<name>.log`). The current process exits after spawning.
+        server process. PID is written to `.sidestage-<name>.pid` (repo-root
+        runtime artifact); logs are appended to `logs/<name>.log` (created
+        if missing). The current process exits after spawning.
 
         .implements: cuj-startup-deps, cuj-startup-load, cuj-startup-ready
         """
         self.check_deps()
 
         pid_file = Path(f".sidestage-{self.instance.name}.pid")
-        log_file = Path(f".sidestage-{self.instance.name}.log")
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / f"{self.instance.name}.log"
 
         cmd = [
             "uv",
@@ -415,9 +444,11 @@ class Runner:
             start_new_session=True,
         )
         pid_file.write_text(f"{proc.pid}\n")
-        print(
-            f"sidestage[{self.instance.name}] started (pid {proc.pid}) -> {log_file}",
-            file=sys.stderr,
+        logger.info(
+            "sidestage[%s] started (pid %d) -> %s",
+            self.instance.name,
+            proc.pid,
+            log_file,
         )
 
     def stop(self) -> None:
@@ -484,15 +515,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Force-restart dependencies whose cwd or version doesn't match.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG logging.",
+    )
     args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     try:
         instance = _load_instance(args.instance)
     except FileNotFoundError:
-        print(
-            f"sidestage-ctl: unknown instance {args.instance!r} "
-            f"(no instances/{args.instance}.yaml)",
-            file=sys.stderr,
+        logger.error(
+            "unknown instance %r (no instances/%s.yaml)",
+            args.instance,
+            args.instance,
         )
         return 2
 
@@ -506,7 +549,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif args.command == "stop":
             runner.stop()
     except DependencyError as e:
-        print(f"sidestage-ctl: {e}", file=sys.stderr)
+        logger.error("%s", e)
         return 1
     return 0
 

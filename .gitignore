@@ -1,8 +1,35 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 dist/
+build/
 *.egg-info/
+
+# Environment
 .env
+.env.local
+
+# Generated specs (rebuilt via `uv run pydoc-markdown`)
 specs/generated/
+
+# Runtime artifacts
+logs/
+.sidestage-*.pid
+.sidestage-*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+src/sidestage/static/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

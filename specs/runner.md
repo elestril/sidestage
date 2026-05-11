@@ -99,7 +99,7 @@ Executed for each `DependencyConfig` in order before the server starts.
 - .implements: cuj-startup-deps, cuj-startup-load, cuj-startup-ready
 
 `start(self) -> None`
-- runner-start-daemonizes: Same as `run()` but daemonizes the server process and writes a PID file to `.sidestage-<name>.pid`.
+- runner-start-daemonizes: Same as `run()` but daemonizes the server process. Writes a PID file to `.sidestage-<name>.pid` (repo root) and appends server stdout/stderr to `logs/<name>.log` (creating `logs/` if missing).
 - .implements: cuj-startup-deps, cuj-startup-load, cuj-startup-ready
 
 `stop(self) -> None`

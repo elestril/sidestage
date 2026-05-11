@@ -1,2 +1,2 @@
 name: Dragon's Lair
-active_scene_id: dungeon_entrance
+default_scene_id: dungeon_entrance
