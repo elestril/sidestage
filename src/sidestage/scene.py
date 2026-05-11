@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from sidestage.entity import Entity, EntityId, EntityType
 from sidestage.events import EntityChanged
-from sidestage.message import Message, MessageId
+from sidestage.message import Message
 
 if TYPE_CHECKING:
     from sidestage.character import Character
@@ -37,8 +37,8 @@ class Scene(Entity):
     """scene-class: Abstract scene — holds the message history and lists the
     present characters.
 
-    Pure data + event source. Public mutation is `append(msg) -> MessageId`
-    which records and emits `EntityChanged(SceneChangeHint(...))`. The npc
+    Pure data + event source. Public mutation is `append(msg) -> int`
+    (the message index) which records and emits `EntityChanged`. The npc
     response cycle is driven by listener fanout (Character.notify), not by
     Scene.
 
@@ -95,24 +95,24 @@ class Scene(Entity):
 
     # ---------------- public mutation + test surface ---------------------
 
-    def append(self, message: Message) -> MessageId:
+    def append(self, message: Message) -> int:
         """scene-append: Record `message` and emit `EntityChanged`.
 
-        Single public mutation API. Replaces the prior `Scene.dispatch` —
-        no orchestration here; reactions are listener-driven (per
-        `events.md`). Returns the assigned `MessageId`.
+        Single public mutation API. Returns the assigned index. The full
+        message identity is `(self.id, index)`; callers that need to
+        report it on the wire use `Scene.serialize_message`.
 
         - scene-append-records: Appends via `_append_message`.
         - scene-append-emits: Fires
           `EntityChanged(entity=self, attributes=["messages"])` via
           `self._emit`.
-        - scene-append-returns: Returns `MessageId(f"{self.id}:{idx}")`.
+        - scene-append-returns: Returns the new message's index (`int`).
 
         .implements: events-dataflow-emit, message-dataflow-record-emit
         """
         idx = self._append_message(message)
         self._emit(EntityChanged(entity=self, attributes=["messages"]))
-        return MessageId(f"{self.id}:{idx}")
+        return idx
 
     # `idle()` is inherited from `Entity` — events are entity-scoped, not
     # scene-scoped. Tests await `scene.idle()` to wait for cascading
@@ -139,10 +139,12 @@ class Scene(Entity):
 
     def serialize_message(self, index: int) -> Message.Model:
         """scene-serialize-message: Build the wire `Message.Model` for the
-        message at `index`. Only place `MessageId` is constructed."""
+        message at `index`. The composite `(scene_id, index)` is the
+        message's identity on the wire."""
         msg = self.messages[index]
         return Message.Model(
-            id=MessageId(f"{self.id}:{index}"),
+            scene_id=self.id,
+            index=index,
             sender_id=msg.sender.id,
             body=msg.body,
         )

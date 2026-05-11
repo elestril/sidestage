@@ -85,9 +85,10 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
             f"happy path; got status={post_resp.status_code} "
             f"body={post_resp.text!r}"
         )
-        assert post_resp.json()["id"] == "parlor:0", (
-            "rest-api-post-message: response carries the assigned "
-            f"MessageId; got id={post_resp.json().get('id')!r}"
+        accepted = post_resp.json()
+        assert accepted == {"scene_id": "parlor", "index": 0}, (
+            "rest-api-post-returns: response carries (scene_id, index) of "
+            f"the appended message; got {accepted!r}"
         )
         assert len(frames) == 2, (
             "events-dataflow-deliver: SSE stream must deliver one "

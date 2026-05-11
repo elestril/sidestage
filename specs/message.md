@@ -16,9 +16,11 @@ orchestration (no `dispatch`, no `_respond`).
    Actor response.
    - .implemented-by: Scene.append, rest-api-post-message
 2. message-dataflow-record-emit: `scene.append` records the message,
-   assigns the next index as MessageId, fires `EntityChanged` (per
-   `events-dataflow-emit`).
-   - .implemented-by: Scene.append, events-dataflow-emit
+   assigns the next index, fires `EntityChanged` (per
+   `events-dataflow-emit`). The composite `(scene.id, index)` is the
+   message's wire identity; assembly into `Message.Model` happens in
+   `Scene.serialize_message`.
+   - .implemented-by: Scene.append, Scene.serialize_message, events-dataflow-emit
 3. message-dataflow-react: Subscribed Characters' `notify` filters and
    spawns `_actor.respond` tasks; non-None responses recurse back through
    step 1 via `scene.append(response)`.

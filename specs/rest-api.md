@@ -77,9 +77,10 @@ but the prefix is the multi-campaign scaffold.
    (per `events-dataflow`); this fires `EntityChanged`, listeners react,
    the npc response cycle runs as listener-spawned background tasks.
    - .implemented-by: rest-api-post-message, events-dataflow-emit
-7. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
-   The message itself and any character response arrive via `scene_updated`
-   SSE notifications followed by `GET /messages`.
+7. api-dataflow-respond: Server returns `201 Created` with
+   `MessageAccepted{scene_id, index}`. The message itself and any
+   character response arrive via `entity_changed` SSE notifications
+   followed by `GET /messages`.
    - .implements: cuj-hello-send
    - .implemented-by: rest-api-post-message
 
@@ -213,8 +214,8 @@ typically requesting only the slice they don't already have.
 ### rest-api-post-message: POST /api/campaigns/{cid}/scenes/{scene_id}/messages
 
 Non-blocking acknowledgement endpoint. The handler resolves the sender, calls
-`scene.dispatch(message)`, and returns the assigned `MessageId`. The full
-message — and any character response — arrives at all connected clients via SSE.
+`scene.append(message)`, and returns `(scene_id, index)`. The full message —
+and any character response — arrives at all connected clients via SSE.
 
 #### MessageRequest(BaseModel)
 
@@ -228,7 +229,8 @@ class MessageRequest(BaseModel):
 
 ```python
 class MessageAccepted(BaseModel):
-    id: MessageId  # the id assigned to the incoming message
+    scene_id: EntityId
+    index: int
 ```
 
 **Request** `MessageRequest`
@@ -237,8 +239,8 @@ class MessageAccepted(BaseModel):
 - rest-api-post-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
 - rest-api-post-422: Returns 422 if the request body fails Pydantic validation, or if `sender_id` is not in `player_character_ids`.
 - rest-api-post-503: Returns 503 if `App.state == LOADING`.
-- rest-api-post-dispatch: Constructs `Message(sender, body)`, calls `scene.append(message)` (per `events-dataflow`), returns the assigned `MessageId`. The handler does not await the npc response cycle — it fires asynchronously via listener fanout.
-- rest-api-post-returns: Returns `201 Created` with `MessageAccepted{id}`; the message itself and any character response arrive via SSE.
+- rest-api-post-dispatch: Constructs `Message(sender, body)`, calls `scene.append(message)` (per `events-dataflow`), packs the returned index plus the scene id into `MessageAccepted`. The handler does not await the npc response cycle — it fires asynchronously via listener fanout.
+- rest-api-post-returns: Returns `201 Created` with `MessageAccepted{scene_id, index}`; the message itself and any character response arrive via SSE.
 - .implements: api-dataflow-send, api-dataflow-dispatch, api-dataflow-respond
 - .implemented-by: server-route-post-message
 

@@ -35,8 +35,8 @@ async def run_scenario(scenario: Scenario, app: App) -> None:
       factory. Fresh scene = no message bleed across tests.
     - run-scenario-seed-history: Append each `Message` in
       `scenario.chat_history` to the new scene's `_messages`.
-    - run-scenario-dispatch: Call `scene.dispatch(scenario.input)` and
-      capture the returned `MessageId`.
+    - run-scenario-dispatch: Call `scene.append(scenario.input)` and
+      capture the returned index.
     - run-scenario-await-cycle: Await the fire-and-forget npc cycle to
       settle. Polls `len(scene.messages)` every `asyncio.sleep(0)` cycle;
       treats N consecutive no-growth yields as "settled". Bounded by

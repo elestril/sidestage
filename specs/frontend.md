@@ -169,6 +169,6 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 ### frontend-usesendmessage: useSendMessage(campaignId, sceneId)
 
 - frontend-send-hook-posts: POSTs `MessageRequest` to `/api/campaigns/{campaignId}/scenes/{sceneId}/messages`.
-- frontend-send-hook-returns: Returns a `send(body: string) => Promise<MessageId | null>` callback. The MessageId is the server-assigned id from `MessageAccepted`; null on error.
+- frontend-send-hook-returns: Returns a `send(body: string) => Promise<MessageAccepted | null>` callback. The `MessageAccepted` carries `{scene_id, index}` — the composite identity assigned by the server; null on error.
 
-Note: There is no client-side optimistic append. The SSE `scene_updated` for the user's own POST already triggers a slice fetch, so an optimistic append would cause double rendering.
+Note: There is no client-side optimistic append. The SSE `entity_changed` for the user's own POST already triggers a slice fetch, so an optimistic append would cause double rendering.

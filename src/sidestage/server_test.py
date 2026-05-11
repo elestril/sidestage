@@ -13,7 +13,7 @@ from sidestage.actor import StubActor, UserActor
 from sidestage.campaign import CampaignResponse
 from sidestage.entity import EntityId
 from sidestage.events import EntityChanged
-from sidestage.message import Message, MessageId
+from sidestage.message import Message
 from sidestage.scene import SceneResponse
 from sidestage.server import (
     App,
@@ -94,14 +94,15 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     def serialize_message(idx: int) -> Message.Model:
         m = scene.messages[idx]
         return Message.Model(
-            id=MessageId(f"{scene.id}:{idx}"),
+            scene_id=scene.id,
+            index=idx,
             sender_id=m.sender.id,
             body=m.body,
         )
 
-    def append(msg: Message) -> MessageId:
+    def append(msg: Message) -> int:
         scene.messages.append(msg)
-        return MessageId(f"{scene.id}:{len(scene.messages) - 1}")
+        return len(scene.messages) - 1
 
     scene.to_response = to_response
     scene.serialize_message = serialize_message
@@ -201,8 +202,9 @@ class TestMessageRequest:
 
 class TestMessageAccepted:
     def test_fields(self):
-        acc = MessageAccepted(id=MessageId("s1:0"))
-        assert acc.id == "s1:0"
+        acc = MessageAccepted(scene_id=EntityId("s1"), index=0)
+        assert acc.scene_id == "s1"
+        assert acc.index == 0
 
 
 # ---------------------------------------------------------------------------
@@ -643,8 +645,11 @@ class TestGetMessages:
         assert response.status_code == 200
         body = response.json()
         assert len(body) == 3
-        assert body[0]["id"] == "s1:0"
-        assert body[2]["id"] == "s1:2"
+        assert body[0]["scene_id"] == "s1" and body[0]["index"] == 0, (
+            "message-model-fields: serialized messages carry scene_id + index; "
+            f"got body[0]={body[0]!r}"
+        )
+        assert body[2]["scene_id"] == "s1" and body[2]["index"] == 2
         assert body[1]["body"] == "m1"
 
     def test_messages_with_from_and_to_half_open(self):
@@ -658,7 +663,10 @@ class TestGetMessages:
             )
         assert response.status_code == 200
         body = response.json()
-        assert [m["id"] for m in body] == ["s1:1", "s1:2"]
+        assert [(m["scene_id"], m["index"]) for m in body] == [
+            ("s1", 1),
+            ("s1", 2),
+        ]
 
     def test_messages_to_equals_len(self):
         # to == len(messages) is valid (half-open upper bound).
@@ -791,8 +799,7 @@ class TestPostMessage:
 
     def test_post_appends_and_returns_id(self):
         # rest-api-post-dispatch + rest-api-post-returns: server calls
-        # `scene.append(message)` (per events-dataflow) and returns the
-        # assigned MessageId.
+        # `scene.append(message)` and returns the assigned (scene_id, index).
         app, scene, human, npc = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
@@ -801,7 +808,10 @@ class TestPostMessage:
             )
         assert response.status_code == 201
         body = response.json()
-        assert body["id"] == "s1:0"
+        assert body["scene_id"] == "s1" and body["index"] == 0, (
+            "rest-api-post-returns: response carries (scene_id, index) of the "
+            f"appended message; got {body!r}"
+        )
         scene.append.assert_called_once()
         msg = scene.append.call_args[0][0]
         assert isinstance(msg, Message)

@@ -7,7 +7,7 @@ import pytest
 from sidestage.character import Character
 from sidestage.entity import Entity, EntityId, EntityType
 from sidestage.events import EntityChanged
-from sidestage.message import Message, MessageId
+from sidestage.message import Message
 from sidestage.scene import Scene, SceneResponse, SimpleScene
 
 
@@ -121,7 +121,7 @@ class TestSceneAppendMessage:
 
 
 class TestSceneAppend:
-    """scene-append: Public mutation API. Records, emits, returns MessageId."""
+    """scene-append: Public mutation API. Records, emits, returns the index."""
 
     async def test_append_records_message(self):
         # scene-append-records: appended via _append_message; visible in
@@ -144,24 +144,27 @@ class TestSceneAppend:
         scene.append(m2)
         assert scene.messages == [m0, m1, m2]
 
-    async def test_append_returns_message_id_for_first(self):
-        # scene-append-returns: returns MessageId(f"{scene.id}:{idx}");
-        # first append is "<scene_id>:0".
+    async def test_append_returns_index_for_first(self):
+        # scene-append-returns: returns the new message's index; first append is 0.
         scene = make_simple_scene(scene_id="sceneid")
         sender = make_character_mock("u", is_human=True)
         result = scene.append(Message(sender=sender, body="hi"))
-        assert result == MessageId("sceneid:0")
+        assert result == 0, (
+            "scene-append-returns: first append must return index 0; "
+            f"got {result!r}"
+        )
 
     async def test_append_returns_monotonic_indices(self):
-        # scene-append-returns: id index advances per-append.
+        # scene-append-returns: index advances per-append.
         scene = make_simple_scene(scene_id="s")
         u = make_character_mock("u", is_human=True)
         r0 = scene.append(Message(sender=u, body="a"))
         r1 = scene.append(Message(sender=u, body="b"))
         r2 = scene.append(Message(sender=u, body="c"))
-        assert r0 == MessageId("s:0")
-        assert r1 == MessageId("s:1")
-        assert r2 == MessageId("s:2")
+        assert (r0, r1, r2) == (0, 1, 2), (
+            "scene-append-returns: index advances by 1 per append; "
+            f"got {(r0, r1, r2)!r}"
+        )
 
     async def test_append_emits_entity_changed_to_subscribers(self):
         # scene-append-emits: a subscribed listener receives an EntityChanged
@@ -208,27 +211,34 @@ class TestSceneAppend:
 
 class TestSceneSerializeMessage:
     def test_serialize_message_builds_model(self):
-        # scene-serialize-message: returns Message.Model with composed id,
-        # sender_id, body.
+        # scene-serialize-message: returns Message.Model with scene_id,
+        # index, sender_id, body.
         scene = make_simple_scene(scene_id="scene-77")
         sender = make_character_mock("char-x")
         scene._append_message(Message(sender=sender, body="hello"))
         model = scene.serialize_message(0)
         assert isinstance(model, Message.Model)
-        assert model.id == MessageId("scene-77:0")
+        assert model.scene_id == EntityId("scene-77"), (
+            "scene-serialize-message: model.scene_id echoes self.id; "
+            f"got {model.scene_id!r}"
+        )
+        assert model.index == 0, (
+            "scene-serialize-message: model.index is the position; "
+            f"got {model.index!r}"
+        )
         assert model.sender_id == EntityId("char-x")
         assert model.body == "hello"
 
-    def test_serialize_message_uses_index_in_id(self):
-        # scene-serialize-message + message-id-format.
+    def test_serialize_message_indices_advance(self):
+        # scene-serialize-message: index reflects the requested position.
         scene = make_simple_scene(scene_id="abc")
         s = make_character_mock("u")
         scene._append_message(Message(sender=s, body="m0"))
         scene._append_message(Message(sender=s, body="m1"))
         scene._append_message(Message(sender=s, body="m2"))
-        assert scene.serialize_message(0).id == "abc:0"
-        assert scene.serialize_message(1).id == "abc:1"
-        assert scene.serialize_message(2).id == "abc:2"
+        assert scene.serialize_message(0).index == 0
+        assert scene.serialize_message(1).index == 1
+        assert scene.serialize_message(2).index == 2
 
 
 # ---------------------------------------------------------------------------

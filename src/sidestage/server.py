@@ -22,7 +22,7 @@ from sidestage.entity import (
     EntityId,
     UnresolvedEntityError,
 )
-from sidestage.message import Message, MessageId
+from sidestage.message import Message
 from sidestage.scene import SceneResponse
 
 logger = logging.getLogger(__name__)
@@ -83,14 +83,18 @@ class MessageAccepted(BaseModel):
     """server-message-accepted: Wire shape returned by
     `POST /api/campaigns/{cid}/scenes/{scene_id}/messages` on success (201 Created).
 
-    Returns the server-assigned MessageId so the client can correlate its
-    optimistic local message with the canonical entry in scene history.
+    Carries the composite identity assigned by `Scene.append` so the
+    client can correlate its optimistic local message with the canonical
+    entry in scene history.
 
     .implements: rest-api-post-message
     """
 
-    id: MessageId
-    """server-message-accepted-id: MessageId assigned by `Scene.dispatch`."""
+    scene_id: EntityId
+    """server-message-accepted-scene-id: scene this message was appended to (echoes the URL path)."""
+
+    index: int
+    """server-message-accepted-index: 0-based position in the scene's message history."""
 
 
 # ---------------------------------------------------------------------------
@@ -423,13 +427,13 @@ class App:
                     detail="sender_id is not a player character",
                 )
             # rest-api-post-dispatch: construct Message(sender, body), call
-            # scene.append (per events-dataflow), return assigned MessageId.
+            # scene.append (per events-dataflow), return assigned (scene_id, index).
             # Reactions (npc cycle, SSE delivery) are listener-driven — the
             # POST handler does not await them.
             msg = Message(sender=sender, body=body.body)
-            message_id = scene.append(msg)
-            # rest-api-post-returns: 201 + MessageAccepted{id}.
-            return MessageAccepted(id=message_id)
+            index = scene.append(msg)
+            # rest-api-post-returns: 201 + MessageAccepted{scene_id, index}.
+            return MessageAccepted(scene_id=scene.id, index=index)
 
         # rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
         @app.get("/api/campaigns/{cid}/entities/{entity_id}/events")
