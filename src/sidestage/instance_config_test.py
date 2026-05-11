@@ -45,6 +45,10 @@ class TestInstanceConfigDefaults:
         assert c.reload is False, (
             f"instance-config-reload: default reload MUST be False; got {c.reload!r}"
         )
+        assert c.llm_profile == "localhost", (
+            "instance-config-llm-profile: default llm_profile MUST be "
+            f"'localhost'; got {c.llm_profile!r}"
+        )
 
 
 class TestInstanceConfigPrecedence:

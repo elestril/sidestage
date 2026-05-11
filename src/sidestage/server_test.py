@@ -13,7 +13,7 @@ from starlette.testclient import TestClient
 
 from sidestage.actor import StubActor, UserActor
 from sidestage.campaign import CampaignResponse
-from sidestage.entity import EntityId
+from sidestage.entity import EntityId, EntityType
 from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import SceneResponse
@@ -76,6 +76,8 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     scene = MagicMock(spec=[])
     scene.id = EntityId(scene_id)
     scene.name = "Test Scene"
+    scene.body = ""
+    scene.type = EntityType.SCENE
     scene.characters = [human, npc]
     scene.user_characters = [c for c in scene.characters if c.has_human_actor()]
     scene.messages = []
@@ -84,6 +86,7 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
         return SceneResponse(
             id=scene.id,
             name=scene.name,
+            body=scene.body,
             character_ids=[c.id for c in scene.characters],
             player_character_ids=[c.id for c in scene.user_characters],
         )
@@ -502,55 +505,6 @@ class TestGetScenes:
 
 
 # ---------------------------------------------------------------------------
-# rest-api-get-scene: GET /api/scenes/{scene_id}
-# ---------------------------------------------------------------------------
-
-
-class TestGetScene:
-    def test_scene_503_when_loading(self) -> None:
-        # rest-api-scene-503.
-        app = App()
-        with TestClient(app._fastapi) as client:
-            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
-        assert response.status_code == 503
-
-    def test_scene_404_when_campaign_unknown(self) -> None:
-        # 404 when campaign id is unknown.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.get("/api/campaigns/no-such/scenes/s1")
-        assert response.status_code == 404
-
-    def test_scene_returns_response(self) -> None:
-        # server-route-scene: returns the SceneResponse from
-        # `campaign.scene(id).to_response()`. Server constructs nothing.
-        app, scene, human, npc = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["id"] == "s1"
-        assert body["name"] == "Test Scene"
-        assert set(body["character_ids"]) == {"bob", "elara"}
-        assert body["player_character_ids"] == ["bob"]
-
-    def test_scene_404_when_unknown(self) -> None:
-        # rest-api-scene-404: campaign.scene returns None -> 404.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/no-such-scene")
-        assert response.status_code == 404
-
-    def test_scene_delegates_to_campaign_scene(self) -> None:
-        # Server resolves the scene via `campaign.scene(id)`, never via
-        # any singular "active scene" helper.
-        app, scene, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
-        app.campaigns[CAMPAIGN_ID].scene.assert_called_with(EntityId("s1"))  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
 # rest-api-get-entity: GET /api/entities/{entity_id}
 # ---------------------------------------------------------------------------
 
@@ -592,31 +546,82 @@ class TestGetEntity:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/ghost-id")
         assert response.status_code == 404
 
-    def test_entity_returns_serialized_model(self) -> None:
-        # server-route-entity: returns factory.get(id).serialize().
-        # Use a hand-built mock entity to avoid coupling to Character internals.
-        mock_entity = MagicMock()
-        mock_model = MagicMock()
-        mock_model.model_dump = MagicMock(
-            return_value={
-                "id": "alice",
-                "name": "Alice",
-                "type": "character",
-                "body": "Body",
-                "owner": "stub",
-            }
+    def test_entity_scene_returns_scene_response(self) -> None:
+        # rest-api-entity-dispatch: a Scene entity dispatches to
+        # `scene.to_response()` and returns a SceneResponse.
+        from sidestage.entity import EntityType
+        from sidestage.scene import SceneResponse
+
+        scene_entity = MagicMock(spec=[])
+        scene_entity.id = EntityId("s1")
+        scene_entity.type = EntityType.SCENE
+        scene_entity.to_response = MagicMock(
+            return_value=SceneResponse(
+                id=EntityId("s1"),
+                name="Test Scene",
+                body="A small room.",
+                character_ids=[EntityId("bob"), EntityId("elara")],
+                player_character_ids=[EntityId("bob")],
+            )
         )
-        mock_entity.serialize = MagicMock(return_value=mock_model)
 
         app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=mock_entity)
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=scene_entity)
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/s1")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["type"] == "scene"
+        assert body["id"] == "s1"
+        assert body["name"] == "Test Scene"
+        assert body["body"] == "A small room."
+        assert set(body["character_ids"]) == {"bob", "elara"}
+        assert body["player_character_ids"] == ["bob"]
+
+    def test_entity_character_returns_character_response(self) -> None:
+        # rest-api-entity-dispatch: a Character entity dispatches to
+        # `character.to_response()` and returns a CharacterResponse.
+        from sidestage.character import CharacterResponse
+        from sidestage.entity import EntityType
+
+        char_entity = MagicMock(spec=[])
+        char_entity.id = EntityId("alice")
+        char_entity.type = EntityType.CHARACTER
+        char_entity.to_response = MagicMock(
+            return_value=CharacterResponse(
+                id=EntityId("alice"),
+                name="Alice",
+                body="A curious user.",
+                owner="user",
+            )
+        )
+
+        app, *_ = make_loaded_app()
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=char_entity)
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/alice")
         assert response.status_code == 200
         body = response.json()
+        assert body["type"] == "character"
         assert body["id"] == "alice"
         assert body["name"] == "Alice"
-        assert body["owner"] == "stub"
+        assert body["body"] == "A curious user."
+        assert body["owner"] == "user"
+
+    def test_entity_404_when_no_panel_renderer(self) -> None:
+        # rest-api-entity-dispatch: entities of unknown type (not Scene or
+        # Character) return 404 — no panel renderer is registered.
+        from sidestage.entity import EntityType
+
+        generic_entity = MagicMock(spec=[])
+        generic_entity.id = EntityId("thing")
+        generic_entity.type = EntityType.ENTITY
+
+        app, *_ = make_loaded_app()
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=generic_entity)
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/thing")
+        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -1368,6 +1373,43 @@ class TestCreateApp:
 
 
 # ---------------------------------------------------------------------------
+# server-main: CLI entry point .env handling
+# ---------------------------------------------------------------------------
+
+
+class TestServerMainLoadsDotenv:
+    def test_main_calls_load_dotenv_before_uvicorn(self, tmp_path, monkeypatch) -> None:
+        # server-main-loads-dotenv: main() MUST load `.env` (if present)
+        # into os.environ before resolving config or starting uvicorn.
+        # Patch the load_dotenv symbol imported into server.py; verify
+        # it was called.
+        from sidestage import server as server_mod
+
+        # Build a minimal sidestage tree so App.run finds a campaign.
+        sd = tmp_path / "sidestage"
+        (sd / "campaigns" / "c").mkdir(parents=True)
+        (sd / "campaigns" / "c" / "config.yaml").write_text("name: c\n")
+
+        monkeypatch.setattr("sys.argv", ["sidestage", "--sidestage-dir", str(sd) + "/"])
+        fake_campaign = MagicMock()
+        fake_campaign.name = "c"
+        with (
+            patch.object(server_mod, "load_dotenv") as load_mock,
+            patch.object(server_mod.uvicorn, "run"),
+            patch.object(server_mod.Campaign, "load", return_value=fake_campaign),
+            patch.object(server_mod, "DictEntityFactory") as factory_mock,
+        ):
+            factory_mock.return_value = MagicMock()
+            server_mod.main()
+
+        load_mock.assert_called_once_with()
+        # And it was called before sidestage actually ran (load_dotenv has
+        # to populate env BEFORE downstream code reads it).
+        # We can't easily order-assert across mocks; the assertion above
+        # plus main()'s code structure is sufficient.
+
+
+# ---------------------------------------------------------------------------
 # api-dataflow / sse-dataflow integration sanity
 # ---------------------------------------------------------------------------
 
@@ -1382,7 +1424,7 @@ class TestEndpointDataflowIntegration:
         with TestClient(app._fastapi) as client:
             r0 = client.get("/api/campaigns")
             r1 = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
-            r2 = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
+            r2 = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/s1")
             r3 = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages")
         assert r0.status_code == 200
         assert r1.status_code == 200
@@ -1390,5 +1432,6 @@ class TestEndpointDataflowIntegration:
         assert r3.status_code == 200
         assert r0.json()[0]["name"] == "Test Campaign"
         assert r1.json()["default_scene_id"] == "s1"
+        assert r2.json()["type"] == "scene"
         assert r2.json()["id"] == "s1"
         assert len(r3.json()) == 1

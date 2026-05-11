@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,10 +17,12 @@ from pydantic import BaseModel
 
 from sidestage.actor import Actor, StubActor, UserActor
 from sidestage.campaign import Campaign, CampaignResponse
+from sidestage.character import CharacterResponse
 from sidestage.entity import (
     DictEntityFactory,
     EntityFactory,
     EntityId,
+    EntityType,
     UnresolvedEntityError,
 )
 from sidestage.events import EntityChanged
@@ -34,6 +37,9 @@ from sidestage.instance_config import (
 )
 from sidestage.message import Message
 from sidestage.scene import SceneResponse
+
+# rest-api-get-entity: discriminated union returned by GET /entities/{eid}.
+EntityResponse = SceneResponse | CharacterResponse
 
 logger = logging.getLogger(__name__)
 
@@ -346,21 +352,9 @@ class App:
                 raise HTTPException(status_code=404, detail="campaign not found")
             return [s.to_response() for s in campaign.scenes()]
 
-        # rest-api-get-scene: GET /api/campaigns/{cid}/scenes/{scene_id}
-        @app.get("/api/campaigns/{cid}/scenes/{scene_id}")
-        async def get_scene(cid: str, scene_id: str) -> SceneResponse:
-            self._require_serving()
-            campaign = self.campaigns.get(cid)
-            if campaign is None:
-                raise HTTPException(status_code=404, detail="campaign not found")
-            scene = campaign.scene(EntityId(scene_id))
-            if scene is None:
-                raise HTTPException(status_code=404, detail="scene not found")
-            return scene.to_response()
-
         # rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
         @app.get("/api/campaigns/{cid}/entities/{entity_id}")
-        async def get_entity(cid: str, entity_id: str) -> Response:
+        async def get_entity(cid: str, entity_id: str) -> EntityResponse:
             self._require_serving()
             campaign = self.campaigns.get(cid)
             if campaign is None:
@@ -369,13 +363,25 @@ class App:
             # rest-api-entity-404: missing or unresolved entity.
             if entity is None:
                 raise HTTPException(status_code=404, detail="entity not found")
+            # rest-api-entity-dispatch: dispatch by entity.type to the
+            # matching typed response. The ghost-attribute guard makes
+            # `entity.type` access raise UnresolvedEntityError on
+            # unresolved entities. Generic entities (no panel-renderer
+            # subclass) 404 — clients only request entities they intend
+            # to render.
             try:
-                model = entity.serialize()
+                entity_type = entity.type
             except UnresolvedEntityError as exc:
                 raise HTTPException(
                     status_code=404, detail="entity not resolved"
                 ) from exc
-            return JSONResponse(content=model.model_dump(mode="json"))
+            if entity_type == EntityType.SCENE:
+                return entity.to_response()
+            if entity_type == EntityType.CHARACTER:
+                return entity.to_response()
+            raise HTTPException(
+                status_code=404, detail="no panel renderer for entity type"
+            )
 
         # rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
         @app.get("/api/campaigns/{cid}/scenes/{scene_id}/messages")
@@ -603,8 +609,17 @@ def main() -> None:
     `create_app` factory in a worker subprocess and re-runs the factory
     on any file change under `src/sidestage/`.
 
+    - server-main-loads-dotenv: Before resolving config or starting
+      uvicorn, loads `.env` (if present) into `os.environ` via
+      `python-dotenv`. API keys and other secrets live there
+      (gitignored); read by downstream HTTP clients (e.g. litellm) at
+      runtime.
+
     .implements: cuj-startup-launch
     """
+    # server-main-loads-dotenv. Idempotent: if .env is absent, no-op.
+    load_dotenv()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--sidestage-dir", default=None)
     parser.add_argument("--port", type=int, default=None)

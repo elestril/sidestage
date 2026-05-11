@@ -1,0 +1,18 @@
+# Localhost profile — local llama-server with HuggingFace auto-download.
+#
+# `just run` calls `bin/llm_up.py sidestage localhost`, which reads
+# this file and spawns llama-server for each entry whose endpoint is
+# loopback (127.0.0.1, localhost, ::1). First run downloads the GGUF
+# weights from HF; subsequent runs use the global llama.cpp cache
+# (~/.cache/llama.cpp/). External endpoints (anything non-loopback)
+# are consumed as-is — we don't manage their lifecycle.
+#
+# Edit ports / models / endpoints freely. Add roles (e.g. `embedding`,
+# `narrator`) by extending `models:`.
+
+models:
+  smart:
+    endpoint: http://127.0.0.1:8080
+    hf-repo: bartowski/Llama-3.2-3B-Instruct-GGUF
+    hf-file: Llama-3.2-3B-Instruct-Q5_K_M.gguf
+    ctx-size: 8192

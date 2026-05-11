@@ -6,6 +6,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "litellm",
+    "python-dotenv",
     "python-multipart",
     "pydantic-settings",
     "pyyaml",
@@ -31,6 +32,7 @@ dev = [
     "pydoc-markdown",
     "ruff",
     "pyright",
+    "pydantic-to-typescript",
 ]
 
 [tool.pytest.ini_options]

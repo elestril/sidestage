@@ -2,8 +2,27 @@
   "permissions": {
     "allow": [
       "Bash(git config:*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Write(.env)",
+      "Write(.env.*)",
+      "Bash(cat .env*)",
+      "Bash(head .env*)",
+      "Bash(tail .env*)",
+      "Bash(less .env*)",
+      "Bash(more .env*)",
+      "Bash(grep * .env*)",
+      "Bash(rg * .env*)",
+      "Bash(awk * .env*)",
+      "Bash(sed * .env*)",
+      "Bash(source .env*)",
+      "Bash(. .env*)"
     ]
   },
-  "autoMemoryDirectory": ".claude/memory", 
+  "autoMemoryDirectory": ".claude/memory",
   "plansDirectory": ".claude/plans"
 }

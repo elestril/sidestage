@@ -1,0 +1,11 @@
+# Test instance's localhost profile — same shape as the dev instance.
+# Lives here so tests that resolve a profile via
+# `<sidestage_dir>/llm_profiles/` find one when they need it. Today no
+# test exercises real LLM lifecycle; this is the convention.
+
+models:
+  smart:
+    endpoint: http://127.0.0.1:8080
+    hf-repo: bartowski/Llama-3.2-3B-Instruct-GGUF
+    hf-file: Llama-3.2-3B-Instruct-Q5_K_M.gguf
+    ctx-size: 8192

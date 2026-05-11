@@ -8,7 +8,7 @@ records a message and emits `EntityChanged`; reactions are listener-driven
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import BaseModel
 
@@ -21,14 +21,17 @@ if TYPE_CHECKING:
 
 
 class SceneResponse(BaseModel):
-    """scene-response: Wire shape for `GET /api/campaigns/{cid}/scenes/{id}`
-    and `GET /api/campaigns/{cid}/scenes`.
+    """scene-response: Wire shape for `GET /api/campaigns/{cid}/entities/{id}`
+    when the entity is a Scene, and for `GET /api/campaigns/{cid}/scenes`.
 
-    Constructed exclusively by `Scene.to_response()`.
+    Constructed exclusively by `Scene.to_response()`. The `type` discriminator
+    distinguishes this variant within `EntityResponse`.
     """
 
+    type: Literal["scene"] = "scene"
     id: EntityId
     name: str
+    body: str
     character_ids: list[EntityId]
     player_character_ids: list[EntityId]
 
@@ -133,6 +136,7 @@ class Scene(Entity):
         return SceneResponse(
             id=self.id,
             name=self.name,
+            body=self.body,
             character_ids=[c.id for c in self.characters],
             player_character_ids=[c.id for c in self.user_characters],
         )

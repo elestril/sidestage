@@ -12,6 +12,7 @@ class InstanceConfig(BaseSettings):
     sidestage_dir: str = "sidestage/"
     port: int = 8000
     reload: bool = False
+    llm_profile: str = "localhost"
 ```
 
 - instance-config-sidestage-dir: Instance state root. Resolves from CLI
@@ -22,6 +23,9 @@ class InstanceConfig(BaseSettings):
 - instance-config-reload: Dev hot-reload toggle. When true, `main()`
   dispatches to uvicorn's reload mechanism via the `create_app` factory
   (per `server-run-reload`).
+- instance-config-llm-profile: Name of the active LLM topology profile,
+  resolved from `<sidestage_dir>/llm_profiles/<name>.yaml` (per
+  `specs/llm-profiles.md`). Default `"localhost"`.
 - .implemented-by: InstanceConfig
 
 ## instance-config-resolve: Resolution precedence

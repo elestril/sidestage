@@ -49,6 +49,12 @@ class InstanceConfig(BaseSettings):
     """instance-config-reload: When true, server runs under uvicorn's
     `--reload` (factory + reload_dirs). Dev workflow only."""
 
+    llm_profile: str = "localhost"
+    """instance-config-llm-profile: Selects which YAML under
+    `<sidestage_dir>/llm_profiles/` defines this instance's LLM
+    topology. Loaded by `sidestage.llm_profile.load_profiles` at
+    runtime (per `specs/llm-profiles.md`)."""
+
 
 def _load_yaml(sidestage_dir: str) -> dict[str, Any]:
     """instance-config-yaml-load: Read `<sidestage_dir>/sidestage.yaml` if

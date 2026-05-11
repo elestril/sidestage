@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, Self
 
+from pydantic import BaseModel
+
 from sidestage.entity import Entity, EntityId, EntityType
 
 if TYPE_CHECKING:
     from sidestage.events import EntityChanged
     from sidestage.message import Message
+
+
+class CharacterResponse(BaseModel):
+    """character-response: Wire shape for `GET /api/campaigns/{cid}/entities/{id}`
+    when the entity is a Character.
+
+    Constructed exclusively by `Character.to_response()`. The `type`
+    discriminator distinguishes this variant within `EntityResponse`.
+    """
+
+    type: Literal["character"] = "character"
+    id: EntityId
+    name: str
+    body: str
+    owner: Literal["user", "stub"]
 
 
 class Character(Entity):
@@ -83,6 +100,16 @@ class Character(Entity):
             id=self.id,
             name=self.name,
             type=self.type,
+            body=self.body,
+            owner=self.owner,
+        )
+
+    def to_response(self) -> CharacterResponse:
+        """character-to-response: Build the wire shape. Only place
+        `CharacterResponse` is constructed."""
+        return CharacterResponse(
+            id=self.id,
+            name=self.name,
             body=self.body,
             owner=self.owner,
         )

@@ -17,10 +17,20 @@ just setup
 ## Running
 
 ```bash
-just run     # vite (background) + sidestage server (foreground)
+just run             # vite + llama-server (per profile) + sidestage server
+just run anthropic   # use a different LLM profile (see sidestage/llm_profiles/)
 ```
 
-Stop with `Ctrl-C`. Vite keeps running — `just stop-vite` to kill it.
+Ctrl-C stops sidestage. `just stop` tears down vite + any local llama-server.
+
+**LLM topology** is per-instance config under `sidestage/llm_profiles/*.yaml`.
+The default `localhost.yaml` declares a local llama-server with HuggingFace
+auto-download (multi-GB on first run, cached globally at `~/.cache/llama.cpp/`).
+
+**Secrets** (`ANTHROPIC_API_KEY`, etc.) live in `.env` at the repo root —
+gitignored, loaded into `os.environ` at sidestage startup via `python-dotenv`.
+Profile YAMLs reference env-var NAMES (`api_key_env: ANTHROPIC_API_KEY`);
+the values stay in `.env`.
 
 ## URLs
 

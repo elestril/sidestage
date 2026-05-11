@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { ChatMessage } from '../hooks/useSSE';
+import type { ChatMessage } from '../hooks/useEntity';
 import type { EntityId } from '../types_ext';
 import { MessageItem } from './MessageItem';
 

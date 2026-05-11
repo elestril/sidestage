@@ -46,8 +46,19 @@ _ruff-format-check:
 _pyright:
     uv run pyright src/ tests/
 
-_tsc:
+_tsc: _gen-types
     cd frontend && npm run typecheck
+
+# Regenerate frontend/src/types.ts from the Pydantic wire models.
+# frontend/src/types.ts is gitignored; every consumer (tsc, vitest,
+# vite build, vite dev) depends on this recipe so the file is always
+# fresh against the current backend. json2ts is the npm binary from
+# json-schema-to-typescript (project-local under frontend/node_modules).
+_gen-types:
+    uv run pydantic2ts \
+        --module sidestage.server \
+        --output frontend/src/types.ts \
+        --json2ts-cmd frontend/node_modules/.bin/json2ts
 
 # Apply ruff fixes + formatter (writes changes).
 format:
@@ -59,7 +70,7 @@ test-py:
     uv run pytest
 
 # Frontend tests (vitest only — typecheck runs via `just lint`).
-test-fe:
+test-fe: _gen-types
     cd frontend && npm run test:run
 
 # Browser e2e (Playwright + Chromium against the built SPA, ephemeral port).
@@ -73,7 +84,7 @@ test-browser: build
 # -------- build / spec --------
 
 # Build the frontend SPA into src/sidestage/static/.
-build:
+build: _gen-types
     cd frontend && npm run build
 
 # Regenerate the pydoc spec view at specs/generated/api.md.
@@ -83,7 +94,7 @@ spec:
 # -------- run --------
 
 # Ensure the Vite dev server is up at :5173. Background-launches it if not.
-_vite-up:
+_vite-up: _gen-types
     #!/usr/bin/env bash
     set -e
     if curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
@@ -101,13 +112,20 @@ _vite-up:
     echo "Vite failed to come up — check sidestage/logs/vite.log" >&2
     exit 1
 
-# Stop the Vite dev server (if started by _vite-up).
-stop-vite:
-    @pkill -f 'vite' || true
+# Ensure the LLM topology declared in a profile is up. Reads
+# sidestage/llm_profiles/{{profile}}.yaml. Idempotent: skips servers
+# already healthy on their declared port.
+_llm-up profile:
+    uv run python bin/llm_up.py sidestage {{profile}}
 
-# Dev stack: vite (background) + sidestage (foreground, hot-reload). Ctrl-C stops.
-run: _vite-up
-    uv run sidestage --sidestage-dir sidestage/ --reload
+# Stop everything `just run` started — vite and any local llama-server.
+stop:
+    @pkill -f 'vite' || true
+    @pkill -f 'llama-server' || true
+
+# Dev stack: vite + llama-server (per profile) + sidestage (hot-reload). `just stop` to tear down.
+run profile="localhost": _vite-up (_llm-up profile)
+    SIDESTAGE_LLM_PROFILE={{profile}} uv run sidestage --sidestage-dir sidestage/ --reload
 
 # -------- housekeeping --------
 

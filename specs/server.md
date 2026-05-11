@@ -24,6 +24,25 @@ Wire models defined in this module: `SceneResponse`, `MessageRequest`,
 `MessageAccepted`. (`CampaignResponse` lives in `campaign.py`;
 `SceneResponse` returned from `scene.to_response()` lives in `scene.py`.)
 
+## server-main-loads-dotenv
+
+`main()` calls `python-dotenv`'s `load_dotenv()` before resolving any
+config — `.env` (gitignored, repo root) contributes to `os.environ`
+so downstream consumers (litellm, OpenAI SDK, anything reading env
+directly) see API keys without `InstanceConfig` having to know about
+them. `.env` carries values; profiles (`specs/llm-profiles.md`) carry
+the env-var NAMES via `api_key_env`.
+
+- server-main-loads-dotenv-idempotent: Absent `.env` is a no-op, not
+  an error.
+- server-main-loads-dotenv-not-config: Variables loaded from `.env`
+  are NOT automatically pulled into `InstanceConfig` unless they carry
+  the `SIDESTAGE_` prefix. Secrets like `ANTHROPIC_API_KEY` flow
+  through `os.environ` to the LLM client; they're not part of the
+  typed config surface.
+- .implemented-by: server.main
+- .tested-by: test_server_main_loads_dotenv
+
 ## server-run-reload: dev hot-reload via uvicorn factory
 
 When `instance-config-reload` is true, `main()` dispatches to uvicorn's
@@ -82,12 +101,12 @@ per `spec-location-markdown`. Per-route 503/422/404 details live in
 - server-route-scenes: Returns `list[SceneResponse]` — every scene in the campaign; 404 if campaign unknown.
 - .implements: rest-api-get-scenes
 
-`GET /api/campaigns/{cid}/scenes/{scene_id}`
-- server-route-scene: Returns `SceneResponse` for the named scene; 404 if campaign or scene is unknown.
-- .implements: rest-api-get-scene
-
 `GET /api/campaigns/{cid}/entities/{entity_id}`
-- server-route-entity: Returns `campaign.factory.get(entity_id).serialize()`; 404 if campaign, entity, or resolution is missing.
+- server-route-entity: Dispatches by the entity's runtime subclass:
+  Scene → `scene.to_response()` → `SceneResponse`;
+  Character → `character.to_response()` → `CharacterResponse`.
+  404 if campaign, entity, or resolution is missing, or if the entity
+  is neither Scene nor Character (no panel renderer registered).
 - .implements: rest-api-get-entity
 
 `GET /api/campaigns/{cid}/scenes/{scene_id}/messages`

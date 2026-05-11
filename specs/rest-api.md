@@ -58,13 +58,13 @@ but the prefix is the multi-campaign scaffold.
    the client has no other navigation context).
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-campaign
-4. api-dataflow-scene: Client fetches `GET /api/campaigns/{cid}/scenes/{scene_id}`
-   for the scene it wants to display (typically `default_scene_id`); response
-   yields `character_ids` and `player_character_ids`.
-   - .implements: cuj-startup-ready
-   - .implemented-by: rest-api-get-scene
-4a. api-dataflow-entities: Client fetches `GET /api/campaigns/{cid}/entities/{id}`
-   for each `character_id`; responses populate the entity cache.
+4. api-dataflow-entity: Client fetches `GET /api/campaigns/{cid}/entities/{entity_id}`
+   for the entity it wants to display (typically `default_scene_id`).
+   Response is a typed discriminated `EntityResponse` — `SceneResponse`
+   or `CharacterResponse` — dispatched by the response's `type` field.
+   For a Scene entity, the response yields `character_ids` and
+   `player_character_ids`; the client then resolves each character via
+   the same endpoint.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-entity
 4b. api-dataflow-history: Client fetches
@@ -142,63 +142,61 @@ class CampaignResponse(BaseModel):
 
 ### rest-api-get-scenes: GET /api/campaigns/{cid}/scenes
 
-Returns the list of scenes in the campaign. Each entry is a `SceneResponse`
-(same shape as `GET /api/campaigns/{cid}/scenes/{id}`); the client uses the
-list to navigate.
+Returns the list of scenes in the campaign. Each entry is a `SceneResponse`;
+the client uses the list to navigate.
 
 **Response 200** `list[SceneResponse]`
 **Response 404** `cid` not found
 
 - rest-api-scenes-503: Returns 503 if `App.state == LOADING`.
 - rest-api-scenes-404: Returns 404 if `App.campaigns.get(cid)` is None.
-- .implements: api-dataflow-scene
+- .implements: api-dataflow-entity
 - .implemented-by: server-route-scenes
 
-### rest-api-get-scene: GET /api/campaigns/{cid}/scenes/{scene_id}
+### rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
 
-Returns the named scene. Entity content is NOT embedded — resolve each id
-via `GET /api/campaigns/{cid}/entities/{id}`.
+Single source of truth for entity content. Returns a typed discriminated
+`EntityResponse` dispatched by the entity's runtime subclass. The
+response carries a `type` field that the client uses to choose the
+matching panel renderer.
 
 #### SceneResponse(BaseModel)
 
 ```python
 class SceneResponse(BaseModel):
+    type: Literal["scene"] = "scene"
     id: EntityId
     name: str
-    character_ids: list[EntityId]         # resolve each via GET /api/campaigns/{cid}/entities/{id}
+    body: str
+    character_ids: list[EntityId]         # resolve each via this same endpoint
     player_character_ids: list[EntityId]  # EntityIds this connection may send as
 ```
 
-**Response 200** `SceneResponse`
-**Response 404** `cid` or `scene_id` not found in this campaign
-
-- rest-api-scene-503: Returns 503 if `App.state == LOADING`.
-- rest-api-scene-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
-- .implements: api-dataflow-scene
-- .implemented-by: server-route-scene
-
-### rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
-
-Single source of truth for entity content. Returns `entity.serialize()` —
-the concrete `Model` subclass discriminated by `type`.
+#### CharacterResponse(BaseModel)
 
 ```python
-class EntityModel(BaseModel):       # base — Entity.Model
+class CharacterResponse(BaseModel):
+    type: Literal["character"] = "character"
     id: EntityId
     name: str
-    type: EntityType                 # discriminant
     body: str
-
-class CharacterModel(EntityModel):  # Character.Model
-    owner: Literal["user", "stub"]  # selects the runtime Actor via App.get_actor
+    owner: Literal["user", "stub"]        # selects the runtime Actor via App.get_actor
 ```
 
-**Response 200** `EntityModel` (or concrete subclass)
-**Response 404** campaign unknown, or entity unknown / unresolved
+#### EntityResponse
+
+```python
+EntityResponse = SceneResponse | CharacterResponse
+```
+
+**Response 200** `EntityResponse` (one of the union variants)
+**Response 404** campaign unknown; entity unknown / unresolved; entity is
+not a Scene or Character (no panel renderer registered).
 
 - rest-api-entity-503: Returns 503 if `App.state == LOADING`.
-- rest-api-entity-404: Returns 404 if `App.campaigns.get(cid)` is None, if `campaign.factory.get(entity_id)` returns None, or if the entity is unresolved.
-- .implements: api-dataflow-entities
+- rest-api-entity-404: Returns 404 if `App.campaigns.get(cid)` is None, if `campaign.factory.get(entity_id)` returns None, if the entity is unresolved, or if the entity is not a Scene or Character.
+- rest-api-entity-dispatch: Scene entities return via `scene.to_response()`; Character entities return via `character.to_response()`. Generic Entity (no panel-renderer subclass) returns 404; clients are expected to request only entities they intend to render.
+- .implements: api-dataflow-entity
 - .implemented-by: server-route-entity
 
 ### rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
