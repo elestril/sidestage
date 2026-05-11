@@ -1311,6 +1311,48 @@ class TestAppRun:
 
 
 # ---------------------------------------------------------------------------
+# create_app: reload-mode ASGI factory
+# ---------------------------------------------------------------------------
+
+
+class TestCreateApp:
+    def test_create_app_reads_env_and_builds(self, tmp_path, monkeypatch):
+        # server-create-app: factory reads SIDESTAGE_INSTANCE_CONFIG, builds
+        # the App, returns the FastAPI instance with state=SERVING.
+        from sidestage.server import create_app
+        from sidestage.instance_config import InstanceConfig
+
+        # Build a minimal sidestage tree.
+        sd = tmp_path / "sidestage"
+        (sd / "campaigns" / "c").mkdir(parents=True)
+        (sd / "campaigns" / "c" / "config.yaml").write_text("name: c\n")
+        config = InstanceConfig(sidestage_dir=str(sd) + "/", port=8000)
+        # Use monkeypatch so the env mutation is undone on teardown — no leak.
+        monkeypatch.setenv("SIDESTAGE_INSTANCE_CONFIG", config.model_dump_json())
+
+        fake_campaign = MagicMock()
+        fake_campaign.name = "c"
+        with patch(
+            "sidestage.server.Campaign.load", return_value=fake_campaign
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
+            factory_mock.return_value = MagicMock()
+            asgi = create_app()
+        assert isinstance(asgi, FastAPI), (
+            "server-create-app: factory MUST return a FastAPI app; "
+            f"got {type(asgi)!r}"
+        )
+
+    def test_create_app_missing_env_is_fatal(self, monkeypatch):
+        # server-create-app: factory invoked without SIDESTAGE_INSTANCE_CONFIG
+        # is a setup error, not a fallback case.
+        monkeypatch.delenv("SIDESTAGE_INSTANCE_CONFIG", raising=False)
+        from sidestage.server import create_app
+
+        with pytest.raises(RuntimeError, match="SIDESTAGE_INSTANCE_CONFIG"):
+            create_app()
+
+
+# ---------------------------------------------------------------------------
 # api-dataflow / sse-dataflow integration sanity
 # ---------------------------------------------------------------------------
 

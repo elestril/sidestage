@@ -111,6 +111,114 @@ describe('useSSE', () => {
         'initial 1s backoff; ' +
         `got call count ${fetcher.mock.calls.length} (was ${initialCalls})`
     )).toBeGreaterThan(initialCalls);
+
+    // useSSE logs every bootstrap failure (per its console.error call
+    // on the catch path). That's expected output for this test — assert
+    // on the spy and clear so the global "no unexpected console" check
+    // in vitest.setup.ts doesn't fail.
+    const errorMock = vi.mocked(console.error);
+    expect(errorMock.mock.calls.length, (
+      'frontend-handles-api-503-no-crash: bootstrap failures MUST surface ' +
+        'as console.error (not uncaught); ' +
+        `got ${errorMock.mock.calls.length} error log(s)`
+    )).toBeGreaterThan(0);
+    expect(errorMock.mock.calls[0][0]).toBe('SSE bootstrap failed');
+    errorMock.mockClear();
+  });
+
+  test('frontend-be-consistency-on-reconnect', async () => {
+    // On SSE drop + reconnect (backend restart with diverged state),
+    // the bootstrap's full history fetch MUST overwrite `messages`
+    // outright. Locks frontend-be-consistency-{event-loss,messages-overwritten}:
+    // a backend that lost runtime state must produce an empty UI.
+    const cid = 'Test Campaign';
+    const sceneId = 'parlor';
+    const alice = {
+      id: 'alice',
+      name: 'Alice',
+      type: 'character',
+      body: '',
+      owner: 'user',
+    };
+    const bob = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'character',
+      body: '*nods quietly*',
+      owner: 'stub',
+    };
+
+    // First connection: history has alice's "Hi". Second connection
+    // (post-restart): history is empty.
+    const historyResponses: unknown[] = [
+      [{ scene_id: sceneId, index: 0, sender_id: 'alice', body: 'Hi' }],
+      [], // post-restart: backend lost runtime messages
+    ];
+    let historyIdx = 0;
+    const fetcher = vi.fn(async (input: unknown) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.endsWith('/api/campaigns')) {
+        return jsonResponse([{ name: cid, default_scene_id: sceneId }]);
+      }
+      if (url === `/api/campaigns/${encodeURIComponent(cid)}`) {
+        return jsonResponse({ name: cid, default_scene_id: sceneId });
+      }
+      if (url.endsWith(`/scenes/${sceneId}`)) {
+        return jsonResponse({
+          id: sceneId,
+          name: 'Parlor',
+          character_ids: ['alice', 'bob'],
+          player_character_ids: ['alice'],
+        });
+      }
+      if (url.endsWith('/entities/alice')) return jsonResponse(alice);
+      if (url.endsWith('/entities/bob')) return jsonResponse(bob);
+      if (url.includes('/scenes/parlor/messages') && !url.includes('from=')) {
+        const r = historyResponses[historyIdx] ?? [];
+        historyIdx += 1;
+        return jsonResponse(r);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const { factory, sources } = makeFakeEventSourceFactory();
+    const { result } = renderHook(() =>
+      useSSE({
+        fetcher: fetcher as unknown as typeof fetch,
+        eventSourceFactory: factory,
+      }),
+    );
+
+    // First bootstrap.
+    await act(async () => {
+      for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    });
+    expect(result.current.messages.length, (
+      'frontend-be-consistency-messages-overwritten: first bootstrap MUST ' +
+        'populate messages from the initial history fetch; ' +
+        `got ${result.current.messages.length}`
+    )).toBe(1);
+    expect(sources.length).toBe(1);
+
+    // Backend dies → SSE error → reconnect timer.
+    act(() => {
+      const src = sources[0];
+      for (const fn of src.listeners['error'] ?? []) fn({});
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+      for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    });
+
+    expect(sources.length, 'reconnect must open a new SSE source').toBe(2);
+    expect(result.current.messages.length, (
+      'frontend-be-consistency-event-loss: after reconnect against a ' +
+        'backend that lost runtime state, the FULL history re-fetch MUST ' +
+        'replace `messages` with the (empty) authoritative state; got ' +
+        `${result.current.messages.length}: ${JSON.stringify(
+          result.current.messages.map((m) => m.body),
+        )}`
+    )).toBe(0);
   });
 
   test('sse-client-event-serialized', async () => {

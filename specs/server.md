@@ -24,6 +24,32 @@ Wire models defined in this module: `SceneResponse`, `MessageRequest`,
 `MessageAccepted`. (`CampaignResponse` lives in `campaign.py`;
 `SceneResponse` returned from `scene.to_response()` lives in `scene.py`.)
 
+## server-run-reload: dev hot-reload via uvicorn factory
+
+When `instance-config-reload` is true, `main()` dispatches to uvicorn's
+reload mechanism instead of the direct `App.run` path.
+
+- server-run-reload-factory: `uvicorn.run("sidestage.server:create_app",
+  factory=True, reload=True, reload_dirs=[<src/sidestage>], port=...)`.
+  uvicorn's reload spawns a worker subprocess that re-imports
+  `sidestage.server` and calls `create_app()` on every file change
+  under `reload_dirs`. The factory is zero-arg by contract; config
+  crosses the parent → worker boundary via env per
+  `instance-config-env-roundtrip`.
+- server-run-reload-dirs: Only `src/sidestage/` is watched. Frontend
+  HMR is owned by Vite (`:5173`), which watches its own tree.
+- server-run-reload-no-state-persistence: Each reload re-imports the
+  module → `App._actors`, `App.factory`, and per-process state start
+  fresh. Scene message history (runtime-only per `scene-on-disk`) is
+  wiped. The SPA's `frontend-be-consistency-on-reconnect` re-fetches
+  the (now-empty) authoritative state — chat clears on reload. Known
+  dev trade-off; not a bug. Persistence is a separate concern.
+- server-run-reload-prod-off: `reload=False` is the production default;
+  `App.run` invokes uvicorn directly with the pre-constructed app
+  object (no factory, no subprocess).
+- .implemented-by: server.create_app, server.main
+- .tested-by: test_create_app_reads_env_and_builds, test_create_app_missing_env_is_fatal
+
 ## server-routes: HTTP route table
 
 The route handlers themselves are registered by `App._setup_routes`. Each

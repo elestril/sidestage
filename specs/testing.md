@@ -94,6 +94,21 @@ assert len(scene.messages) == 1, (
   rule when the `reason` argument starts with the spec label:
   `assert_that(messages, has_length(1), reason="scene-append-records: …")`.
 
+## testing-no-stray-logs
+
+Warnings and unexpected log output drown signal in test runs. The suite
+treats both as failures so they stay quiet.
+
+- testing-no-stray-logs-pytest: `pyproject.toml`'s
+  `[tool.pytest.ini_options].filterwarnings` starts with `"error"` — any
+  unhandled warning becomes an exception. Third-party noise we cannot fix
+  earns a surgical `ignore:<pattern>:<Category>` line after it; never a
+  blanket suppression.
+- testing-no-stray-logs-vitest: `vitest.setup.ts` installs a per-test
+  `console.warn` / `console.error` spy and asserts no calls in
+  `afterEach`. Tests that intentionally exercise error paths declare
+  the expected output and `mockClear()` before afterEach runs.
+
 ## testing-fixtures
 
 Shared fixtures live in `tests/conftest.py`. E2E-only fixtures live in

@@ -22,6 +22,12 @@ from sidestage.entity import (
     EntityId,
     UnresolvedEntityError,
 )
+from sidestage.instance_config import (
+    InstanceConfig,
+    from_env as _instance_config_from_env,
+    resolve as _instance_config_resolve,
+    serialize_to_env as _instance_config_serialize_to_env,
+)
 from sidestage.message import Message
 from sidestage.scene import SceneResponse
 
@@ -493,22 +499,12 @@ class App:
     # ----------------------- run -----------------------
 
     @classmethod
-    def run(cls, sidestage_dir: str = "sidestage/", port: int = 8000) -> None:
-        """server-run: CLI entry point — construct the App, load the single
-        campaign, and start serving.
+    def _build_and_load(cls, sidestage_dir: str) -> "App":
+        """server-build-and-load: shared construction + load path.
 
-        Owns the LOADING -> SERVING lifecycle transition for one process. The
-        active `EntityFactory` is installed on the class BEFORE `Campaign.load`
-        runs so that any deserialize-time code can resolve cross-references
-        via `App.factory.get(...)`.
+        Both `App.run` (non-reload entry) and `create_app` (uvicorn reload
+        factory) call this. Owns the LOADING -> SERVING transition.
 
-        - server-run-sidestage-dir: The `--sidestage-dir` flag (or the
-          `sidestage_dir` argument) sets the instance state root; defaults
-          to `"sidestage/"`. Campaign trees live under
-          `<sidestage_dir>/campaigns/<name>/`.
-        - server-run-port: The `--port` flag (or the `port` argument) sets
-          the listen port; defaults to `8000`. Test harnesses (browser e2e)
-          pass an ephemeral port to avoid colliding with the dev server.
         - server-run-state-loading: Sets `state = LOADING` before campaign
           load; while in this state every API route returns 503.
         - server-run-load: Walks `<sidestage_dir>/campaigns/` for
@@ -518,10 +514,6 @@ class App:
           if `<sidestage_dir>/campaigns/` is missing or empty.
         - server-run-state-serving: Sets `state = SERVING` after the campaign
           is fully loaded; API endpoints become active.
-        - server-run-serve: Starts the FastAPI server (uvicorn) on
-          `0.0.0.0:<port>`.
-
-        .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
         """
         # server-run-sidestage-dir.
         instance = cls(sidestage_dir=sidestage_dir)
@@ -553,22 +545,84 @@ class App:
         instance.campaigns[campaign.name] = campaign
         # server-run-state-serving.
         instance.state = ServerState.SERVING
+        return instance
+
+    @classmethod
+    def run(cls, sidestage_dir: str = "sidestage/", port: int = 8000) -> None:
+        """server-run: non-reload entry point — build, load, serve.
+
+        - server-run-sidestage-dir: The `sidestage_dir` argument sets the
+          instance state root; defaults to `"sidestage/"`. Campaign trees
+          live under `<sidestage_dir>/campaigns/<name>/`.
+        - server-run-port: The `port` argument sets the listen port;
+          defaults to `8000`. Test harnesses pass an ephemeral port to
+          avoid colliding with the dev server.
+        - server-run-serve: Starts the FastAPI server (uvicorn) on
+          `0.0.0.0:<port>`.
+
+        For the reload path see `create_app` and `server-run-reload`.
+
+        .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
+        """
+        instance = cls._build_and_load(sidestage_dir)
         # server-run-serve.
         uvicorn.run(instance._fastapi, host="0.0.0.0", port=port)
+
+
+def create_app() -> FastAPI:
+    """server-create-app: zero-arg ASGI factory for `uvicorn --reload`.
+
+    uvicorn's reload mechanism spawns a worker subprocess that imports
+    this module fresh on every file change. The factory contract requires
+    a zero-arg callable returning the ASGI app — so config is passed
+    through the env (`SIDESTAGE_INSTANCE_CONFIG`, JSON) set by `main()`
+    before invoking uvicorn.
+
+    .implements: server-run-reload, cuj-startup-launch
+    """
+    config = _instance_config_from_env()
+    instance = App._build_and_load(config.sidestage_dir)
+    return instance._fastapi
 
 
 def main() -> None:
     """server-main: CLI entry point for the `sidestage` console script.
 
-    Parses `--sidestage-dir` and `--port`, then runs `App.run(...)`.
-    Typically invoked via `just run` (which also brings up the Vite
-    dev server) on port 8000; browser e2e (`just test-browser`) invokes
-    with an ephemeral port.
+    Parses `--sidestage-dir`, `--port`, `--reload`. Resolves into an
+    `InstanceConfig` (per `instance-config-resolve`), serializes to env,
+    then dispatches to uvicorn. When `reload` is true, uvicorn runs the
+    `create_app` factory in a worker subprocess and re-runs the factory
+    on any file change under `src/sidestage/`.
 
     .implements: cuj-startup-launch
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sidestage-dir", default="sidestage/")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--sidestage-dir", default=None)
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        default=None,
+        help="Run under uvicorn --reload (dev workflow).",
+    )
     args = parser.parse_args()
-    App.run(args.sidestage_dir, port=args.port)
+
+    config = _instance_config_resolve(
+        sidestage_dir=args.sidestage_dir,
+        port=args.port,
+        reload=args.reload,
+    )
+    _instance_config_serialize_to_env(config)
+
+    if config.reload:
+        # server-run-reload: factory + reload_dirs.
+        uvicorn.run(
+            "sidestage.server:create_app",
+            factory=True,
+            host="0.0.0.0",
+            port=config.port,
+            reload=True,
+            reload_dirs=[str(Path(__file__).parent)],
+        )
+    else:
+        App.run(config.sidestage_dir, port=config.port)

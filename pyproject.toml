@@ -7,6 +7,7 @@ dependencies = [
     "uvicorn[standard]",
     "litellm",
     "python-multipart",
+    "pydantic-settings",
     "pyyaml",
     "python-frontmatter",
 ]
@@ -34,6 +35,18 @@ dev = [
 python_files = "*_test.py test_*.py"
 testpaths = ["src/sidestage", "tests"]
 asyncio_mode = "auto"
+# Filter third-party deprecation noise from uvicorn[standard]'s legacy
+# websockets path. We don't use websockets directly; uvicorn pulls them
+# in transitively for protocol support and warns until they migrate to
+# the new API. Not actionable in our code; surgical filter beats a
+# blanket suppression.
+# Fail on any unhandled warning. Suite must stay quiet; new warnings
+# either get fixed or earn a surgical ignore rule.
+filterwarnings = [
+    "error",
+    "ignore:websockets.legacy is deprecated.*:DeprecationWarning",
+    "ignore:websockets\\.server\\.WebSocketServerProtocol is deprecated.*:DeprecationWarning",
+]
 # A unit test that takes longer than 2s is almost certainly hung — fail
 # fast so the wedge is visible. Integration / eval tests can override
 # per-test via `@pytest.mark.timeout(N)`.

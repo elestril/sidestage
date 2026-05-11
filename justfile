@@ -78,9 +78,10 @@ _vite-up:
 stop-vite:
     @pkill -f 'vite' || true
 
-# Dev stack: vite (background) + sidestage (foreground). Ctrl-C stops sidestage.
+# Dev stack: vite (background) + sidestage (foreground, hot-reload on
+# src/sidestage/ changes). Ctrl-C stops sidestage.
 run: _vite-up
-    uv run sidestage --sidestage-dir sidestage/
+    uv run sidestage --sidestage-dir sidestage/ --reload
 
 # -------- housekeeping --------
 

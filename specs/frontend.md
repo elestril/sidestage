@@ -67,6 +67,38 @@ regenerated whenever the server-side wire format changes.
   defined in `types_ext.ts`. Today there is exactly one event variant;
   the type is a discriminated union scaffold for future variants.
 
+## frontend-be-consistency: SPA state stays consistent with backend
+
+The SPA's view of the scene MUST equal the backend's authoritative state
+(modulo at most one in-flight `entity_changed` event). The SSE event
+stream is the only mechanism for incremental update; whenever the SPA
+has any reason to believe it might have missed events, it MUST re-fetch
+the full state for every entity currently rendered before resuming the
+event-driven loop.
+
+- frontend-be-consistency-event-loss: Any disconnect window (SSE close,
+  reconnect backoff, scene switch, initial mount) is an event-loss
+  window. The SPA cannot rely on "fetch from `lastFetchedIndex + 1`"
+  to catch up — the backend's history may have shrunk (e.g. a dev
+  reload that wiped runtime state) or diverged. The reconnect path
+  re-fetches the FULL history (no `from=` query) and overwrites
+  `messages` outright; that's the only approach that converges
+  correctly across all transitions.
+- frontend-be-consistency-bootstrap-first: SSE opens AFTER the full
+  bootstrap completes (`sse-client-list-campaigns` through
+  `sse-client-history`). Opening SSE first and bootstrapping in
+  parallel would create a race where an `entity_changed` event arrives
+  before `lastFetchedIndex` is set, with no defined ordering.
+- frontend-be-consistency-messages-overwritten: `messages` state is
+  preserved across the clear-and-bootstrap cycle for UX continuity (no
+  empty-flicker during transient reconnects), but `sse-client-history`
+  REPLACES `messages` with the freshly-fetched history. The state can
+  only be stale during the in-flight reconnect window, never after a
+  successful bootstrap.
+
+.tested-by: test_frontend_be_consistency_on_reconnect
+.implemented-by: useSSE
+
 ## frontend-sse-client-dataflow: Client SSE dataflow
 
 The SSE connection is a process boundary (server→client only). Bootstrap
