@@ -13,7 +13,7 @@ logged, not events.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Awaitable, Protocol
 
 if TYPE_CHECKING:
     from sidestage.entity import Entity
@@ -41,11 +41,12 @@ class EntityChanged:
 class Listener(Protocol):
     """events-protocol: anything implementing `notify(event)`.
 
-    - events-protocol-non-blocking: `notify` MUST NOT block. Async work is
-      launched via `asyncio.create_task`; queue listeners use `put_nowait`.
+    - events-protocol-sync-or-async: `notify` may be sync or async. The
+      bus wraps each listener invocation in a task (per
+      `events-async-tasks`) and awaits the result if it is a coroutine.
     - events-protocol-event-self-contained: The event carries everything
       the listener needs — `event.entity` for fresh state,
       `event.attributes` for the changed-attribute list.
     """
 
-    def notify(self, event: EntityChanged) -> None: ...
+    def notify(self, event: EntityChanged) -> None | Awaitable[None]: ...

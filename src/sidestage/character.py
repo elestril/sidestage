@@ -115,8 +115,26 @@ class Character(Entity):
         (which fires another `EntityChanged`).
 
         .implements: events-pattern-subscription, message-dataflow-react
+        .tested-by: test_events_dataflow
         """
-        raise NotImplementedError
+        # Lazy import — scene.py imports character.py via TYPE_CHECKING; doing
+        # this at module level would cycle.
+        from sidestage.scene import Scene
+
+        # Filter: only Scene emissions with message-list changes.
+        if not isinstance(event.entity, Scene):
+            return
+        if "messages" not in event.attributes:
+            return
+        latest = event.entity.messages[-1]
+        # Don't respond to our own messages — avoids the recursion where our
+        # appended response triggers another EntityChanged we'd react to.
+        if latest.sender is self:
+            return
+        # Generate a response via the bound actor; append back if non-None.
+        response = await self._actor.respond(latest, self)
+        if response is not None:
+            event.entity.append(response)
 
     def has_human_actor(self) -> bool:
         """character-has-human-actor: Returns `self.owner == "user"`. The check

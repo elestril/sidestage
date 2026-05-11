@@ -6,11 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from sidestage.actor import SceneUpdatedEvent, StubActor, UserActor
+from sidestage.actor import StubActor, UserActor
 from sidestage.campaign import CampaignResponse
 from sidestage.entity import EntityId
+from sidestage.events import EntityChanged
 from sidestage.message import Message, MessageId
 from sidestage.scene import SceneResponse
 from sidestage.server import (
@@ -72,7 +74,7 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     """Mock Scene exposing the surface the server now relies on:
     - `to_response()` builds the wire shape (server no longer constructs it).
     - `user_characters` is the player-character subset.
-    - `serialize_message`, `messages`, `dispatch` are the message API.
+    - `serialize_message`, `messages`, `append` are the message API.
     """
     scene = MagicMock(spec=[])
     scene.id = EntityId(scene_id)
@@ -97,13 +99,13 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
             body=m.body,
         )
 
-    def dispatch(msg: Message) -> MessageId:
+    def append(msg: Message) -> MessageId:
         scene.messages.append(msg)
         return MessageId(f"{scene.id}:{len(scene.messages) - 1}")
 
     scene.to_response = to_response
     scene.serialize_message = serialize_message
-    scene.dispatch = MagicMock(side_effect=dispatch)
+    scene.append = MagicMock(side_effect=append)
     return scene
 
 
@@ -153,6 +155,18 @@ def make_loaded_app(scene_id: str = "s1") -> tuple[App, MagicMock, MagicMock, Ma
     app.campaigns = {campaign.name: campaign}
     app.state = ServerState.SERVING
     return app, scene, human, npc
+
+
+def install_mock_user_actor() -> MagicMock:
+    """Install a `MagicMock(spec=UserActor)` at `App._actors["user"]`.
+
+    Per `testing-mock-user-actor`: tests never instantiate a real UserActor.
+    The mock records `subscribe_to`/`unsubscribe_from` so SSE-handler tests
+    can assert delegation without touching QueueListener internals.
+    """
+    mock_actor = MagicMock(spec=UserActor)
+    App._actors["user"] = mock_actor
+    return mock_actor
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +282,7 @@ class TestAppGetActor:
 
 
 # ---------------------------------------------------------------------------
-# Private plumbing: App._current_user, App._subscribe, App._unsubscribe
+# Private plumbing: App._current_user
 # ---------------------------------------------------------------------------
 
 
@@ -276,30 +290,6 @@ class TestAppPrivatePlumbing:
     def test_current_user_returns_user(self):
         # _current_user is a classmethod stub returning "user" today.
         assert App._current_user() == "user"
-
-    def test_subscribe_routes_to_user_actor(self):
-        # _subscribe finds the actor for `user_id` (via get_actor) and calls
-        # add_queue on it.
-        queue: asyncio.Queue = asyncio.Queue()
-        App._subscribe("user", queue)
-        actor = App.get_actor("user")
-        assert queue in actor._queues
-
-    def test_unsubscribe_removes_queue(self):
-        queue: asyncio.Queue = asyncio.Queue()
-        App._subscribe("user", queue)
-        App._unsubscribe("user", queue)
-        actor = App.get_actor("user")
-        assert queue not in actor._queues
-
-    def test_subscribe_unsubscribe_singleton_remains(self):
-        # The singleton actor stays registered after unsubscribe (so other
-        # connections continue to receive events).
-        queue: asyncio.Queue = asyncio.Queue()
-        App._subscribe("user", queue)
-        original = App._actors["user"]
-        App._unsubscribe("user", queue)
-        assert App._actors.get("user") is original
 
 
 # ---------------------------------------------------------------------------
@@ -799,8 +789,10 @@ class TestPostMessage:
             )
         assert response.status_code == 422
 
-    def test_post_dispatches_and_returns_id(self):
-        # rest-api-post-dispatch + rest-api-post-returns.
+    def test_post_appends_and_returns_id(self):
+        # rest-api-post-dispatch + rest-api-post-returns: server calls
+        # `scene.append(message)` (per events-dataflow) and returns the
+        # assigned MessageId.
         app, scene, human, npc = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
@@ -810,46 +802,88 @@ class TestPostMessage:
         assert response.status_code == 201
         body = response.json()
         assert body["id"] == "s1:0"
-        scene.dispatch.assert_called_once()
-        msg = scene.dispatch.call_args[0][0]
+        scene.append.assert_called_once()
+        msg = scene.append.call_args[0][0]
         assert isinstance(msg, Message)
         assert msg.sender is human
         assert msg.body == "hello"
 
 
 # ---------------------------------------------------------------------------
-# rest-api-get-events: GET /api/events
+# rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
 # ---------------------------------------------------------------------------
 
 
-class TestGetEvents:
-    def test_events_503_when_loading(self):
-        # rest-api-events-503.
+class TestGetEntityEvents:
+    """Per-entity SSE stream — replaces the old global `/api/events`.
+
+    Per `rest-api-get-entity-events` and `events-subscription`. The handler
+    resolves the entity, routes the queue subscription through the
+    current-user's UserActor (mocked per `testing-mock-user-actor`),
+    yields each `EntityChanged` as `event: entity_changed\\ndata: …\\n\\n`,
+    and unsubscribes on disconnect.
+    """
+
+    def _entity_events_url(self, eid: str = "s1") -> str:
+        return f"/api/campaigns/{CAMPAIGN_ID}/entities/{eid}/events"
+
+    def test_entity_events_503_when_loading(self):
+        # rest-api-events-503: server in LOADING state returns 503.
         app = App()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/events")
+            response = client.get(self._entity_events_url())
         assert response.status_code == 503
 
-    def test_events_route_registered(self):
-        # rest-api-get-events: route GET /api/events exists on the FastAPI app.
+    def test_entity_events_404_unknown_campaign(self):
+        # rest-api-events-404: unknown campaign -> 404.
         app, *_ = make_loaded_app()
-        paths = {route.path for route in app._fastapi.routes if hasattr(route, "path")}
-        assert "/api/events" in paths
+        install_mock_user_actor()
+        with TestClient(app._fastapi) as client:
+            response = client.get(
+                f"/api/campaigns/no-such-campaign/entities/s1/events"
+            )
+        assert response.status_code == 404
 
-    async def test_events_accept_calls_subscribe(self):
-        # rest-api-events-accept / sse-dataflow-accept: route calls
-        # App._subscribe(user_id, queue) on connect. Drive the route directly
-        # to avoid sync TestClient SSE complications.
+    def test_entity_events_404_unknown_entity(self):
+        # rest-api-events-404: campaign exists but factory.get returns None.
         app, *_ = make_loaded_app()
+        install_mock_user_actor()
+        # Force factory miss for any id.
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=None)
+        with TestClient(app._fastapi) as client:
+            response = client.get(self._entity_events_url("ghost-id"))
+        assert response.status_code == 404
 
-        # Locate the get_events route handler.
+    async def test_entity_events_subscribes_via_user_actor(self):
+        # rest-api-events-accept / sse-dataflow-accept: handler resolves
+        # `App.get_actor(current_user)` and calls
+        # `user_actor.subscribe_to(entity, queue)` synchronously on connect.
+        # We drive the route handler directly to avoid streaming-client
+        # complications and to inspect the (entity, queue) pair.
+        app, scene, *_ = make_loaded_app()
+        mock_actor = install_mock_user_actor()
+
+        # Drive a queue we control through subscribe_to so we can later
+        # verify unsubscribe_from is called with the same queue.
+        captured: dict = {}
+
+        def _capture_subscribe(entity, queue):
+            captured["entity"] = entity
+            captured["queue"] = queue
+
+        mock_actor.subscribe_to.side_effect = _capture_subscribe
+
+        # Locate the route handler.
         handler = None
         for r in app._fastapi.routes:
-            if getattr(r, "path", None) == "/api/events":
+            if getattr(r, "path", None) == \
+                    "/api/campaigns/{cid}/entities/{entity_id}/events":
                 handler = r.endpoint
                 break
         assert handler is not None
 
+        # Build a request mock that reports immediate disconnect so the
+        # generator drains and the finally block fires unsubscribe.
         request = MagicMock()
 
         async def is_disconnected() -> bool:
@@ -857,36 +891,102 @@ class TestGetEvents:
 
         request.is_disconnected = is_disconnected
 
-        with patch.object(App, "_subscribe") as sub_mock, patch.object(
-            App, "_unsubscribe"
-        ) as unsub_mock:
-            response = await handler(request)
-            # Subscribe is called synchronously in the route body — before the
-            # streaming response is consumed.
-            sub_mock.assert_called_once()
-            sub_args = sub_mock.call_args[0]
-            assert sub_args[0] == "user"
-            queue = sub_args[1]
-            assert isinstance(queue, asyncio.Queue)
+        response = await handler(CAMPAIGN_ID, "s1", request)
 
-            # Drain the streaming body so the finally block fires _unsubscribe.
-            async for _ in response.body_iterator:
-                pass
+        # subscribe_to was called once with the resolved entity and a Queue.
+        mock_actor.subscribe_to.assert_called_once()
+        assert captured["entity"] is scene
+        assert isinstance(captured["queue"], asyncio.Queue)
 
-            unsub_mock.assert_called_once_with("user", queue)
+        # Drain the response so the finally block runs.
+        async for _ in response.body_iterator:
+            pass
 
-    async def test_events_cleanup_calls_unsubscribe(self):
-        # rest-api-events-cleanup: on disconnect, the queue is removed via
-        # App._unsubscribe.
-        app, *_ = make_loaded_app()
+        # rest-api-events-cleanup: unsubscribe_from called with the SAME
+        # entity and queue.
+        mock_actor.unsubscribe_from.assert_called_once_with(
+            scene, captured["queue"]
+        )
+
+    async def test_entity_events_yields_entity_changed_frames(self):
+        # rest-api-events-yield + events-subscription: drive the handler
+        # directly with a controlled queue and read one frame off
+        # `response.body_iterator`. Streaming over httpx wedges on the
+        # 15s keepalive after the frame, since `is_disconnected` doesn't
+        # flip synchronously when the test client closes; bypassing the
+        # client and using a request mock that flips after one frame
+        # keeps the test bounded.
+        app, scene, *_ = make_loaded_app()
+        mock_actor = install_mock_user_actor()
+
+        controlled_queue: asyncio.Queue = asyncio.Queue()
+        await controlled_queue.put(
+            EntityChanged(entity=scene, attributes=["messages"])
+        )
+
+        with patch(
+            "sidestage.server.asyncio.Queue", return_value=controlled_queue
+        ):
+            handler = None
+            for r in app._fastapi.routes:
+                if getattr(r, "path", None) == \
+                        "/api/campaigns/{cid}/entities/{entity_id}/events":
+                    handler = r.endpoint
+                    break
+            assert handler is not None
+
+            # Flip is_disconnected to True after the first poll so the
+            # generator exits its loop after delivering the queued frame.
+            disconnect_calls = {"n": 0}
+
+            async def is_disconnected() -> bool:
+                disconnect_calls["n"] += 1
+                # Pass on the first poll (deliver the queued event), then
+                # flip on the second poll (stops the loop cleanly).
+                return disconnect_calls["n"] > 1
+
+            request = MagicMock()
+            request.is_disconnected = is_disconnected
+
+            response = await handler(CAMPAIGN_ID, "s1", request)
+
+            chunks: list[bytes] = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+
+        assert chunks, "expected at least one SSE frame"
+        text = b"".join(chunks).decode("utf-8")
+        assert "event: entity_changed" in text
+        data_line = [
+            line for line in text.splitlines() if line.startswith("data: ")
+        ][0][len("data: "):]
+        payload = json.loads(data_line)
+        assert payload == {"entity_id": "s1", "attributes": ["messages"]}
+
+        # subscribe_to was called for the resolved scene with the queue
+        # the handler created (which our patch redirected to ours).
+        mock_actor.subscribe_to.assert_called_once()
+        called_entity, called_queue = mock_actor.subscribe_to.call_args[0]
+        assert called_entity is scene
+        assert called_queue is controlled_queue
+
+    async def test_entity_events_unsubscribes_on_disconnect(self):
+        # rest-api-events-cleanup / sse-dataflow-disconnect: on client
+        # disconnect, the handler calls
+        # `user_actor.unsubscribe_from(entity, queue)` in `try/finally`.
+        app, scene, *_ = make_loaded_app()
+        mock_actor = install_mock_user_actor()
 
         handler = None
         for r in app._fastapi.routes:
-            if getattr(r, "path", None) == "/api/events":
+            if getattr(r, "path", None) == \
+                    "/api/campaigns/{cid}/entities/{entity_id}/events":
                 handler = r.endpoint
                 break
         assert handler is not None
 
+        # Disconnected request — the stream generator exits its loop and
+        # the finally block must invoke unsubscribe.
         request = MagicMock()
 
         async def is_disconnected() -> bool:
@@ -894,38 +994,50 @@ class TestGetEvents:
 
         request.is_disconnected = is_disconnected
 
-        with patch.object(App, "_subscribe"), patch.object(
-            App, "_unsubscribe"
-        ) as unsub_mock:
-            response = await handler(request)
-            async for _ in response.body_iterator:
-                pass
+        response = await handler(CAMPAIGN_ID, "s1", request)
 
-            unsub_mock.assert_called_once()
+        # Drain the streaming body.
+        async for _ in response.body_iterator:
+            pass
 
-    async def test_sse_event_stream_yields_scene_updated(self):
-        # rest-api-events-yield + sse-dataflow-event: helper emits a
-        # `event: scene_updated\ndata: {json}\n\n` block per dequeued event.
+        mock_actor.unsubscribe_from.assert_called_once()
+        ent, q = mock_actor.unsubscribe_from.call_args[0]
+        assert ent is scene
+        assert isinstance(q, asyncio.Queue)
+
+
+# ---------------------------------------------------------------------------
+# _sse_event_stream helper — wire serialization for EntityChanged
+# ---------------------------------------------------------------------------
+
+
+class TestSseEventStream:
+    async def test_sse_event_stream_yields_entity_changed(self):
+        # events-subscription: helper emits a
+        # `event: entity_changed\ndata: {"entity_id": "...", "attributes": [...]}\n\n`
+        # block per dequeued EntityChanged. EntityChanged is a @dataclass —
+        # the SSE boundary builds the wire payload.
         from sidestage.server import _sse_event_stream
 
+        # Minimal entity stand-in: only `id` is read at the wire boundary.
+        ent = MagicMock()
+        ent.id = "s1"
+
         queue: asyncio.Queue = asyncio.Queue()
-        await queue.put(
-            SceneUpdatedEvent(scene_id=EntityId("s1"), latest_message_index=2)
-        )
+        await queue.put(EntityChanged(entity=ent, attributes=["messages"]))
 
         gen = _sse_event_stream(queue=queue, request=None, keepalive_interval_s=5.0)
         chunk = await gen.__anext__()
         await gen.aclose()
 
         text = chunk.decode("utf-8")
-        assert "event: scene_updated" in text
+        assert "event: entity_changed" in text
         assert "\n\n" in text
         data_line = [
             line for line in text.splitlines() if line.startswith("data: ")
         ][0][len("data: "):]
         payload = json.loads(data_line)
-        assert payload["scene_id"] == "s1"
-        assert payload["latest_message_index"] == 2
+        assert payload == {"entity_id": "s1", "attributes": ["messages"]}
 
     async def test_sse_event_stream_keepalive_on_idle(self):
         # rest-api-events-keepalive: ": keepalive" comment when queue is idle.

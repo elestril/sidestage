@@ -4,10 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sidestage.actor import SceneUpdatedEvent
 from sidestage.character import Character
 from sidestage.entity import Entity, EntityId, EntityType
+from sidestage.events import EntityChanged
 from sidestage.message import Message
+from sidestage.scene import Scene
 
 
 # ---------------------------------------------------------------------------
@@ -181,67 +182,121 @@ class TestCharacterRespondPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# character-notify-passthrough
+# character-notify-react  (async)
 # ---------------------------------------------------------------------------
 
 
-class TestCharacterNotifyPassthrough:
-    """character-notify-passthrough: Pure pass-through to
-    self._actor.notify(event)."""
+def _make_scene_event(
+    *,
+    messages: list[Message],
+    attributes: list[str] | None = None,
+) -> tuple[EntityChanged, MagicMock]:
+    """Build an EntityChanged whose `entity` is a Scene-spec MagicMock with
+    the given `messages` and an `append` MagicMock. Returns (event, scene_mock).
+    """
+    scene = MagicMock(spec=Scene)
+    scene.messages = messages
+    scene.append = MagicMock()
+    event = EntityChanged(
+        entity=scene,
+        attributes=["messages"] if attributes is None else attributes,
+    )
+    return event, scene
 
-    def test_notify_delegates_to_actor(self):
+
+class TestCharacterNotifyReact:
+    """character-notify-react: filter on Scene + "messages" attribute + sender
+    not self; on pass, await actor.respond(latest, self) and append non-None
+    response back to event.entity."""
+
+    async def test_notify_filters_non_scene_emitter(self):
+        # event.entity is a non-Scene Entity → no actor.respond, no append
         actor = MagicMock()
-        actor.notify.return_value = None
+        actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
 
-        event = SceneUpdatedEvent(
-            scene_id=EntityId("s1"),
-            latest_message_index=7,
-        )
+        non_scene = MagicMock(spec=Entity)
+        non_scene.append = MagicMock()
+        event = EntityChanged(entity=non_scene, attributes=["messages"])
 
-        result = char.notify(event)
+        await char.notify(event)
 
-        actor.notify.assert_called_once_with(event)
-        assert result is None
+        actor.respond.assert_not_called()
+        non_scene.append.assert_not_called()
 
-    def test_notify_passes_same_event_instance(self):
-        # The same event object must be forwarded — no copying / wrapping.
+    async def test_notify_filters_non_messages_attribute(self):
+        # attributes = ["body"] → no actor.respond
         actor = MagicMock()
+        actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
 
-        event = SceneUpdatedEvent(
-            scene_id=EntityId("s2"),
-            latest_message_index=3,
-        )
+        other = make_character(id="other", actor=MagicMock())
+        msg = Message(sender=other, body="hi")
+        event, scene = _make_scene_event(messages=[msg], attributes=["body"])
 
-        char.notify(event)
+        await char.notify(event)
 
-        forwarded = actor.notify.call_args.args[0]
-        assert forwarded is event
+        actor.respond.assert_not_called()
+        scene.append.assert_not_called()
 
-    def test_notify_accepts_arbitrary_event_object(self):
-        # Pure pass-through — Character does not introspect the event.
+    async def test_notify_filters_own_message(self):
+        # Latest message's sender IS this character → no actor.respond
         actor = MagicMock()
+        actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
 
-        event = MagicMock(name="event")
+        own_msg = Message(sender=char, body="my own words")
+        event, scene = _make_scene_event(messages=[own_msg])
 
-        char.notify(event)
+        await char.notify(event)
 
-        actor.notify.assert_called_once_with(event)
+        actor.respond.assert_not_called()
+        scene.append.assert_not_called()
 
-    def test_notify_forwards_each_call(self):
+    async def test_notify_calls_actor_respond_with_latest(self):
+        # Happy path: await actor.respond(latest, self) is invoked
         actor = MagicMock()
+        actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
 
-        e1 = SceneUpdatedEvent(scene_id=EntityId("s"), latest_message_index=0)
-        e2 = SceneUpdatedEvent(scene_id=EntityId("s"), latest_message_index=42)
+        other = make_character(id="other", actor=MagicMock())
+        older = Message(sender=other, body="older")
+        latest = Message(sender=other, body="latest")
+        event, _scene = _make_scene_event(messages=[older, latest])
 
-        char.notify(e1)
-        char.notify(e2)
+        await char.notify(event)
 
-        assert actor.notify.call_args_list[0].args == (e1,)
-        assert actor.notify.call_args_list[1].args == (e2,)
+        actor.respond.assert_awaited_once_with(latest, char)
+
+    async def test_notify_appends_non_none_response(self):
+        # Actor returns Message → event.entity.append(response) called
+        actor = MagicMock()
+        char = make_character(actor=actor)
+        response = Message(sender=char, body="my reply")
+        actor.respond = AsyncMock(return_value=response)
+
+        other = make_character(id="other", actor=MagicMock())
+        latest = Message(sender=other, body="provoke")
+        event, scene = _make_scene_event(messages=[latest])
+
+        await char.notify(event)
+
+        scene.append.assert_called_once_with(response)
+
+    async def test_notify_skips_append_when_response_none(self):
+        # Actor returns None → no append
+        actor = MagicMock()
+        actor.respond = AsyncMock(return_value=None)
+        char = make_character(actor=actor)
+
+        other = make_character(id="other", actor=MagicMock())
+        latest = Message(sender=other, body="provoke")
+        event, scene = _make_scene_event(messages=[latest])
+
+        await char.notify(event)
+
+        actor.respond.assert_awaited_once_with(latest, char)
+        scene.append.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

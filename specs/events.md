@@ -80,6 +80,7 @@ async def idle(self) -> None:
   returns the task; done-callback handles cleanup and exception logging.
 - events-async-tasks-idle: `Entity.idle()` is a test-only primitive;
   production never calls it. Awaits cascading reactions.
+  - .tested-by: test_events_dataflow
 - events-async-tasks-listener-spawn: Listeners can call
   `event.entity.spawn_task(coro)` for additional fan-out work beyond
   their own `notify` (rare but useful). No back-references required.
@@ -89,6 +90,7 @@ async def idle(self) -> None:
 - events-pattern-subscription: `entity.subscribe(listener)` registers;
   `entity._emit(event)` fans out by calling `listener.notify(event)` on
   each subscriber.
+  - .tested-by: test_events_dataflow
 - events-pattern-subscription-lifecycle: The caller of `subscribe` owns
   the listener's lifetime. Subscriptions whose lifetime matches the
   entity (e.g. Scene subscribing its characters in `__init__`) need no
@@ -164,10 +166,13 @@ No client-side filtering, no cross-scene leakage.
 ## events-dataflow
 
 1. events-dataflow-mutate: Entity state mutates.
+   - .tested-by: test_events_dataflow
 2. events-dataflow-emit: Entity calls `self._emit(EntityChanged(entity=self, attributes=[...]))`.
+   - .tested-by: test_events_dataflow
 3. events-dataflow-fan-out: `_emit` wraps each listener call in a tracked
    task via `self.spawn_task(self._invoke_listener(listener, event))`.
    The task catches per-listener exceptions and awaits async listeners.
+   - .tested-by: test_events_dataflow
 4. events-dataflow-deliver: SSE-handler `QueueListener.notify` does
    `queue.put_nowait(event)`; the response generator yields
    `event: entity_changed\ndata: {"entity_id": ..., "attributes": [...]}\n\n`.

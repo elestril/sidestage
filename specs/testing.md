@@ -62,6 +62,30 @@ markers = [
 - testing-markers-eval-opt-in: Eval tests carry `@pytest.mark.eval` AND
   `@pytest.mark.skipif(os.environ.get("EVAL") != "1", reason="eval-only")`.
 
+## testing-failure-message
+
+Every assertion that proves a spec invariant MUST include the spec label
+verbatim in its message, followed by a prose description of what the
+invariant requires and how the actual value violated it. The
+label-in-message rule applies even when the enclosing test name already
+encodes the label (per `spec-links-tested-by-implicit`) — duplication
+keeps the failure line self-contained, so an agent reading only the
+failure output knows which spec to load without opening the test file.
+
+```python
+assert len(scene.messages) == 1, (
+    "scene-append-records: scene.messages must contain the appended "
+    f"message; got len={len(scene.messages)}"
+)
+```
+
+- testing-failure-message-exempt: Setup/precondition assertions (object
+  is not None, fixture wired correctly) are exempt — they prove no spec
+  invariant. Their failure points at infrastructure, not at a spec.
+- testing-failure-message-pyhamcrest: PyHamcrest matchers satisfy the
+  rule when the `reason` argument starts with the spec label:
+  `assert_that(messages, has_length(1), reason="scene-append-records: …")`.
+
 ## testing-fixtures
 
 Defined in `tests/conftest.py`.

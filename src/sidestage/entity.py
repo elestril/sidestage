@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, NewType, Optional, Self
@@ -9,6 +10,9 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from sidestage.events import EntityChanged, Listener
+
+
+logger = logging.getLogger("sidestage.entity")
 
 
 EntityId = NewType("EntityId", str)
@@ -76,6 +80,7 @@ class Entity:
         object.__setattr__(self, "_loaded", _loaded)
         if _loaded:
             object.__setattr__(self, "_listeners", [])
+            object.__setattr__(self, "_pending_tasks", set())
 
     def __getattribute__(self, name: str):
         """Ghost-pattern attribute access guard.
@@ -132,6 +137,7 @@ class Entity:
         object.__setattr__(instance, "type", model.type)
         object.__setattr__(instance, "body", model.body)
         object.__setattr__(instance, "_listeners", [])
+        object.__setattr__(instance, "_pending_tasks", set())
         return instance
 
     # ---------------- events: pub/sub (per specs/events.md) ---------------
@@ -142,7 +148,7 @@ class Entity:
 
         .implements: events-pattern-subscription
         """
-        raise NotImplementedError
+        self._listeners.append(listener)
 
     def unsubscribe(self, listener: "Listener") -> None:
         """entity-unsubscribe: Remove `listener` from this entity's
@@ -150,7 +156,10 @@ class Entity:
 
         .implements: events-pattern-subscription-lifecycle
         """
-        raise NotImplementedError
+        try:
+            self._listeners.remove(listener)
+        except ValueError:
+            pass
 
     def _emit(self, event: "EntityChanged") -> None:
         """entity-emit: Fan out `event` by wrapping each listener call in a
@@ -163,7 +172,23 @@ class Entity:
 
         .implements: events-dataflow-fan-out, events-errors-listener-isolation
         """
-        raise NotImplementedError
+        # Snapshot — a listener may unsubscribe during emit.
+        for listener in list(self._listeners):
+            self.spawn_task(self._invoke_listener(listener, event))
+
+    async def _invoke_listener(self, listener: "Listener", event: "EntityChanged") -> None:
+        """Per-listener task body: invoke `listener.notify`, awaiting if it
+        returned a coroutine; log any exception so one bad listener cannot
+        abort fanout.
+
+        .implements: events-errors-listener-isolation
+        """
+        try:
+            result = listener.notify(event)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            logger.exception("listener %r raised in notify", listener)
 
     def spawn_task(self, coro) -> "asyncio.Task":
         """entity-spawn-task: Track `coro` as a task on this entity.
@@ -177,9 +202,25 @@ class Entity:
 
         .implements: events-async-tasks-spawn
         """
-        raise NotImplementedError
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+        return task
 
-    async def idle(self) -> None:
+    def _on_task_done(self, task: "asyncio.Task") -> None:
+        """Done-callback for `spawn_task`: discard from `_pending_tasks` and
+        log any non-cancellation exception.
+
+        .implements: events-errors-spawned-task
+        """
+        self._pending_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("spawned task raised", exc_info=exc)
+
+    async def idle(self, timeout: float = 5.0) -> None:
         """entity-idle: Wait for all pending listener tasks to complete.
 
         Loops until `_pending_tasks` is empty — each iteration awaits
@@ -193,7 +234,21 @@ class Entity:
 
         .implements: events-async-tasks-idle, testing-runner
         """
-        raise NotImplementedError
+        deadline = asyncio.get_running_loop().time() + timeout
+        while self._pending_tasks:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError("idle: pending tasks did not settle")
+            # Snapshot to allow new tasks to be added while waiting.
+            snapshot = list(self._pending_tasks)
+            # asyncio.wait (unlike gather+wait_for) does NOT cancel pending
+            # tasks on timeout — we just loop again and let the deadline check
+            # raise.
+            await asyncio.wait(snapshot, timeout=remaining)
+            # Yield once so done-callbacks scheduled by completed tasks can
+            # run and discard themselves from `_pending_tasks` before we
+            # re-check the loop condition.
+            await asyncio.sleep(0)
 
     def notify(self, event: "EntityChanged") -> None:
         """entity-notify-default-noop: Default Entity listener — does

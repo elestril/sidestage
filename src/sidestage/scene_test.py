@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sidestage.actor import SceneUpdatedEvent
 from sidestage.character import Character
 from sidestage.entity import Entity, EntityId, EntityType
+from sidestage.events import EntityChanged
 from sidestage.message import Message, MessageId
 from sidestage.scene import Scene, SceneResponse, SimpleScene
 
@@ -24,8 +23,8 @@ def make_character_mock(
 ) -> MagicMock:
     """A test double for Character.
 
-    `has_human_actor()` is set directly on the mock per the agent directives —
-    we don't want test failures here to depend on live Actor wiring.
+    `has_human_actor()` is set directly on the mock — we don't want test
+    failures here to depend on live Actor wiring.
     """
     char = MagicMock(spec=Character)
     char.id = EntityId(id)
@@ -49,6 +48,16 @@ def make_simple_scene(
     )
 
 
+class _Recorder:
+    """Minimal sync Listener that records every event it receives."""
+
+    def __init__(self) -> None:
+        self.events: list[EntityChanged] = []
+
+    def notify(self, event: EntityChanged) -> None:
+        self.events.append(event)
+
+
 # ---------------------------------------------------------------------------
 # Scene base class invariants
 # ---------------------------------------------------------------------------
@@ -67,11 +76,11 @@ class TestSceneBase:
         assert isinstance(attr, property)
         assert getattr(attr.fget, "__isabstractmethod__", False) is True
 
-    def test_dispatch_is_abstract_on_base(self):
-        # Scene.dispatch is abstract.
-        attr = Scene.__dict__.get("dispatch")
-        assert attr is not None
-        assert getattr(attr, "__isabstractmethod__", False) is True
+
+# ---------------------------------------------------------------------------
+# Scene._append_message (still present as the internal helper)
+# ---------------------------------------------------------------------------
+
 
 class TestSceneAppendMessage:
     def test_append_history(self):
@@ -106,9 +115,101 @@ class TestSceneAppendMessage:
         assert idx2 == 2
 
 
+# ---------------------------------------------------------------------------
+# Scene.append (the new public mutation API)
+# ---------------------------------------------------------------------------
+
+
+class TestSceneAppend:
+    """scene-append: Public mutation API. Records, emits, returns MessageId."""
+
+    async def test_append_records_message(self):
+        # scene-append-records: appended via _append_message; visible in
+        # scene.messages.
+        scene = make_simple_scene()
+        sender = make_character_mock("u", is_human=True)
+        m = Message(sender=sender, body="hello")
+        scene.append(m)
+        assert scene.messages == [m]
+
+    async def test_append_records_in_order(self):
+        # scene-append-records: subsequent appends preserve order.
+        scene = make_simple_scene()
+        s = make_character_mock("s", is_human=True)
+        m0 = Message(sender=s, body="a")
+        m1 = Message(sender=s, body="b")
+        m2 = Message(sender=s, body="c")
+        scene.append(m0)
+        scene.append(m1)
+        scene.append(m2)
+        assert scene.messages == [m0, m1, m2]
+
+    async def test_append_returns_message_id_for_first(self):
+        # scene-append-returns: returns MessageId(f"{scene.id}:{idx}");
+        # first append is "<scene_id>:0".
+        scene = make_simple_scene(scene_id="sceneid")
+        sender = make_character_mock("u", is_human=True)
+        result = scene.append(Message(sender=sender, body="hi"))
+        assert result == MessageId("sceneid:0")
+
+    async def test_append_returns_monotonic_indices(self):
+        # scene-append-returns: id index advances per-append.
+        scene = make_simple_scene(scene_id="s")
+        u = make_character_mock("u", is_human=True)
+        r0 = scene.append(Message(sender=u, body="a"))
+        r1 = scene.append(Message(sender=u, body="b"))
+        r2 = scene.append(Message(sender=u, body="c"))
+        assert r0 == MessageId("s:0")
+        assert r1 == MessageId("s:1")
+        assert r2 == MessageId("s:2")
+
+    async def test_append_emits_entity_changed_to_subscribers(self):
+        # scene-append-emits: a subscribed listener receives an EntityChanged
+        # whose entity is the scene and whose attributes contains "messages".
+        # Use a fresh scene with NO character listeners interfering — but the
+        # SimpleScene constructor subscribes them. We add our own recorder.
+        scene = make_simple_scene()
+        recorder = _Recorder()
+        scene.subscribe(recorder)
+
+        sender = make_character_mock("u", is_human=True)
+        scene.append(Message(sender=sender, body="hi"))
+
+        # _emit wraps each listener in a task (events-async-tasks); wait for
+        # them to settle before asserting.
+        await scene.idle()
+
+        assert len(recorder.events) == 1
+        event = recorder.events[0]
+        assert isinstance(event, EntityChanged)
+        assert event.entity is scene
+        assert "messages" in event.attributes
+
+    async def test_append_emits_once_per_call(self):
+        # scene-append-emits: exactly one EntityChanged per append.
+        scene = make_simple_scene()
+        recorder = _Recorder()
+        scene.subscribe(recorder)
+        s = make_character_mock("u", is_human=True)
+        scene.append(Message(sender=s, body="a"))
+        scene.append(Message(sender=s, body="b"))
+        scene.append(Message(sender=s, body="c"))
+        await scene.idle()
+        assert len(recorder.events) == 3
+        for event in recorder.events:
+            assert event.entity is scene
+            assert "messages" in event.attributes
+
+
+# ---------------------------------------------------------------------------
+# Scene.serialize_message
+# ---------------------------------------------------------------------------
+
+
 class TestSceneSerializeMessage:
     def test_serialize_message_builds_model(self):
-        # scene-serialize-message: returns Message.Model with composed id, sender_id, body.
+        # scene-serialize-message: returns Message.Model with composed id,
+        # sender_id, body.
         scene = make_simple_scene(scene_id="scene-77")
         sender = make_character_mock("char-x")
         scene._append_message(Message(sender=sender, body="hello"))
@@ -209,7 +310,8 @@ class TestSceneDeserialize:
         assert scene.characters == [user, npc]
 
     def test_deserialize_signature_uniform_with_entity(self):
-        # scene-deserialize-signature: same `(cls, model)` signature as Entity.deserialize.
+        # scene-deserialize-signature: same `(cls, model)` signature as
+        # Entity.deserialize.
         import inspect
 
         sig = inspect.signature(Scene.deserialize)
@@ -292,12 +394,15 @@ class TestSimpleSceneInit:
         with pytest.raises(ValueError):
             SimpleScene(id=EntityId("s"), name="x", body="b", characters=[u])
         with pytest.raises(ValueError):
-            SimpleScene(id=EntityId("s"), name="x", body="b", characters=[u, n, extra])
+            SimpleScene(
+                id=EntityId("s"), name="x", body="b", characters=[u, n, extra]
+            )
         with pytest.raises(ValueError):
             SimpleScene(id=EntityId("s"), name="x", body="b", characters=[])
 
     def test_init_user_must_be_human(self):
-        # simple-scene-init-user: ValueError if characters[0].has_human_actor() is False.
+        # simple-scene-init-user: ValueError if characters[0].has_human_actor()
+        # is False.
         non_human = make_character_mock("u", is_human=False)
         npc = make_character_mock("n", is_human=False)
         with pytest.raises(ValueError):
@@ -309,7 +414,8 @@ class TestSimpleSceneInit:
             )
 
     def test_init_npc_must_not_be_human(self):
-        # simple-scene-init-npc: ValueError if characters[1].has_human_actor() is True.
+        # simple-scene-init-npc: ValueError if characters[1].has_human_actor()
+        # is True.
         user = make_character_mock("u", is_human=True)
         also_human = make_character_mock("n", is_human=True)
         with pytest.raises(ValueError):
@@ -332,6 +438,33 @@ class TestSimpleSceneInit:
         )
         assert scene._user is user
         assert scene._npc is npc
+
+    def test_init_subscribes_every_character(self):
+        # simple-scene-init-subscribes-characters: every character in
+        # `characters` ends up in scene._listeners after construction.
+        user = make_character_mock("u", is_human=True)
+        npc = make_character_mock("n", is_human=False)
+        scene = SimpleScene(
+            id=EntityId("s"),
+            name="x",
+            body="b",
+            characters=[user, npc],
+        )
+        assert user in scene._listeners
+        assert npc in scene._listeners
+
+    def test_init_subscribes_characters_only(self):
+        # simple-scene-init-subscribes-characters: no extra unrelated listeners
+        # are added.
+        user = make_character_mock("u", is_human=True)
+        npc = make_character_mock("n", is_human=False)
+        scene = SimpleScene(
+            id=EntityId("s"),
+            name="x",
+            body="b",
+            characters=[user, npc],
+        )
+        assert len(scene._listeners) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -356,238 +489,14 @@ class TestSimpleSceneMessages:
 
 
 # ---------------------------------------------------------------------------
-# SimpleScene.dispatch
-# ---------------------------------------------------------------------------
-
-
-class TestSimpleSceneDispatch:
-    async def test_dispatch_appends_incoming_to_history(self):
-        # simple-scene-dispatch-append: dispatch calls _append_message(message).
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_resp(_msg):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_resp)
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        scene.dispatch(msg)
-        assert msg in scene.messages
-        assert scene.messages[0] is msg
-
-    async def test_dispatch_returns_message_id_with_correct_format(self):
-        # simple-scene-dispatch-return: returns MessageId(f"{self.id}:{index}").
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_resp(_msg):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_resp)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="my-scene")
-        msg = Message(sender=user, body="hi")
-        result = scene.dispatch(msg)
-        assert result == MessageId("my-scene:0")
-
-    async def test_dispatch_returns_index_for_each_subsequent_message(self):
-        # simple-scene-dispatch-return: index is per-scene monotonic.
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_resp(_msg):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_resp)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="s")
-        m0 = scene.dispatch(Message(sender=user, body="a"))
-        m1 = scene.dispatch(Message(sender=user, body="b"))
-        assert m0 == "s:0"
-        assert m1 == "s:1"
-
-    def test_dispatch_spawns_create_task(self, monkeypatch):
-        # simple-scene-dispatch-task: dispatch calls asyncio.create_task on _respond.
-        import sidestage.scene as scene_mod
-
-        captured = {}
-
-        def fake_create_task(coro):
-            captured["coro"] = coro
-            coro.close()
-            return MagicMock()
-
-        monkeypatch.setattr(scene_mod.asyncio, "create_task", fake_create_task)
-
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        scene.dispatch(msg)
-        assert "coro" in captured
-        # The captured coroutine was created by calling self._respond(message).
-        # We can't easily inspect the coroutine's args after .close(), but we
-        # confirmed a task was spawned without dispatch awaiting itself.
-
-    def test_dispatch_does_not_await(self, monkeypatch):
-        # simple-scene-dispatch-task: dispatch is synchronous and does NOT await.
-        import sidestage.scene as scene_mod
-
-        monkeypatch.setattr(
-            scene_mod.asyncio,
-            "create_task",
-            lambda coro: (coro.close(), MagicMock())[1],
-        )
-
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-        # Make npc.respond raise if called synchronously — proves dispatch
-        # doesn't traverse it on the calling thread.
-        npc.respond = MagicMock(side_effect=AssertionError("respond called sync"))
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        result = scene.dispatch(msg)
-        assert isinstance(result, str)
-
-
-# ---------------------------------------------------------------------------
-# SimpleScene._respond
-# ---------------------------------------------------------------------------
-
-
-class TestSimpleSceneRespond:
-    async def test_respond_awaits_npc_respond_with_message(self):
-        # simple-scene-respond-call: response = await self._npc.respond(message).
-        # Character.respond is async.
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_respond(message):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        await scene._respond(msg)
-        npc.respond.assert_called_once_with(msg)
-
-    async def test_respond_appends_response_when_not_none(self):
-        # simple-scene-respond-append: appends response to messages when non-None.
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-        response = Message(sender=npc, body="Hello User!")
-
-        async def async_respond(_msg):
-            return response
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        await scene._respond(msg)
-        assert response in scene.messages
-
-    async def test_respond_does_not_append_when_none(self):
-        # simple-scene-respond-append (negative): no append when response is None.
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_respond(_msg):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc)
-        msg = Message(sender=user, body="hi")
-        await scene._respond(msg)
-        assert scene.messages == []
-
-    async def test_respond_notifies_user_with_event(self):
-        # simple-scene-respond-notify: builds an event via
-        # self._make_scene_update(latest_index) and calls self._user.notify(event).
-        user = make_character_mock("user-1", is_human=True)
-        user.notify = MagicMock()
-        npc = make_character_mock("npc-1", is_human=False)
-        response = Message(sender=npc, body="hi back")
-
-        async def async_respond(_msg):
-            return response
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="s")
-        # Pre-populate with one message so the response lands at index 1.
-        scene._append_message(Message(sender=user, body="seed"))
-        await scene._respond(Message(sender=user, body="trigger"))
-        user.notify.assert_called_once()
-        (event,), _ = user.notify.call_args
-        assert isinstance(event, SceneUpdatedEvent)
-        assert event.scene_id == EntityId("s")
-        assert event.latest_message_index == 1
-
-    async def test_respond_uses_make_scene_update_to_build_event(self):
-        # simple-scene-respond-notify: the event is constructed via
-        # self._make_scene_update(latest_index) — not built inline.
-        user = make_character_mock("user-1", is_human=True)
-        user.notify = MagicMock()
-        npc = make_character_mock("npc-1", is_human=False)
-        response = Message(sender=npc, body="hi back")
-
-        async def async_respond(_msg):
-            return response
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="s")
-        sentinel = SceneUpdatedEvent(scene_id=EntityId("s"), latest_message_index=42)
-        scene._make_scene_update = MagicMock(return_value=sentinel)
-        await scene._respond(Message(sender=user, body="trigger"))
-        # latest_index will be 0 here since nothing was pre-appended.
-        scene._make_scene_update.assert_called_once_with(0)
-        user.notify.assert_called_once_with(sentinel)
-
-    async def test_respond_does_not_notify_when_response_none(self):
-        # simple-scene-respond-notify (negative): notify only fires when a response
-        # was appended.
-        user = make_character_mock("user-1", is_human=True)
-        user.notify = MagicMock()
-        npc = make_character_mock("npc-1", is_human=False)
-
-        async def async_respond(_msg):
-            return None
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc)
-        await scene._respond(Message(sender=user, body="hi"))
-        user.notify.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# SimpleScene._make_scene_update
-# ---------------------------------------------------------------------------
-
-
-class TestSceneMakeUpdate:
-    def test_make_scene_update_returns_event_with_scene_id_and_index(self):
-        # scene-make-update: returns SceneUpdatedEvent(scene_id=self.id,
-        # latest_message_index=latest_index).
-        scene = make_simple_scene(scene_id="scene-xyz")
-        event = scene._make_scene_update(7)
-        assert isinstance(event, SceneUpdatedEvent)
-        assert event.scene_id == EntityId("scene-xyz")
-        assert event.latest_message_index == 7
-
-    def test_make_scene_update_uses_self_id(self):
-        # scene-make-update: scene_id is self.id, not something else.
-        scene = make_simple_scene(scene_id="another")
-        event = scene._make_scene_update(0)
-        assert event.scene_id == EntityId("another")
-        assert event.latest_message_index == 0
-
-
-# ---------------------------------------------------------------------------
 # Scene.user_characters
 # ---------------------------------------------------------------------------
 
 
 class TestSceneUserCharacters:
     def test_user_characters_returns_only_human_actors(self):
-        # scene-user-characters: subset of `characters` with has_human_actor() True.
+        # scene-user-characters: subset of `characters` with has_human_actor()
+        # True.
         user = make_character_mock("user", is_human=True)
         npc = make_character_mock("npc", is_human=False)
         scene = make_simple_scene(user=user, npc=npc)
@@ -599,7 +508,9 @@ class TestSceneUserCharacters:
         npc = make_character_mock("npc", is_human=False)
         scene = make_simple_scene(user=user, npc=npc)
         # user is at characters[0], so it appears first (and is the only one).
-        assert scene.user_characters == [c for c in scene.characters if c.has_human_actor()]
+        assert scene.user_characters == [
+            c for c in scene.characters if c.has_human_actor()
+        ]
 
     def test_user_characters_is_property(self):
         # scene-user-characters: declared as a property on Scene.
@@ -643,37 +554,3 @@ class TestSceneToResponse:
         scene = make_simple_scene(user=user, npc=npc)
         resp = scene.to_response()
         assert resp.character_ids == [EntityId("u"), EntityId("n")]
-
-
-# ---------------------------------------------------------------------------
-# End-to-end via dispatch + drain
-# ---------------------------------------------------------------------------
-
-
-class TestSimpleSceneEndToEnd:
-    async def test_dispatch_then_drain_event_loop_appends_response(self):
-        # End-to-end: with a real event loop, dispatch's fire-and-forget task
-        # eventually appends the response and notifies the user.
-        user = make_character_mock("user-1", is_human=True)
-        user.notify = MagicMock()
-        npc = make_character_mock("npc-1", is_human=False)
-        response = Message(sender=npc, body="Hello User!")
-
-        async def async_respond(_msg):
-            return response
-
-        npc.respond = MagicMock(side_effect=async_respond)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="s")
-        msg = Message(sender=user, body="hi")
-
-        mid = scene.dispatch(msg)
-        assert mid == "s:0"
-        # Yield control so the spawned task can run.
-        for _ in range(5):
-            await asyncio.sleep(0)
-        assert scene.messages == [msg, response]
-        user.notify.assert_called_once()
-        (event,), _ = user.notify.call_args
-        assert isinstance(event, SceneUpdatedEvent)
-        assert event.scene_id == EntityId("s")
-        assert event.latest_message_index == 1

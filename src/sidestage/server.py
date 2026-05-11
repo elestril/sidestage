@@ -137,7 +137,14 @@ async def _sse_event_stream(
                 yield b": keepalive\n\n"
                 continue
             if isinstance(event, EntityChanged):
-                data = event.model_dump_json()
+                # events-subscription: serialize the in-process @dataclass
+                # event to the wire shape — entity reference becomes id,
+                # attributes pass through.
+                payload = {
+                    "entity_id": event.entity.id,
+                    "attributes": list(event.attributes),
+                }
+                data = json.dumps(payload)
             else:
                 data = json.dumps(event)
             yield f"event: entity_changed\ndata: {data}\n\n".encode("utf-8")
@@ -435,7 +442,29 @@ class App:
             EntityChanged as `event: entity_changed\\ndata: …\\n\\n`, calls
             unsubscribe in finally on disconnect.
             """
-            raise NotImplementedError
+            # rest-api-events-503.
+            self._require_serving()
+            # rest-api-events-404: campaign or entity unknown.
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            entity = campaign.factory.get(entity_id)
+            if entity is None:
+                raise HTTPException(status_code=404, detail="entity not found")
+            # rest-api-events-accept: route the queue through the user's actor.
+            queue: asyncio.Queue = asyncio.Queue()
+            user_id = App._current_user()
+            user_actor = App.get_actor(user_id)
+            user_actor.subscribe_to(entity, queue)
+
+            # rest-api-events-cleanup: on disconnect, unsubscribe.
+            def _on_close() -> None:
+                user_actor.unsubscribe_from(entity, queue)
+
+            return StreamingResponse(
+                _sse_event_stream(queue, request, _on_close),
+                media_type="text/event-stream",
+            )
 
         # frontend-serve-mount + frontend-serve-spa: mount StaticFiles at `/`
         # AFTER all `/api/*` routes are registered. `html=True` provides SPA

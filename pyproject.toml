@@ -26,6 +26,7 @@ packages = ["src/sidestage"]
 dev = [
     "pytest",
     "pytest-asyncio",
+    "pytest-timeout",
     "httpx",
     "pydoc-markdown",
 ]
@@ -34,6 +35,11 @@ dev = [
 python_files = "*_test.py test_*.py"
 testpaths = ["src/sidestage", "tests"]
 asyncio_mode = "auto"
+# A unit test that takes longer than 2s is almost certainly hung — fail
+# fast so the wedge is visible. Integration / eval tests can override
+# per-test via `@pytest.mark.timeout(N)`.
+timeout = 2
+timeout_method = "signal"
 markers = [
     "integration: in-process multi-module flows; slower than unit tests",
     "eval: behavioral evals; opt-in (require EVAL=1)",

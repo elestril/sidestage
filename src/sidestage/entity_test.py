@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import pytest
 from sidestage.entity import (
     DictEntityFactory,
@@ -8,11 +11,59 @@ from sidestage.entity import (
     EntityType,
     UnresolvedEntityError,
 )
+from sidestage.events import EntityChanged
 
 
 def make_entity(id: str = "e1", name: str = "Test", body: str = "body") -> Entity:
     model = Entity.Model(id=EntityId(id), name=name, type=EntityType.ENTITY, body=body)
     return Entity.deserialize(model)
+
+
+class _TestEntity(Entity):
+    """A concrete Entity subclass for direct instantiation in tests."""
+
+
+def make_test_entity(id: str = "te1") -> _TestEntity:
+    instance = _TestEntity.__new__(_TestEntity)
+    object.__setattr__(instance, "id", EntityId(id))
+    object.__setattr__(instance, "_loaded", True)
+    object.__setattr__(instance, "name", "TestEntity")
+    object.__setattr__(instance, "type", EntityType.ENTITY)
+    object.__setattr__(instance, "body", "")
+    object.__setattr__(instance, "_listeners", [])
+    object.__setattr__(instance, "_pending_tasks", set())
+    return instance
+
+
+class _SyncListener:
+    def __init__(self) -> None:
+        self.received: list[EntityChanged] = []
+
+    def notify(self, event: EntityChanged) -> None:
+        self.received.append(event)
+
+
+class _AsyncListener:
+    def __init__(self) -> None:
+        self.received: list[EntityChanged] = []
+
+    async def notify(self, event: EntityChanged) -> None:
+        # Yield control once so we exercise the async path.
+        await asyncio.sleep(0)
+        self.received.append(event)
+
+
+class _RaisingListener:
+    def __init__(self, message: str = "boom") -> None:
+        self.message = message
+
+    def notify(self, event: EntityChanged) -> None:
+        raise RuntimeError(self.message)
+
+
+# ----------------------------------------------------------------------
+# Existing tests (kept) — id, ghost, model, factory
+# ----------------------------------------------------------------------
 
 
 class TestEntityId:
@@ -123,3 +174,393 @@ class TestDictEntityFactory:
         entity = make_entity("e1")
         factory.add(entity)
         assert factory.get("e1") is entity
+
+
+# ----------------------------------------------------------------------
+# Event machinery tests — one per labeled invariant
+# ----------------------------------------------------------------------
+
+
+class TestEntitySubscribe:
+    """entity-subscribe: subscribe appends to listener list."""
+
+    def test_subscribe_appends_listener(self):
+        entity = make_test_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+        assert listener in entity._listeners
+
+    def test_subscribe_appends_multiple_in_order(self):
+        entity = make_test_entity()
+        l1 = _SyncListener()
+        l2 = _SyncListener()
+        l3 = _SyncListener()
+        entity.subscribe(l1)
+        entity.subscribe(l2)
+        entity.subscribe(l3)
+        assert entity._listeners == [l1, l2, l3]
+
+
+class TestEntityUnsubscribe:
+    """entity-unsubscribe: removes listener; no-op if not subscribed."""
+
+    def test_unsubscribe_removes_listener(self):
+        entity = make_test_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+        entity.unsubscribe(listener)
+        assert listener not in entity._listeners
+
+    def test_unsubscribe_not_subscribed_is_noop(self):
+        entity = make_test_entity()
+        listener = _SyncListener()
+        # Should not raise.
+        entity.unsubscribe(listener)
+        assert entity._listeners == []
+
+
+class TestEntityEmit:
+    """entity-emit: wraps each listener call in a tracked task via spawn_task;
+    per-listener isolation."""
+
+    async def test_emit_invokes_each_listener(self):
+        entity = make_test_entity()
+        l1 = _SyncListener()
+        l2 = _SyncListener()
+        entity.subscribe(l1)
+        entity.subscribe(l2)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        entity._emit(event)
+        await entity.idle()
+
+        assert l1.received == [event]
+        assert l2.received == [event]
+
+    async def test_emit_wraps_in_tracked_tasks(self):
+        entity = make_test_entity()
+        # Use an async listener so the task is observably alive after _emit.
+        listener = _AsyncListener()
+        entity.subscribe(listener)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        entity._emit(event)
+        # Immediately after _emit (no awaits), there should be a pending task.
+        assert len(entity._pending_tasks) == 1
+        await entity.idle()
+        assert listener.received == [event]
+
+    async def test_emit_per_listener_isolation(self, caplog):
+        entity = make_test_entity()
+        bad = _RaisingListener("emit-isolation")
+        good = _SyncListener()
+        entity.subscribe(bad)
+        entity.subscribe(good)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        with caplog.at_level(logging.ERROR):
+            entity._emit(event)
+            await entity.idle()
+
+        # The good listener still received the event despite the bad one raising.
+        assert good.received == [event]
+
+
+class TestEntitySpawnTask:
+    """entity-spawn-task: tracks task in _pending_tasks; done-callback removes
+    on completion + logs exception."""
+
+    async def test_spawn_task_returns_task(self):
+        entity = make_test_entity()
+
+        async def coro():
+            return "ok"
+
+        task = entity.spawn_task(coro())
+        assert isinstance(task, asyncio.Task)
+        await task
+
+    async def test_spawn_task_tracks_in_pending(self):
+        entity = make_test_entity()
+
+        async def coro():
+            await asyncio.sleep(0.01)
+
+        task = entity.spawn_task(coro())
+        assert task in entity._pending_tasks
+        await entity.idle()
+        assert task not in entity._pending_tasks
+
+    async def test_spawn_task_done_callback_removes(self):
+        entity = make_test_entity()
+
+        async def coro():
+            return None
+
+        task = entity.spawn_task(coro())
+        await task
+        # Allow the done-callback to fire.
+        await asyncio.sleep(0)
+        assert task not in entity._pending_tasks
+
+    async def test_spawn_task_done_callback_logs_exception(self, caplog):
+        entity = make_test_entity()
+
+        async def coro():
+            raise RuntimeError("spawn-task-boom")
+
+        with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
+            task = entity.spawn_task(coro())
+            try:
+                await task
+            except RuntimeError:
+                pass
+            # Allow the done-callback to fire.
+            await asyncio.sleep(0)
+
+        # An error should have been logged.
+        error_records = [
+            r for r in caplog.records if r.levelno >= logging.ERROR
+        ]
+        assert any("spawn-task-boom" in (r.exc_text or "") or
+                   "spawned task raised" in r.getMessage()
+                   for r in error_records), \
+            f"expected error log for failed spawned task, got: {error_records}"
+
+
+class TestEntityIdle:
+    """entity-idle: loops until _pending_tasks empty; bounded by timeout;
+    handles cascading tasks."""
+
+    async def test_idle_returns_immediately_when_empty(self):
+        entity = make_test_entity()
+        # No pending tasks — idle should return immediately.
+        await entity.idle()
+        assert entity._pending_tasks == set()
+
+    async def test_idle_waits_for_pending(self):
+        entity = make_test_entity()
+        completed: list[bool] = []
+
+        async def slow():
+            await asyncio.sleep(0.01)
+            completed.append(True)
+
+        entity.spawn_task(slow())
+        await entity.idle()
+        assert completed == [True]
+        assert entity._pending_tasks == set()
+
+    async def test_idle_bounded_by_timeout(self):
+        entity = make_test_entity()
+
+        async def forever():
+            await asyncio.sleep(2.0)
+
+        entity.spawn_task(forever())
+        with pytest.raises(asyncio.TimeoutError):
+            await entity.idle(timeout=0.05)
+
+    async def test_idle_handles_cascading_tasks(self):
+        """A task that spawns another task (cascading) should still be awaited."""
+        entity = make_test_entity()
+        order: list[str] = []
+
+        async def second():
+            await asyncio.sleep(0)
+            order.append("second")
+
+        async def first():
+            await asyncio.sleep(0)
+            order.append("first")
+            entity.spawn_task(second())
+
+        entity.spawn_task(first())
+        await entity.idle(timeout=1.0)
+        assert "first" in order
+        assert "second" in order
+        assert entity._pending_tasks == set()
+
+
+class TestEntityNotifyDefaultNoop:
+    """entity-notify-default-noop: default Entity.notify returns None / does nothing."""
+
+    def test_default_notify_returns_none(self):
+        entity = make_test_entity()
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        result = entity.notify(event)
+        assert result is None
+
+    def test_default_notify_does_not_raise(self):
+        entity = make_test_entity()
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        # Should not raise for any input.
+        entity.notify(event)
+
+
+# ----------------------------------------------------------------------
+# events.md protocol & error invariants
+# ----------------------------------------------------------------------
+
+
+class TestEventsProtocolSyncOrAsync:
+    """events-protocol-sync-or-async: notify can be sync or async; bus awaits if coroutine."""
+
+    async def test_sync_listener_invoked(self):
+        entity = make_test_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        entity._emit(event)
+        await entity.idle()
+
+        assert listener.received == [event]
+
+    async def test_async_listener_awaited(self):
+        entity = make_test_entity()
+        listener = _AsyncListener()
+        entity.subscribe(listener)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        entity._emit(event)
+        await entity.idle()
+
+        # If the bus did not await the coroutine, .received would be empty
+        # because the await asyncio.sleep(0) in _AsyncListener.notify would
+        # not have scheduled the append.
+        assert listener.received == [event]
+
+
+class TestEventsErrorsListenerIsolation:
+    """events-errors-listener-isolation: a raising listener doesn't abort the
+    fanout; logs via caplog."""
+
+    async def test_raising_listener_does_not_abort_fanout(self, caplog):
+        entity = make_test_entity()
+        bad = _RaisingListener("isolation-test")
+        good = _SyncListener()
+        entity.subscribe(bad)
+        entity.subscribe(good)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
+            entity._emit(event)
+            await entity.idle()
+
+        assert good.received == [event]
+
+    async def test_raising_listener_logs_error(self, caplog):
+        entity = make_test_entity()
+        bad = _RaisingListener("listener-log-check")
+        entity.subscribe(bad)
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
+            entity._emit(event)
+            await entity.idle()
+
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert error_records, "expected at least one ERROR log for raising listener"
+        # Either the message or formatted exc_text should mention the failure.
+        joined = " ".join(
+            (r.getMessage() + " " + (r.exc_text or "")) for r in error_records
+        )
+        assert "listener-log-check" in joined or "raised" in joined
+
+
+class TestEventsErrorsSpawnedTask:
+    """events-errors-spawned-task: failed spawned task logs via done-callback."""
+
+    async def test_failed_spawned_task_is_logged(self, caplog):
+        entity = make_test_entity()
+
+        async def boom():
+            raise RuntimeError("spawned-task-log-check")
+
+        with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
+            task = entity.spawn_task(boom())
+            try:
+                await task
+            except RuntimeError:
+                pass
+            # Done-callback runs after the task finishes; yield once.
+            await asyncio.sleep(0)
+
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert error_records, "expected at least one ERROR log for failed spawned task"
+
+
+class TestEventsAsyncTasksSpawn:
+    """events-async-tasks-spawn: spawn_task returns the task; cleanup on done."""
+
+    async def test_spawn_task_returns_the_task(self):
+        entity = make_test_entity()
+
+        async def coro():
+            return 42
+
+        task = entity.spawn_task(coro())
+        assert isinstance(task, asyncio.Task)
+        result = await task
+        assert result == 42
+
+    async def test_spawn_task_cleanup_on_done(self):
+        entity = make_test_entity()
+
+        async def coro():
+            return None
+
+        task = entity.spawn_task(coro())
+        assert task in entity._pending_tasks
+        await task
+        # The done-callback runs in the same loop iteration after task completion.
+        await asyncio.sleep(0)
+        assert task not in entity._pending_tasks
+
+
+class TestEventsAsyncTasksIdle:
+    """events-async-tasks-idle: handles cascading tasks (a task that triggers
+    another task)."""
+
+    async def test_cascading_emit_settles_via_idle(self):
+        """A listener that itself spawns a task on the entity — idle should
+        wait for the cascaded task too."""
+        entity = make_test_entity()
+        cascaded: list[str] = []
+
+        async def cascaded_work():
+            await asyncio.sleep(0)
+            cascaded.append("done")
+
+        class CascadingListener:
+            def notify(self, event: EntityChanged) -> None:
+                event.entity.spawn_task(cascaded_work())
+
+        entity.subscribe(CascadingListener())
+
+        event = EntityChanged(entity=entity, attributes=["test_attr"])
+        entity._emit(event)
+        await entity.idle(timeout=1.0)
+
+        assert cascaded == ["done"]
+        assert entity._pending_tasks == set()
+
+    async def test_idle_waits_for_chained_spawn_tasks(self):
+        entity = make_test_entity()
+        completed: list[str] = []
+
+        async def grandchild():
+            await asyncio.sleep(0)
+            completed.append("grandchild")
+
+        async def child():
+            await asyncio.sleep(0)
+            completed.append("child")
+            entity.spawn_task(grandchild())
+
+        entity.spawn_task(child())
+        await entity.idle(timeout=1.0)
+
+        assert completed == ["child", "grandchild"]
+        assert entity._pending_tasks == set()

@@ -86,13 +86,33 @@ Specs split across two physical homes:
   - spec-foo: Description.
     - .implements: parent-spec, OtherClass.method
     - .implemented-by: child-spec-a, ConcreteClass.method
+    - .tested-by: TestFoo.test_happy_path, cuj-hello-send
   ```
   - spec-links-implements: Upward link — "this spec point implements the named target."
   - spec-links-implemented-by: Downward link — "this spec point is implemented by the named target."
+  - spec-links-tested-by: Test link — "this spec point is proven by the named
+    test(s)." The value is any `pytest -k <selector>` substring that uniquely
+    selects the test: a method name (`test_unsubscribes_on_disconnect`), a
+    class name (`TestDispatchFlow`), or a parametrize id
+    (`cuj-hello-send`).
+    - spec-links-tested-by-implicit: Every labeled spec invariant
+      `foo-bar-baz` implicitly has `.tested-by: test_foo_bar_baz` — the
+      colocated unit test of the same name, with dashes mapped to
+      underscores. The implicit link is NOT written out. A missing unit
+      test of the expected name is a defect.
+    - spec-links-tested-by-explicit: Write `.tested-by` only when the
+      implicit link does not apply: the test lives outside the colocated
+      `*_test.py` (typically an integration test in `tests/integration/`),
+      or the test name does not follow the `test_<spec-name>` convention
+      (e.g. a parametrized scenario id like `cuj-hello-send`).
+  - spec-links-tests: Reverse of `.tested-by`. Test docstrings carry
+    `.tests: <spec-label>[, …]` pointing at the spec invariants the test
+    proves. Same value rules as `.implements`.
   - spec-links-both: When the same edge exists, BOTH ends carry the link. If
-    `A.implements: B`, then `B.implemented-by: A` should also appear. Adding
-    code does not drop the spec link; refactoring the spec hierarchy does not
-    drop the code link.
+    `A.implements: B`, then `B.implemented-by: A` should also appear; if
+    `A.tested-by: TestThing`, then `TestThing.tests: A` should also appear.
+    Adding code does not drop the spec link; refactoring the spec hierarchy
+    does not drop the code link.
 
 - spec-link-targets: A link target is either a labeled bullet spec
   (`scene-append-history`) OR the name of a public class, method, or

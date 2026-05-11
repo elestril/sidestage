@@ -73,6 +73,7 @@ class Scene(Entity):
         object.__setattr__(self, "body", body)
         object.__setattr__(self, "characters", list(characters))
         object.__setattr__(self, "_listeners", [])
+        object.__setattr__(self, "_pending_tasks", set())
 
     @property
     @abstractmethod
@@ -102,13 +103,16 @@ class Scene(Entity):
         `events.md`). Returns the assigned `MessageId`.
 
         - scene-append-records: Appends via `_append_message`.
-        - scene-append-emits: Fires `EntityChanged(scene_id,
-          SceneChangeHint(latest_message_index=idx))` via `self._emit`.
+        - scene-append-emits: Fires
+          `EntityChanged(entity=self, attributes=["messages"])` via
+          `self._emit`.
         - scene-append-returns: Returns `MessageId(f"{self.id}:{idx}")`.
 
         .implements: events-dataflow-emit, message-dataflow-record-emit
         """
-        raise NotImplementedError
+        idx = self._append_message(message)
+        self._emit(EntityChanged(entity=self, attributes=["messages"]))
+        return MessageId(f"{self.id}:{idx}")
 
     # `idle()` is inherited from `Entity` — events are entity-scoped, not
     # scene-scoped. Tests await `scene.idle()` to wait for cascading
@@ -207,6 +211,7 @@ class SimpleScene(Scene):
         - simple-scene-init-subscribes-characters: Calls `self.subscribe(c)`
           for every character in `characters`, wiring the listener-driven
           response cycle.
+          - .tested-by: test_events_dataflow
         """
         if len(characters) != 2:
             raise ValueError(
