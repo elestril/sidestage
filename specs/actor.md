@@ -1,26 +1,27 @@
-# actor: The controller of a Character
+# actor: Edge-state holder for a Character
 
-An Actor controls one or more Characters. Actors are runtime singletons owned
-by `App` (not Entity subclasses); each Character holds a reference to the
-shared Actor instance for its `owner`. Three actors exist today: `StubActor`
-(deterministic test scaffold), `UserActor` (SSE notification target), and
-`NpcActor` (LLM-backed responder, future).
+An Actor is a runtime singleton owned by `App`. It holds the **edge state**
+that connects a Character to the world outside the Sidestage process —
+LLM connections, SSE subscriptions, future auth context. Character carries
+world-data; Actor carries the I/O.
 
-## actor-impl: Actor, StubActor, UserActor classes
+Two actor classes today:
+- `StubActor` — deterministic test responder, no edge state. `respond`
+  returns `Message(sender=character, body=character.body)`.
+- `UserActor` — per-user SSE subscription manager. Holds the
+  `QueueListener`s spawned by SSE handlers on this user's behalf and
+  manages their lifecycle (`subscribe_to`, `unsubscribe_from`,
+  `cancel_all`). `respond` returns `None` (humans answer via REST POST,
+  not via the listener path).
 
-The class specs — class-level invariants and method invariants for `Actor`,
-`StubActor`, and `UserActor` — live in pydoc on `src/sidestage/actor.py` per
-`spec-location-pydoc`.
+Actor is NOT an Entity — Actors don't receive events. The Listener role
+for a Character belongs to `Character.notify` (per `character.md` and
+`events-pattern-subscription`); the Character orchestrates the response
+cycle by calling `self._actor.respond(...)` from inside the async task it
+spawns in `notify`.
 
-Run `uv run pydoc-markdown` to render the generated
-markdown view at `specs/generated/api.md`.
-
-Key labels defined in pydoc (for cross-reference from this and other markdown specs):
-- `actor-base` — the `Actor` (ABC) class spec
-- `actor-notify-default-noop` — default `Actor.notify` invariant
-- `stub-actor` — the `StubActor` class spec
-- `stub-actor-is-human`, `stub-actor-respond-returns` — invariants of `StubActor`
-- `user-actor` — the `UserActor` class spec
-- `user-actor-is-human`, `user-actor-respond-noop`, `user-actor-add-queue`,
-  `user-actor-remove-queue`, `user-actor-notify-broadcast` — invariants of
-  `UserActor`
+`Character.owner: Literal["user", "stub"]` selects the runtime Actor via
+`App.get_actor(owner)`. Today: 1:1 — one UserActor singleton, one
+StubActor singleton. When multi-user lands, `owner` will generalize to
+per-instance identifiers (`"bob"`, `"alice"`); each user-owned character
+will resolve to its own UserActor instance.

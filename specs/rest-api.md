@@ -6,30 +6,32 @@ root is served at `/`. All endpoints return 503 while `App.state == LOADING`.
 
 ## sse-dataflow: SSE notification dataflow
 
-The SSE connection is server→client only. It carries `SceneUpdatedEvent`
-notifications — pure state-change hints — all message content is fetched
-via REST.
+The SSE connection is server→client only and per-entity. It carries
+`EntityChanged` events (per `events.md`) — pure state-change hints —
+all message content is fetched via REST.
 
-1. sse-dataflow-connect: Client opens `GET /api/events`.
+1. sse-dataflow-connect: Client opens `GET /api/campaigns/{cid}/entities/{eid}/events`.
    - .implements: cuj-hello-respond
 2. sse-dataflow-lameduck: Server returns 503 if `App.state == LOADING`.
    - .implements: cuj-startup-ready
-   - .implemented-by: rest-api-get-events
-3. sse-dataflow-accept: Server creates an `asyncio.Queue` and registers it with
-   the shared user actor via `App.get_actor("user").add_queue(queue)`.
+   - .implemented-by: rest-api-get-entity-events
+3. sse-dataflow-accept: Server creates an `asyncio.Queue` and routes it
+   through the user's actor: `App.get_actor(current_user).subscribe_to(entity, queue)`.
+   The actor wraps the queue in a `QueueListener` and registers it on the
+   target entity (per `events-pattern-subscription`).
    - .implements: cuj-startup-ready
-   - .implemented-by: rest-api-get-events
-4. sse-dataflow-event: Server yields each `SceneUpdatedEvent` dequeued
-   from the queue as `event: scene_updated\ndata: <json>\n\n`.
-   - .implemented-by: UserActor.notify_messages, rest-api-get-events
-5. sse-dataflow-fetch: On each `scene_updated`, the client issues
-   `GET /api/campaigns/{cid}/scenes/{scene_id}/messages?from=…&to=…` to
-   fetch the slice it hasn't seen.
+   - .implemented-by: rest-api-get-entity-events
+4. sse-dataflow-event: Server yields each `EntityChanged` dequeued from
+   the queue as `event: entity_changed\ndata: <json>\n\n`.
+   - .implemented-by: UserActor.subscribe_to, rest-api-get-entity-events
+5. sse-dataflow-fetch: On each `entity_changed` for a scene entity, the
+   client issues `GET /api/campaigns/{cid}/scenes/{sid}/messages?from=…&to=…`
+   to fetch the slice it hasn't seen.
    - .implemented-by: sse-client-event
 6. sse-dataflow-disconnect: On client disconnect, server calls
-   `App.get_actor("user").remove_queue(queue)` and discards the queue. The
-   `UserActor` singleton stays in place for any other connected clients.
-   - .implemented-by: rest-api-get-events
+   `App.get_actor(current_user).unsubscribe_from(entity, queue)`. The
+   UserActor stays in place for any other connected clients.
+   - .implemented-by: rest-api-get-entity-events
 7. sse-dataflow-reconnect: A new connection re-enters at sse-dataflow-connect.
    Missed events are NOT replayed; the client refetches via `GET /messages`.
    - .implemented-by: sse-client-reconnect
@@ -71,10 +73,10 @@ but the prefix is the multi-campaign scaffold.
    `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`.
    - .implements: cuj-hello-send, message-dataflow-receive
    - .implemented-by: rest-api-post-message
-6. api-dataflow-dispatch: Server calls `scene.dispatch(message)` synchronously;
-   the npc response cycle runs in a background task.
-   - .implements: message-simplescene-dispatch
-   - .implemented-by: rest-api-post-message
+6. api-dataflow-dispatch: Server calls `scene.append(message)` synchronously
+   (per `events-dataflow`); this fires `EntityChanged`, listeners react,
+   the npc response cycle runs as listener-spawned background tasks.
+   - .implemented-by: rest-api-post-message, events-dataflow-emit
 7. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
    The message itself and any character response arrive via `scene_updated`
    SSE notifications followed by `GET /messages`.
@@ -176,7 +178,7 @@ class EntityModel(BaseModel):       # base — Entity.Model
     body: str
 
 class CharacterModel(EntityModel):  # Character.Model
-    owner: Literal["user", "npc", "stub"]  # selects the runtime Actor via App.get_actor
+    owner: Literal["user", "stub"]  # selects the runtime Actor via App.get_actor
 ```
 
 **Response 200** `EntityModel` (or concrete subclass)
@@ -235,39 +237,34 @@ class MessageAccepted(BaseModel):
 - rest-api-post-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
 - rest-api-post-422: Returns 422 if the request body fails Pydantic validation, or if `sender_id` is not in `player_character_ids`.
 - rest-api-post-503: Returns 503 if `App.state == LOADING`.
-- rest-api-post-dispatch: Constructs `Message(sender, body)` (no id), calls `scene.dispatch(message)`, and returns the assigned `MessageId`. The handler does not await any response cycle.
+- rest-api-post-dispatch: Constructs `Message(sender, body)`, calls `scene.append(message)` (per `events-dataflow`), returns the assigned `MessageId`. The handler does not await the npc response cycle — it fires asynchronously via listener fanout.
 - rest-api-post-returns: Returns `201 Created` with `MessageAccepted{id}`; the message itself and any character response arrive via SSE.
-- .implements: api-dataflow-send, api-dataflow-dispatch, api-dataflow-respond,
-  message-dataflow-receive, message-simplescene-dispatch
+- .implements: api-dataflow-send, api-dataflow-dispatch, api-dataflow-respond
 - .implemented-by: server-route-post-message
 
-### rest-api-get-events: GET /api/events
+### rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
 
-SSE stream of scene-state notifications. Each event tells the client which
-scene changed and what the latest message index is — content is fetched via
-`GET /api/scenes/{scene_id}/messages?from=…&to=…`.
+Per-entity SSE stream of `EntityChanged` events (per `events.md`). Clients
+open one connection per entity they care about; no global firehose.
 
-#### SceneUpdatedEvent(BaseModel)
+`EntityChanged` shape (from `events-event-changed`):
 
 ```python
-class SceneUpdatedEvent(BaseModel):
-    scene_id: EntityId
-    latest_message_index: int  # latest valid index in scene.messages
+class EntityChanged(BaseModel):
+    entity_id: EntityId
+    hint: ChangeHint | None = None   # discriminated union; SceneChangeHint today
 ```
 
-The shape is intentionally extensible — future fields can carry update hints
-for other entity classes (e.g. `latest_character_revision`).
-
 **Response** `text/event-stream`
-Each frame: `event: scene_updated\ndata: <SceneUpdatedEvent JSON>\n\n`
+Each frame: `event: entity_changed\ndata: <EntityChanged JSON>\n\n`
 
 - rest-api-events-503: Returns 503 if `App.state == LOADING`.
-- rest-api-events-keepalive: Sends `": keepalive"` comment every 15 s to prevent proxy timeouts.
-- rest-api-events-accept: On connect, creates an `asyncio.Queue` and registers it with the
-  user-owned actor: `App.get_actor("user").add_queue(queue)`. The UserActor singleton is shared
-  across all connected SSE clients; no actor swap happens at connect time.
-- rest-api-events-yield: Yields each `SceneUpdatedEvent` dequeued from the queue as a `scene_updated` event.
-- rest-api-events-cleanup: On disconnect, calls `App.get_actor("user").remove_queue(queue)`
-  and discards the queue. The UserActor singleton remains in place for other connected clients.
-- .implements: sse-dataflow-lameduck, sse-dataflow-accept, sse-dataflow-event, sse-dataflow-disconnect
-- .implemented-by: server-route-events
+- rest-api-events-404: 404 if `cid` or `eid` doesn't resolve.
+- rest-api-events-keepalive: `": keepalive"` comment every 15 s to prevent proxy timeouts.
+- rest-api-events-accept: On connect, creates an `asyncio.Queue` and routes
+  through `App.get_actor(current_user).subscribe_to(entity, queue)`. The
+  UserActor wraps it in a `QueueListener` and registers with the entity.
+- rest-api-events-yield: Yields each `EntityChanged` dequeued from the queue as an `entity_changed` event.
+- rest-api-events-cleanup: On disconnect, calls `App.get_actor(current_user).unsubscribe_from(entity, queue)`.
+- .implements: sse-dataflow-lameduck, sse-dataflow-accept, sse-dataflow-event, sse-dataflow-disconnect, events-subscription
+- .implemented-by: server-route-entity-events

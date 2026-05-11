@@ -1,26 +1,17 @@
 # character: A person in the game world
 
-A Character represents a person in the game world — a player character, NPC,
-or meta-character such as the GM. Characters store world-state plus an
-`owner` discriminator that selects which runtime Actor handles their
-responses.
+A Character represents a person in the game world — player character, NPC,
+or meta-character such as the GM. Characters store world-data (name, body)
+plus an `owner` discriminator that selects which runtime Actor handles
+responses. Today's owners: `"user"` and `"stub"`.
 
-## character-impl: Character class
+`Character` is also a `Listener` (per `events.md`). When a Scene it's
+subscribed to emits an `EntityChanged`, `Character.notify(event, emitter)`
+inspects the new message and (if not from itself) spawns an async task
+that calls `self._actor.respond(message, self)`. A non-None response is
+appended back to the emitter scene via `emitter.append(response)`, firing
+another `EntityChanged`.
 
-The `Character` class spec — class-level invariants, attribute invariants
-(`owner`), inner `Model`, constructor, and methods (`respond`, `notify`,
-`has_human_actor`) — lives in pydoc on `src/sidestage/character.py` per
-`spec-location-pydoc`.
-
-Run `uv run pydoc-markdown` to render the generated
-markdown view at `specs/generated/api.md`.
-
-Key labels defined in pydoc (for cross-reference from this and other markdown specs):
-- `character-class` — the class spec
-- `character-owner` — attribute
-- `character-model` — inner Pydantic model
-- `character-init-stores-owner`, `character-init-binds-actor` — `__init__`
-  invariants
-- `character-respond-passthrough` — `respond` method
-- `character-notify-passthrough` — `notify` method
-- `character-has-human-actor` — `has_human_actor` method
+UserActor's `respond` returns `None` so user characters auto-noop on this
+listener path. StubActor returns `Message(sender=character, body=character.body)`
+— the character's body verbatim is the canned response.

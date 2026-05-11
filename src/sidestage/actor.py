@@ -1,67 +1,43 @@
+"""actor: Edge-state holder for a Character.
+
+Per `specs/actor.md`. Actor is a runtime singleton owned by `App` and
+holds external-state — LLM connections, SSE subscriptions, future auth.
+Character carries world-data; Actor carries the I/O.
+"""
+
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import BaseModel
-
-from sidestage.entity import EntityId
-
 if TYPE_CHECKING:
     from sidestage.character import Character
+    from sidestage.entity import Entity
     from sidestage.message import Message
 
 
-class SceneUpdatedEvent(BaseModel):
-    """scene-updated-event: SSE payload for `event: scene_updated` notifications.
-
-    Carries the latest message index for a scene; clients use it to fetch
-    the new slice via `GET /api/campaigns/{cid}/scenes/{scene_id}/messages?from=…`.
-
-    .implements: rest-api-events-yield, sse-dataflow-event
-    """
-
-    scene_id: EntityId
-    """scene-updated-event-scene-id: Id of the scene that changed."""
-
-    latest_message_index: int
-    """scene-updated-event-latest-message-index: Latest valid index in `scene.messages`."""
-
-
 class Actor(ABC):
-    """actor-base: Abstract base for the controller of one or more Characters.
-    Actors are runtime singletons owned by `App` (not Entity subclasses); each
-    Character holds a reference to the shared Actor instance for its `owner`.
-
-    .implements: actor
+    """actor-base: Abstract base for the controller of one or more
+    Characters. Actors are runtime singletons owned by `App` (NOT Entity
+    subclasses); each Character holds a reference to the shared Actor
+    instance for its `owner`. Actor is NOT a Listener — the listener role
+    for a Character belongs to `Character.notify`.
     """
 
     @abstractmethod
-    def is_human(self) -> bool:
-        pass
+    def is_human(self) -> bool: ...
 
     @abstractmethod
     async def respond(
         self, message: "Message", character: "Character"
-    ) -> Optional["Message"]:
-        pass
-
-    def notify(self, event: SceneUpdatedEvent) -> None:
-        """actor-notify-default-noop: Default implementation does nothing.
-        Subclasses that need to deliver scene updates (e.g. `UserActor`)
-        override.
-
-        .implemented-by: UserActor.notify
-        """
-        return None
+    ) -> Optional["Message"]: ...
 
 
 class StubActor(Actor):
-    """stub-actor: Deterministic scaffold actor for tests and low-cost
-    end-to-end runs.
-
-    .implements: actor
+    """stub-actor: Deterministic test scaffold. No edge state. `respond`
+    returns the character body verbatim — content comes from the character,
+    not from the actor.
     """
 
     def is_human(self) -> bool:
@@ -72,11 +48,7 @@ class StubActor(Actor):
         self, message: "Message", character: "Character"
     ) -> Optional["Message"]:
         """stub-actor-respond-returns: Returns
-        `Message(sender=character, body=character.body)`. The actor is a
-        deterministic mechanism; the actual response content comes from the
-        character's `body`.
-
-        .implements: message-simplescene-respond
+        `Message(sender=character, body=character.body)`.
         """
         from sidestage.message import Message as Msg
 
@@ -84,16 +56,20 @@ class StubActor(Actor):
 
 
 class UserActor(Actor):
-    """user-actor: Marker actor for user-owned characters. Maintains a
-    private list of SSE event queues — one per connected client. `notify`
-    broadcasts a `SceneUpdatedEvent` to every queue. Does not generate
-    responses; user input arrives via REST POST.
+    """user-actor: Per-user SSE subscription manager. Holds the
+    `QueueListener`s spawned by SSE handlers on this user's behalf and
+    manages their lifecycle. `respond` returns `None` (humans answer via
+    REST POST, not via the listener path).
 
-    .implements: actor
+    Notify still flows direct entity → QueueListener (per
+    `events-multi-window`); UserActor is bookkeeping for the QueueListener
+    lifecycle, NOT a router.
     """
 
     def __init__(self) -> None:
-        self._queues: list[asyncio.Queue] = []
+        # Tracks (entity, listener) pairs subscribed on this user's behalf.
+        # Exact shape is implementation detail; tests use a mock.
+        self._subscriptions: list = []
 
     def is_human(self) -> bool:
         """user-actor-is-human: Returns True."""
@@ -102,35 +78,42 @@ class UserActor(Actor):
     async def respond(
         self, message: "Message", character: "Character"
     ) -> Optional["Message"]:
-        """user-actor-respond-noop: Returns None unconditionally. Human
-        responses arrive via REST.
+        """user-actor-respond-noop: Returns `None` unconditionally — humans
+        respond via REST.
         """
         return None
 
-    def add_queue(self, queue: asyncio.Queue) -> None:
-        """user-actor-add-queue: Registers `queue` for SSE delivery.
+    def subscribe_to(
+        self, entity: "Entity", queue: asyncio.Queue
+    ) -> None:
+        """user-actor-subscribe-to: Wrap `queue` in a `QueueListener`,
+        register it on `entity` via `entity.subscribe(listener)`, and
+        track the (entity, listener) pair for lifecycle management.
 
-        .implements: sse-dataflow-event
+        Called by the SSE handler per `sse-dataflow-accept`.
+
+        .implements: events-pattern-subscription-lifecycle
         """
-        self._queues.append(queue)
+        raise NotImplementedError
 
-    def remove_queue(self, queue: asyncio.Queue) -> None:
-        """user-actor-remove-queue: Deregisters `queue`. No-op if not
-        registered.
+    def unsubscribe_from(
+        self, entity: "Entity", queue: asyncio.Queue
+    ) -> None:
+        """user-actor-unsubscribe-from: Find the QueueListener tracking
+        `queue` for `entity`, call `entity.unsubscribe(listener)`, and
+        drop the tracked pair. No-op if not subscribed.
 
-        .implements: sse-dataflow-event
+        Called by the SSE handler in `try/finally` per
+        `sse-dataflow-disconnect`.
+
+        .implements: events-pattern-subscription-lifecycle
         """
-        try:
-            self._queues.remove(queue)
-        except ValueError:
-            pass
+        raise NotImplementedError
 
-    def notify(self, event: SceneUpdatedEvent) -> None:
-        """user-actor-notify-broadcast: Puts `event` onto every registered
-        queue via `put_nowait`. The same instance is dispatched to all
-        queues — no copying.
+    def cancel_all(self) -> None:
+        """user-actor-cancel-all: Unsubscribe every tracked pair. Used on
+        session end / future logout.
 
-        .implements: sse-dataflow-event, message-simplescene-respond
+        .implements: events-pattern-subscription-lifecycle
         """
-        for queue in self._queues:
-            queue.put_nowait(event)
+        raise NotImplementedError

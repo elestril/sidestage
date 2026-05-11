@@ -1,46 +1,26 @@
 # scene: The active game scene
 
-A scene is an Entity representing the active context for a game session. It
-holds the characters present and the full message history. Scene is abstract;
-SimpleScene is the scaffold concrete implementation.
+A Scene is an Entity holding the characters present and the message
+history. Scene is abstract; SimpleScene is the concrete impl (exactly two
+characters: one user, one non-user — validated at construction).
 
-## scene-impl: Scene and SimpleScene classes
+Scene is **pure data + event source**. Public mutation:
 
-The `Scene` and `SimpleScene` class specs — class-level invariants, attribute
-invariants, the inner `Scene.Model`, and per-method invariants — live in
-pydoc on `src/sidestage/scene.py` per `spec-location-pydoc`.
+- `scene.append(msg) -> MessageId` — append `msg` to history, emit
+  `EntityChanged(scene_id, SceneChangeHint(latest_message_index=idx))`,
+  return the assigned MessageId. The single mutation API. No `dispatch`,
+  no `_respond` orchestration on Scene.
+- `await scene.idle()` — wait for all background tasks the Scene's
+  listeners spawned in response to recent emissions to settle. Used by
+  tests (per `testing.md`); bounded by a small timeout.
 
-Run `uv run pydoc-markdown` to
-render the generated markdown view at `specs/generated/api.md`.
+`SimpleScene.__init__` subscribes every character to itself, wiring the
+listener-driven response cycle automatically.
 
-Key labels defined in pydoc (for cross-reference from this and other markdown
-specs):
+## scene-on-disk: Persistent shape
 
-- `scene-class` — the abstract Scene class spec
-- `scene-characters` — the `characters: list[Character]` attribute
-- `scene-user-characters` — `user_characters` property: subset of `characters`
-  whose `has_human_actor()` is True. Single source of truth for "which
-  characters can a client send messages as".
-- `scene-model` — the inner `Scene.Model` Pydantic shape
-- `scene-messages-property` — the abstract `messages` property
-- `scene-serialize-message` — `Scene.serialize_message`
-- `scene-deserialize-signature`, `scene-deserialize-resolves`,
-  `scene-deserialize-constructs` — invariants of `Scene.deserialize`
-- `scene-to-response` — `Scene.to_response() -> SceneResponse` builds the
-  API wire shape; the only place `SceneResponse` is constructed
-- `simple-scene` — the SimpleScene class spec
-- `simple-scene-init-count`, `simple-scene-init-user`, `simple-scene-init-npc`,
-  `simple-scene-init-messages`, `simple-scene-init-aliases` — invariants of
-  `SimpleScene.__init__`
-- `simple-scene-messages` — `SimpleScene.messages` property
-- `simple-scene-dispatch-append`, `simple-scene-dispatch-task`,
-  `simple-scene-dispatch-return` — invariants of `SimpleScene.dispatch`
-
-Internal contracts (private members; not public spec targets per
-`spec-link-targets-private`, but invariants are documented in pydoc for
-implementer reference):
-
-- `scene-append-history`, `scene-append-return` — `Scene._append_message`
-- `scene-make-update` — `SimpleScene._make_scene_update`
-- `simple-scene-respond-call`, `simple-scene-respond-append`,
-  `simple-scene-respond-notify` — `SimpleScene._respond`
+`Scene.Model` carries `characters: list[EntityId]` plus the inherited
+Entity fields. **Messages are runtime-only** — not persisted today (per
+the "ephemeral messages" decision). When save-game lands, the on-disk
+shape gains a messages sidecar; until then `Scene.Model` is the complete
+persistent declaration.

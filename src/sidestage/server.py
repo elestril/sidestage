@@ -14,7 +14,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sidestage.actor import Actor, SceneUpdatedEvent, StubActor, UserActor
+from sidestage.actor import Actor, StubActor, UserActor
+from sidestage.events import EntityChanged
 from sidestage.campaign import Campaign, CampaignResponse
 from sidestage.entity import (
     DictEntityFactory,
@@ -115,10 +116,10 @@ async def _sse_event_stream(
     on_close=None,
     keepalive_interval_s: float = _KEEPALIVE_INTERVAL_S,
 ) -> AsyncIterator[bytes]:
-    """Yield SSE bytes from a queue of SceneUpdatedEvent.
+    """Yield SSE bytes from a queue of `EntityChanged` events.
 
     rest-api-events-yield + sse-dataflow-event: emits each dequeued event as
-    `event: scene_updated\\ndata: <json>\\n\\n`.
+    `event: entity_changed\\ndata: <json>\\n\\n`.
     rest-api-events-keepalive: emits `: keepalive` after `keepalive_interval_s`
     of inactivity.
     rest-api-events-cleanup: invokes `on_close` in the finally block.
@@ -135,11 +136,11 @@ async def _sse_event_stream(
             except asyncio.TimeoutError:
                 yield b": keepalive\n\n"
                 continue
-            if isinstance(event, SceneUpdatedEvent):
+            if isinstance(event, EntityChanged):
                 data = event.model_dump_json()
             else:
                 data = json.dumps(event)
-            yield f"event: scene_updated\ndata: {data}\n\n".encode("utf-8")
+            yield f"event: entity_changed\ndata: {data}\n\n".encode("utf-8")
     finally:
         if on_close is not None:
             on_close()
@@ -269,35 +270,6 @@ class App:
         distinguished. The returned id is always a key into `cls._actors`.
         """
         return "user"
-
-    @classmethod
-    def _user_actor(cls, user_id: str) -> UserActor:
-        """Resolve the `UserActor` for `user_id`. Raises `TypeError` if the
-        registered actor is not a `UserActor` — only user-owned queues
-        subscribe to scene updates.
-        """
-        actor = cls.get_actor(user_id)
-        if not isinstance(actor, UserActor):
-            raise TypeError(
-                f"Actor for user_id={user_id!r} is {type(actor).__name__}, "
-                "not UserActor; cannot subscribe a queue."
-            )
-        return actor
-
-    @classmethod
-    def _subscribe(cls, user_id: str, queue: asyncio.Queue) -> None:
-        """Register `queue` with the user's actor for SSE delivery.
-
-        Today: `user_id` is always `"user"` — routes to the singleton
-        `UserActor`. Subsequent events dispatched to that actor will be
-        enqueued on every registered queue, including this one.
-        """
-        cls._user_actor(user_id).add_queue(queue)
-
-    @classmethod
-    def _unsubscribe(cls, user_id: str, queue: asyncio.Queue) -> None:
-        """Deregister `queue` previously registered via `_subscribe`."""
-        cls._user_actor(user_id).remove_queue(queue)
 
     # ----------------------- helpers -----------------------
 
@@ -443,43 +415,27 @@ class App:
                     status_code=422,
                     detail="sender_id is not a player character",
                 )
-            # rest-api-post-dispatch: construct Message(sender, body), dispatch,
-            # take returned MessageId.
+            # rest-api-post-dispatch: construct Message(sender, body), call
+            # scene.append (per events-dataflow), return assigned MessageId.
+            # Reactions (npc cycle, SSE delivery) are listener-driven — the
+            # POST handler does not await them.
             msg = Message(sender=sender, body=body.body)
-            message_id = scene.dispatch(msg)
+            message_id = scene.append(msg)
             # rest-api-post-returns: 201 + MessageAccepted{id}.
             return MessageAccepted(id=message_id)
 
-        # rest-api-get-events: GET /api/events
-        @app.get("/api/events")
-        async def get_events(request: Request) -> Response:
-            self._require_serving()
-
-            # rest-api-events-accept / sse-dataflow-accept: register a queue
-            # with the user's actor via App._subscribe. Today _current_user
-            # always returns "user"; the routing indirection lets multi-user
-            # auth land later without touching the route.
-            queue: asyncio.Queue = asyncio.Queue()
-            user_id = App._current_user()
-            App._subscribe(user_id, queue)
-
-            def _on_close() -> None:
-                # rest-api-events-cleanup / sse-dataflow-disconnect.
-                App._unsubscribe(user_id, queue)
-
-            async def event_stream() -> AsyncIterator[bytes]:
-                async for chunk in _sse_event_stream(
-                    queue=queue,
-                    request=request,
-                    on_close=_on_close,
-                ):
-                    yield chunk
-
-            return StreamingResponse(
-                event_stream(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache"},
-            )
+        # rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
+        @app.get("/api/campaigns/{cid}/entities/{entity_id}/events")
+        async def get_entity_events(
+            cid: str, entity_id: str, request: Request
+        ) -> Response:
+            """Per-entity SSE stream (per events.md). Resolves the campaign
+            and entity, routes the queue subscription through the
+            current-user's UserActor (per sse-dataflow-accept), yields each
+            EntityChanged as `event: entity_changed\\ndata: …\\n\\n`, calls
+            unsubscribe in finally on disconnect.
+            """
+            raise NotImplementedError
 
         # frontend-serve-mount + frontend-serve-spa: mount StaticFiles at `/`
         # AFTER all `/api/*` routes are registered. `html=True` provides SPA

@@ -1,44 +1,25 @@
 # message: The unit of communication
 
-A Message is created by an Actor and flows through the system from sender to
-recipients via the Scene.
+A Message is created by an Actor and flows through the Scene from sender
+to recipients via the event bus.
 
-Per `spec-location-pydoc`, the `MessageId` NewType, `Message` class, and
-`Message.Model` inner class invariants now live in pydoc on
-`src/sidestage/message.py`. This file retains the prose intro, the
-cross-cutting dataflow spec, and a label index for cross-reference.
+## message-dataflow
 
-Run `uv run pydoc-markdown` to
-render the generated markdown view at `specs/generated/api.md`.
+Every message flows through `scene.append(message)` — the POST handler
+holds no special path. `append` records the message and emits
+`EntityChanged`; reactions (npc response, SSE delivery) are driven by
+listener fanout per `events-dataflow`. There is no Scene-side
+orchestration (no `dispatch`, no `_respond`).
 
-## message-dataflow: Dataflow
-
-Every message — whether originating from the user via REST or from an Actor as a
-response — flows through the same entry point: `scene.dispatch(message)`. The
-POST handler holds no special path; it constructs a `Message` and calls
-`dispatch` identically to any other caller. `dispatch` returns the `MessageId`
-assigned to the message.
-
-1. message-dataflow-receive: Message is received by `Scene.dispatch()` via
-   either internal calls or [rest-api-post-message].
-   - .implemented-by: SimpleScene.dispatch, rest-api-post-message, api-dataflow-send
-2. message-simplescene-dispatch: `SimpleScene.dispatch`. The message is appended
-   to Scene.messages, and the new array index is used to construct the MessageId
-   and returned to the caller.
-   - .implemented-by: SimpleScene.dispatch
-3. message-simplescene-respond: asyncronously self._npc.respond() is
-   generated, it is appended to self.messages, then
-   self._user.notify(event) is called with the latest message id.
-   - .implemented-by: SimpleScene.dispatch, Character.respond, Character.notify_messages, StubActor.respond, UserActor.notify_messages
-
-## message-labels: Label index (defined in pydoc)
-
-The following labels are defined in pydoc on `src/sidestage/message.py` and are
-available as link targets from this and other markdown specs:
-
-- `message-id` — the `MessageId` NewType (module docstring)
-  - `message-id-newtype`, `message-id-format`, `message-id-assign` — invariants
-- `message-class` — the `Message` dataclass
-  - `message-class-fields`, `message-class-no-serialize` — invariants
-- `message-model` — the `Message.Model` inner Pydantic class
-  - `message-model-fields`, `message-model-inner`, `message-model-built-by` — invariants
+1. message-dataflow-receive: Message received by `Scene.append()` —
+   either from REST (`rest-api-post-message`) or from a listener-spawned
+   Actor response.
+   - .implemented-by: Scene.append, rest-api-post-message
+2. message-dataflow-record-emit: `scene.append` records the message,
+   assigns the next index as MessageId, fires `EntityChanged` (per
+   `events-dataflow-emit`).
+   - .implemented-by: Scene.append, events-dataflow-emit
+3. message-dataflow-react: Subscribed Characters' `notify` filters and
+   spawns `_actor.respond` tasks; non-None responses recurse back through
+   step 1 via `scene.append(response)`.
+   - .implemented-by: Character.notify, events-dataflow-fan-out

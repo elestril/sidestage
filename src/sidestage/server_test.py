@@ -597,7 +597,7 @@ class TestGetEntity:
             "name": "Alice",
             "type": "character",
             "body": "Body",
-            "owner": "npc",
+            "owner": "stub",
         })
         mock_entity.serialize = MagicMock(return_value=mock_model)
 
@@ -609,7 +609,7 @@ class TestGetEntity:
         body = response.json()
         assert body["id"] == "alice"
         assert body["name"] == "Alice"
-        assert body["owner"] == "npc"
+        assert body["owner"] == "stub"
 
 
 # ---------------------------------------------------------------------------

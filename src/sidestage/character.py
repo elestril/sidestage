@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Literal, Optional, Self
 from sidestage.entity import Entity, EntityId, EntityType
 
 if TYPE_CHECKING:
-    from sidestage.actor import Actor, SceneUpdatedEvent
+    from sidestage.actor import Actor
+    from sidestage.events import EntityChanged
     from sidestage.message import Message
 
 
@@ -32,7 +33,7 @@ class Character(Entity):
         .implements: character
         """
 
-        owner: Literal["user", "npc", "stub"]
+        owner: Literal["user", "stub"]
 
     def __init__(
         self,
@@ -40,7 +41,7 @@ class Character(Entity):
         id: EntityId,
         name: str,
         body: str,
-        owner: Literal["user", "npc", "stub"],
+        owner: Literal["user", "stub"],
     ) -> None:
         """Construct a fully-loaded (non-ghost) Character.
 
@@ -94,13 +95,28 @@ class Character(Entity):
         """
         return await self._actor.respond(message, self)
 
-    def notify(self, event: SceneUpdatedEvent) -> None:
-        """character-notify-passthrough: Pure pass-through to
-        `self._actor.notify(event)`.
+    async def notify(self, event: EntityChanged) -> None:
+        """character-notify-react: React to an `EntityChanged` event from a
+        Scene we're subscribed to.
 
-        .implements: message-simplescene-respond
+        Pure async — the bus wraps each listener in a task per
+        `events-async-tasks`, so this can `await` directly without manual
+        `create_task`. The wrapping task is tracked on `event.entity` for
+        `idle()` to await.
+
+        Filters: only emissions where `event.entity` is a Scene AND
+        `"messages" in event.attributes`; only when the latest message's
+        sender is NOT this character (avoids responding to own messages,
+        including the recursive case where this character's response
+        causes another emission).
+
+        Action: `await self._actor.respond(latest, self)`. If the response
+        is non-None, appends it back via `event.entity.append(response)`
+        (which fires another `EntityChanged`).
+
+        .implements: events-pattern-subscription, message-dataflow-react
         """
-        return self._actor.notify(event)
+        raise NotImplementedError
 
     def has_human_actor(self) -> bool:
         """character-has-human-actor: Returns `self.owner == "user"`. The check

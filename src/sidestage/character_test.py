@@ -31,7 +31,7 @@ def make_character(
     id: str = "c1",
     name: str = "Alice",
     body: str = "a body",
-    owner: str = "npc",
+    owner: str = "stub",
     actor: object | None = None,
 ) -> Character:
     """Construct a Character with App.get_actor patched to return `actor`."""
@@ -70,8 +70,8 @@ class TestCharacterInitStoresOwner:
         assert char.owner == "user"
 
     def test_stores_owner_npc(self):
-        char = make_character(owner="npc")
-        assert char.owner == "npc"
+        char = make_character(owner="stub")
+        assert char.owner == "stub"
 
     def test_stores_owner_stub(self):
         char = make_character(owner="stub")
@@ -87,7 +87,7 @@ class TestCharacterInitStoresOwner:
     def test_loaded_true_after_init(self):
         # The Entity ghost guard must allow free attribute access — i.e. the
         # newly-constructed Character is a real (non-ghost) entity.
-        char = make_character(owner="npc")
+        char = make_character(owner="stub")
         # If _loaded were False this would raise UnresolvedEntityError.
         assert char.name == "Alice"
 
@@ -108,9 +108,9 @@ class TestCharacterInitBindsActor:
                 id=EntityId("c1"),
                 name="Alice",
                 body="body",
-                owner="npc",
+                owner="stub",
             )
-        mock_get_actor.assert_called_once_with("npc")
+        mock_get_actor.assert_called_once_with("stub")
 
     def test_stores_returned_actor_as_underscore_actor(self):
         sentinel_actor = MagicMock(name="actor")
@@ -258,7 +258,7 @@ class TestCharacterHasHumanActor:
         assert char.has_human_actor() is True
 
     def test_returns_false_when_owner_is_npc(self):
-        char = make_character(owner="npc")
+        char = make_character(owner="stub")
         assert char.has_human_actor() is False
 
     def test_returns_false_when_owner_is_stub(self):
@@ -300,9 +300,9 @@ class TestCharacterModel:
             name="Alice",
             type=EntityType.CHARACTER,
             body="body",
-            owner="npc",
+            owner="stub",
         )
-        assert m.owner == "npc"
+        assert m.owner == "stub"
 
     def test_model_accepts_stub(self):
         m = Character.Model(
@@ -370,13 +370,13 @@ class TestCharacterDeserialize:
             name="Carol",
             type=EntityType.CHARACTER,
             body="carol body",
-            owner="npc",
+            owner="stub",
         )
         sentinel = MagicMock(name="actor")
         with _patch_get_actor(sentinel) as mock_get_actor:
             char = Character.deserialize(model)
 
-        mock_get_actor.assert_called_once_with("npc")
+        mock_get_actor.assert_called_once_with("stub")
         assert char._actor is sentinel
 
     def test_serialize_roundtrip(self):

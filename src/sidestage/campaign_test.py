@@ -212,13 +212,13 @@ class TestCampaignLoadOwners:
             "name: Owners Test\ndefault_scene_id: s1\n"
         )
         user = next(c for c, o in owners.items() if o == "user")
-        npc = next(c for c, o in owners.items() if o == "npc")
+        nonuser = next(c for c, o in owners.items() if o != "user")
         (root / "scenes" / "s1.md").write_text(
-            f"---\nname: Scene One\ncharacters:\n  - {user}\n  - {npc}\n---\nscene body\n"
+            f"---\nname: Scene One\ncharacters:\n  - {user}\n  - {nonuser}\n---\nscene body\n"
         )
 
     def test_load_owner_user(self, tmp_path, clean_app_state):
-        self._write_min_campaign(tmp_path, {"alice": "user", "bob": "npc"})
+        self._write_min_campaign(tmp_path, {"alice": "user", "bob": "stub"})
         with _patched_get_actor():
             campaign = Campaign.load(tmp_path)
         alice = campaign.factory.get("alice")
@@ -226,23 +226,13 @@ class TestCampaignLoadOwners:
         # character-has-human-actor.
         assert alice.has_human_actor() is True
 
-    def test_load_owner_npc(self, tmp_path, clean_app_state):
-        self._write_min_campaign(tmp_path, {"alice": "user", "bob": "npc"})
+    def test_load_owner_stub(self, tmp_path, clean_app_state):
+        self._write_min_campaign(tmp_path, {"alice": "user", "bob": "stub"})
         with _patched_get_actor():
             campaign = Campaign.load(tmp_path)
         bob = campaign.factory.get("bob")
-        assert bob.owner == "npc"
+        assert bob.owner == "stub"
         assert bob.has_human_actor() is False
-
-    def test_load_owner_stub(self, tmp_path, clean_app_state):
-        self._write_min_campaign(
-            tmp_path, {"alice": "user", "bob": "npc", "ghosty": "stub"}
-        )
-        with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
-        ghosty = campaign.factory.get("ghosty")
-        assert ghosty.owner == "stub"
-        assert ghosty.has_human_actor() is False
 
     def test_load_owner_default_is_stub(self, tmp_path, clean_app_state):
         # Character markdown without an explicit `owner:` field defaults to
@@ -253,7 +243,7 @@ class TestCampaignLoadOwners:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "characters" / "mystery.md").write_text(
             "---\nname: Mystery\n---\nbody\n"
@@ -286,7 +276,7 @@ class TestCharacterActorBinding:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
             "name: Test\ndefault_scene_id: s1\n"
@@ -298,7 +288,7 @@ class TestCharacterActorBinding:
         seen_owners: list[str] = []
         actors = {
             "user": _human_actor(),
-            "npc": _npc_actor(),
+            "stub": _stub_actor(),
         }
 
         def _get_actor(owner):
@@ -315,13 +305,13 @@ class TestCharacterActorBinding:
         # Both characters were instantiated via __init__, which calls
         # App.get_actor (character-init-binds-actor).
         assert "user" in seen_owners
-        assert "npc" in seen_owners
+        assert "stub" in seen_owners
 
         # The bound actor is the one App.get_actor returned.
         alice = campaign.factory.get("alice")
         bob = campaign.factory.get("bob")
         assert alice._actor is actors["user"]
-        assert bob._actor is actors["npc"]
+        assert bob._actor is actors["stub"]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +331,7 @@ class TestSceneDeserializeViaAppFactory:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
             "name: Test\ndefault_scene_id: s1\n"
@@ -412,7 +402,7 @@ class TestDefaultScene:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
             "name: Test\ndefault_scene_id: s2\n"
@@ -445,7 +435,7 @@ class TestDefaultScene:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text("name: No Default\n")
         (tmp_path / "scenes" / "s1.md").write_text(
@@ -482,7 +472,7 @@ class TestCampaignScenes:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
             "name: Multi\ndefault_scene_id: s1\n"
@@ -535,7 +525,7 @@ class TestCampaignToResponse:
             "---\nname: Alice\nowner: user\n---\nbody\n"
         )
         (tmp_path / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: npc\n---\nbody\n"
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text("name: Hintless\n")
         (tmp_path / "scenes" / "s1.md").write_text(

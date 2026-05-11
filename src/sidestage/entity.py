@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import NewType, Optional, Self
+from typing import TYPE_CHECKING, NewType, Optional, Self
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from sidestage.events import EntityChanged, Listener
 
 
 EntityId = NewType("EntityId", str)
@@ -70,6 +74,8 @@ class Entity:
     def __init__(self, id: EntityId, *, _loaded: bool = False) -> None:
         object.__setattr__(self, "id", id)
         object.__setattr__(self, "_loaded", _loaded)
+        if _loaded:
+            object.__setattr__(self, "_listeners", [])
 
     def __getattribute__(self, name: str):
         """Ghost-pattern attribute access guard.
@@ -125,7 +131,79 @@ class Entity:
         object.__setattr__(instance, "name", model.name)
         object.__setattr__(instance, "type", model.type)
         object.__setattr__(instance, "body", model.body)
+        object.__setattr__(instance, "_listeners", [])
         return instance
+
+    # ---------------- events: pub/sub (per specs/events.md) ---------------
+
+    def subscribe(self, listener: "Listener") -> None:
+        """entity-subscribe: Register `listener` to receive future
+        `EntityChanged` events emitted by this entity.
+
+        .implements: events-pattern-subscription
+        """
+        raise NotImplementedError
+
+    def unsubscribe(self, listener: "Listener") -> None:
+        """entity-unsubscribe: Remove `listener` from this entity's
+        subscriber list. No-op if `listener` was not subscribed.
+
+        .implements: events-pattern-subscription-lifecycle
+        """
+        raise NotImplementedError
+
+    def _emit(self, event: "EntityChanged") -> None:
+        """entity-emit: Fan out `event` by wrapping each listener call in a
+        tracked task on this entity (per `events-async-tasks`):
+        `for l in self._listeners: self.spawn_task(self._invoke_listener(l, event))`.
+        Called from inside state-mutating methods on subclasses (e.g. `Scene.append`).
+
+        Per-listener task wrapping gives isolation (one bad listener can't
+        abort the fanout) and lets listeners be sync or async transparently.
+
+        .implements: events-dataflow-fan-out, events-errors-listener-isolation
+        """
+        raise NotImplementedError
+
+    def spawn_task(self, coro) -> "asyncio.Task":
+        """entity-spawn-task: Track `coro` as a task on this entity.
+
+        Adds the task to `_pending_tasks`; the done-callback removes it on
+        completion AND logs `task.exception()` if non-None (per
+        `events-errors-spawned-task`). Returns the Task.
+
+        Used by `_emit` for per-listener wrapping; also callable by
+        listeners that need to fan out additional async work.
+
+        .implements: events-async-tasks-spawn
+        """
+        raise NotImplementedError
+
+    async def idle(self) -> None:
+        """entity-idle: Wait for all pending listener tasks to complete.
+
+        Loops until `_pending_tasks` is empty — each iteration awaits
+        `gather(*pending, return_exceptions=True)`. Catches cascading
+        reactions (a task that triggers another emission that spawns
+        another task). Bounded by a small timeout to fail fast on wedges.
+        Re-raises unexpected exceptions per
+        `events-errors-test-visibility`.
+
+        Test-only primitive; production never calls it.
+
+        .implements: events-async-tasks-idle, testing-runner
+        """
+        raise NotImplementedError
+
+    def notify(self, event: "EntityChanged") -> None:
+        """entity-notify-default-noop: Default Entity listener — does
+        nothing. Subclasses (e.g. `Character`) override to react to events
+        from entities they've subscribed to. The emitting entity is
+        available at `event.entity`.
+
+        .implements: events-protocol
+        """
+        return None
 
 
 class EntityFactory(ABC):

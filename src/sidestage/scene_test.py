@@ -218,6 +218,60 @@ class TestSceneDeserialize:
         assert params == ["model"]
 
 
+class TestSceneToModel:
+    """scene-to-model: inverse of Scene.deserialize."""
+
+    def test_to_model_returns_scene_model(self):
+        scene = make_simple_scene(scene_id="s")
+        model = scene.to_model()
+        assert isinstance(model, Scene.Model)
+
+    def test_to_model_captures_id_name_body(self):
+        user = make_character_mock("u", is_human=True)
+        npc = make_character_mock("n", is_human=False)
+        scene = SimpleScene(
+            id=EntityId("scn-7"),
+            name="My Scene",
+            body="The body",
+            characters=[user, npc],
+        )
+        model = scene.to_model()
+        assert model.id == EntityId("scn-7")
+        assert model.name == "My Scene"
+        assert model.body == "The body"
+
+    def test_to_model_captures_character_ids_in_order(self):
+        # scene-to-model: characters is a list of EntityId (NOT Character).
+        user = make_character_mock("alpha", is_human=True)
+        npc = make_character_mock("beta", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc)
+        model = scene.to_model()
+        assert model.characters == [EntityId("alpha"), EntityId("beta")]
+
+    def test_to_model_round_trips_with_deserialize(self):
+        # scene-to-model is the inverse of Scene.deserialize for the
+        # persistent on-disk shape.
+        user = make_character_mock("c1", is_human=True)
+        npc = make_character_mock("c2", is_human=False)
+        scene = SimpleScene(
+            id=EntityId("rt"),
+            name="round-trip",
+            body="b",
+            characters=[user, npc],
+        )
+        model = scene.to_model()
+
+        fake_factory = MagicMock()
+        fake_factory.get.side_effect = lambda i: {"c1": user, "c2": npc}[i]
+        with patch("sidestage.server.App.factory", fake_factory, create=True):
+            rebuilt = SimpleScene.deserialize(model)
+
+        assert rebuilt.id == scene.id
+        assert rebuilt.name == scene.name
+        assert rebuilt.body == scene.body
+        assert rebuilt.characters == scene.characters
+
+
 # ---------------------------------------------------------------------------
 # SimpleScene constructor
 # ---------------------------------------------------------------------------

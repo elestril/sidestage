@@ -13,25 +13,18 @@ the config directory and begins serving the web UI.
   4. cuj-startup-ready: The server begins serving the web UI
      - .implemented-by: frontend-serve, sse-client-scene, sse-client-entities, sse-dataflow-lameduck, sse-dataflow-accept, api-dataflow-subscribe, api-dataflow-scene, api-dataflow-entities, rest-api-get-root, App.run, Runner.run, Runner.start
 
-## server-impl: App class and wire models
+## server-impl: App
 
-The `App` class spec, the `ServerState` enum spec, and the per-route wire
-model specs (`SceneResponse`, `MessageRequest`, `MessageAccepted`) live in
-pydoc on `src/sidestage/server.py` per `spec-location-pydoc`.
+`App` is the FastAPI process container. Owns `state` (LOADING/SERVING),
+`campaigns: dict[str, Campaign]`, the class-level `_actors` registry
+(via `App.get_actor(owner)`), and the class-level `factory` slot consulted
+by `Scene.deserialize` during load. `App.run(config_dir, reload)` walks
+`config_dir` for the first campaign subdir, loads it, flips state to
+SERVING, launches uvicorn.
 
-Run `uv run pydoc-markdown`
-to render the generated markdown view at `specs/generated/api.md`.
-
-Key labels defined in pydoc (for cross-reference from this and other markdown specs):
-
-- `server-state`, `server-state-loading`, `server-state-serving` — the `ServerState` enum and its members
-- `server-app` — the `App` class
-- `server-app-config-dir`, `server-app-campaigns`, `server-app-state`, `server-app-factory` — `App` attributes
-- `server-get-actor`, `server-get-actor-lazy`, `server-get-actor-cached`, `server-get-actor-unknown` — `App.get_actor`
-- `server-run`, `server-run-config`, `server-run-state-loading`, `server-run-load`, `server-run-state-serving`, `server-run-serve` — `App.run`
-- `server-scene-response` (+ `-id`, `-name`, `-character-ids`, `-player-character-ids`) — `SceneResponse` wire model
-- `server-message-request` (+ `-sender-id`, `-body`) — `MessageRequest` wire model
-- `server-message-accepted` (+ `-id`) — `MessageAccepted` wire model
+Wire models defined in this module: `SceneResponse`, `MessageRequest`,
+`MessageAccepted`. (`CampaignResponse` lives in `campaign.py`;
+`SceneResponse` returned from `scene.to_response()` lives in `scene.py`.)
 
 ## server-routes: HTTP route table
 
@@ -44,9 +37,12 @@ per `spec-location-markdown`. Per-route 503/422/404 details live in
 - server-route-root: Serves SPA or inline HTML fallback.
 - .implements: rest-api-get-root
 
-`GET /api/events`
-- server-route-events: SSE notification stream.
-- .implements: rest-api-get-events
+`GET /api/campaigns/{cid}/entities/{entity_id}/events`
+- server-route-entity-events: Per-entity SSE stream of `EntityChanged` events.
+  Resolves `current_user`, calls `App.get_actor(current_user).subscribe_to(entity, queue)`,
+  yields events as `event: entity_changed\ndata: …\n\n`, calls
+  `unsubscribe_from` in `finally`. No global `/api/events` endpoint.
+- .implements: rest-api-get-entity-events, events-subscription
 
 `GET /api/campaigns`
 - server-route-list-campaigns: Returns `list[CampaignResponse]` — one entry
@@ -75,5 +71,9 @@ per `spec-location-markdown`. Per-route 503/422/404 details live in
 - .implements: rest-api-get-messages
 
 `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`
-- server-route-post-message: Accepts `MessageRequest`; calls `scene.dispatch(message)`; returns `201 Created` with `MessageAccepted{id}`. 404 if campaign or scene is unknown.
+- server-route-post-message: Accepts `MessageRequest`; constructs `Message`,
+  calls `scene.append(message)`, returns `201 Created` with
+  `MessageAccepted{id}` carrying the appended id. The npc response cycle
+  fires asynchronously via listener fanout (per `events.md`); the POST
+  handler does not await it. 404 if campaign or scene is unknown.
 - .implements: rest-api-post-message

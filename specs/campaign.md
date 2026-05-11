@@ -23,7 +23,6 @@ The campaign folder has the following format:
 |     |- rusty_sword.md
 |- scenes/1361-04-16-pub_fight/
 |  |- SCENE.md
-|  |- messages.yaml
 |- locations/
 |  |- filthy_pit_tavern.md
 |  |- golden_goose_inn.md
@@ -79,21 +78,8 @@ without needing a topological sort.
 
 ## campaign-impl: Campaign class
 
-The `Campaign` class spec — class-level invariants, attribute invariants
-(`name`, `factory`, `default_scene_id`), and `Campaign.load` invariants —
-lives in pydoc on `src/sidestage/campaign.py` per `spec-location-pydoc`.
-
-Run `uv run pydoc-markdown` to render the generated
-markdown view at `specs/generated/api.md`.
-
-Key labels defined in pydoc (for cross-reference from this and other markdown specs):
-- `campaign-class` — the class spec
-- `campaign-name`, `campaign-factory`, `campaign-default-scene-id` — attributes
-- `campaign-scenes` — `scenes() -> list[Scene]` accessor
-- `campaign-scene` — `scene(id) -> Optional[Scene]` accessor
-- `campaign-to-response` — `to_response() -> CampaignResponse` for the wire layer
-- `campaign-load` — classmethod
-- `campaign-load-config`, `campaign-load-walks`, `campaign-load-classifies`,
-  `campaign-load-parses`, `campaign-load-ghosts`, `campaign-load-deserializes`,
-  `campaign-load-adds`, `campaign-load-default-scene-id`, `campaign-load-warns-dangling`,
-  `campaign-load-returns` — invariants of `Campaign.load`
+`Campaign` is the world container — `name`, `factory`, `default_scene_id`
+(an optional client navigation hint, NOT a Scene reference). Loaded from
+disk via `Campaign.load(path)` per `fs-dataflow` above. The factory holds
+every loaded Entity; `Campaign.scenes()` and `Campaign.scene(id)` are the
+public accessors. `Campaign.to_response()` builds the wire `CampaignResponse`.

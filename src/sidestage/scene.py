@@ -1,13 +1,19 @@
+"""scene: The active game scene.
+
+Per `specs/scene.md`. Scene is **pure data + event source** — `append`
+records a message and emits `EntityChanged`; reactions are listener-driven
+(per `events.md`). No `dispatch`, no `_respond` orchestration on Scene.
+"""
+
 from __future__ import annotations
 
-import asyncio
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel
 
-from sidestage.actor import SceneUpdatedEvent
 from sidestage.entity import Entity, EntityId, EntityType
+from sidestage.events import EntityChanged
 from sidestage.message import Message, MessageId
 
 if TYPE_CHECKING:
@@ -15,17 +21,10 @@ if TYPE_CHECKING:
 
 
 class SceneResponse(BaseModel):
-    """scene-response: Wire shape for GET /api/campaigns/{cid}/scenes/{id} and GET /api/campaigns/{cid}/scenes.
-
-    Carries the scene's identity, display name, and the two id lists the
-    client needs to render and gate input: every character in the scene
-    (`character_ids`) and the subset whose `has_human_actor()` is True
-    (`player_character_ids`, the player-controllable ones).
+    """scene-response: Wire shape for `GET /api/campaigns/{cid}/scenes/{id}`
+    and `GET /api/campaigns/{cid}/scenes`.
 
     Constructed exclusively by `Scene.to_response()`.
-
-    .implements: rest-api-get-scene, rest-api-get-scenes
-    .implemented-by: Scene.to_response
     """
 
     id: EntityId
@@ -38,33 +37,22 @@ class Scene(Entity):
     """scene-class: Abstract scene — holds the message history and lists the
     present characters.
 
-    Scene is abstract; only concrete subclasses are instantiated. Subclass
-    constructors are responsible for populating `characters` and providing
-    the backing storage for the abstract `messages` property.
+    Pure data + event source. Public mutation is `append(msg) -> MessageId`
+    which records and emits `EntityChanged(SceneChangeHint(...))`. The npc
+    response cycle is driven by listener fanout (Character.notify), not by
+    Scene.
 
-    .implements: scene
-    .implemented-by: SimpleScene
+    Tests use `await scene.idle()` to wait for listener-spawned background
+    tasks to settle before asserting.
     """
 
     characters: list["Character"]
-    """scene-characters: All characters present in the scene. Concrete subclasses
-    may impose order or count constraints (see SimpleScene).
-
-    .implements: scene-class
-    .implemented-by: Scene.characters
-    """
+    """scene-characters: All characters present in the scene. Concrete
+    subclasses may impose order or count constraints (see SimpleScene)."""
 
     class Model(Entity.Model):
-        """scene-model: Inner Pydantic model — the on-disk / on-wire shape for
-        any Scene.
-
-        `characters` is a list of `EntityId` — the ids of characters present
-        in the scene. Concrete subclasses MAY extend `Scene.Model` with
-        subclass-specific fields. `SimpleScene.Model` adds none today.
-
-        .implements: scene-class
-        .implemented-by: Scene.Model
-        """
+        """scene-model: On-disk Scene shape — characters list + inherited
+        Entity fields. Messages are runtime-only (not persisted)."""
 
         characters: list[EntityId]
 
@@ -84,28 +72,18 @@ class Scene(Entity):
         object.__setattr__(self, "type", EntityType.SCENE)
         object.__setattr__(self, "body", body)
         object.__setattr__(self, "characters", list(characters))
+        object.__setattr__(self, "_listeners", [])
 
     @property
     @abstractmethod
     def messages(self) -> list[Message]:
-        """scene-messages-property: Returns the ordered list of messages in the
-        scene.
-
-        Subclasses own the backing storage; the returned list MUST be mutable —
-        `_append_message` appends to it directly. A message's index in this
-        list is its id; no separate counter is maintained.
-
-        .implements: scene-class
-        .implemented-by: SimpleScene.messages
-        """
+        """scene-messages-property: Ordered list of messages in this scene.
+        Subclasses own the backing storage. Mutable — `_append_message`
+        appends in place. Index in the list IS the message id."""
         ...
 
     def _append_message(self, message: Message) -> int:
-        """Internal contract — append `message` to history, return its index.
-
-        Private to Scene; not part of the public spec surface (per
-        `spec-link-targets-private`). Documented here as an internal contract
-        because subclasses rely on it.
+        """Internal: append `message` to history, return its index.
 
         - scene-append-history: Appends `message` to `self.messages`.
         - scene-append-return: Returns the new index (`len(self.messages) - 1`).
@@ -114,27 +92,40 @@ class Scene(Entity):
         msgs.append(message)
         return len(msgs) - 1
 
+    # ---------------- public mutation + test surface ---------------------
+
+    def append(self, message: Message) -> MessageId:
+        """scene-append: Record `message` and emit `EntityChanged`.
+
+        Single public mutation API. Replaces the prior `Scene.dispatch` —
+        no orchestration here; reactions are listener-driven (per
+        `events.md`). Returns the assigned `MessageId`.
+
+        - scene-append-records: Appends via `_append_message`.
+        - scene-append-emits: Fires `EntityChanged(scene_id,
+          SceneChangeHint(latest_message_index=idx))` via `self._emit`.
+        - scene-append-returns: Returns `MessageId(f"{self.id}:{idx}")`.
+
+        .implements: events-dataflow-emit, message-dataflow-record-emit
+        """
+        raise NotImplementedError
+
+    # `idle()` is inherited from `Entity` — events are entity-scoped, not
+    # scene-scoped. Tests await `scene.idle()` to wait for cascading
+    # reactions to scene emissions.
+
+    # ---------------- query / serialization ------------------------------
+
     @property
     def user_characters(self) -> list["Character"]:
-        """scene-user-characters: Subset of `characters` with `has_human_actor()` True.
-
-        Single source of truth for "which characters can a client send messages
-        as". Server consumes this via `Scene.to_response()`; never iterates
-        characters or reads `Character.owner` itself.
-
-        .implements: rest-api-get-scene
-        .implemented-by: Scene.user_characters
-        """
+        """scene-user-characters: Subset of `characters` with
+        `has_human_actor()` True. Single source of truth for "which
+        characters can a client send messages as"."""
         return [c for c in self.characters if c.has_human_actor()]
 
     def to_response(self) -> SceneResponse:
-        """scene-to-response: Build the wire shape for this scene.
-
-        The only place `SceneResponse` is constructed.
-
-        .implements: rest-api-get-scene, rest-api-get-scenes
-        .implemented-by: Scene.to_response
-        """
+        """scene-to-response: Build the wire shape. Only place
+        `SceneResponse` is constructed."""
         return SceneResponse(
             id=self.id,
             name=self.name,
@@ -143,17 +134,8 @@ class Scene(Entity):
         )
 
     def serialize_message(self, index: int) -> Message.Model:
-        """scene-serialize-message: Returns
-        `Message.Model(id=MessageId(f"{self.id}:{index}"),
-        sender_id=self.messages[index].sender.id,
-        body=self.messages[index].body)`.
-
-        This is the only place `MessageId` is constructed; scene-internal
-        code uses `int` indices.
-
-        .implements: message-id-format
-        .implemented-by: Scene.serialize_message
-        """
+        """scene-serialize-message: Build the wire `Message.Model` for the
+        message at `index`. Only place `MessageId` is constructed."""
         msg = self.messages[index]
         return Message.Model(
             id=MessageId(f"{self.id}:{index}"),
@@ -161,25 +143,27 @@ class Scene(Entity):
             body=msg.body,
         )
 
+    def to_model(self) -> "Scene.Model":
+        """scene-to-model: Build a `Scene.Model` from current state.
+        Drops runtime-only state (messages); inverse of `Scene.deserialize`."""
+        return self.Model(
+            id=self.id,
+            name=self.name,
+            type=self.type,
+            body=self.body,
+            characters=[c.id for c in self.characters],
+        )
+
     @classmethod
     def deserialize(cls, model: "Scene.Model") -> Self:
         """Construct a Scene from its on-disk model.
 
-        - scene-deserialize-signature: Same uniform signature as
-          `Entity.deserialize(model)` so callers can dispatch polymorphically.
         - scene-deserialize-resolves: Resolves each id in `model.characters`
           via `App.factory.get(id)` to a `Character` instance. Forward
-          references that aren't loaded yet come back as ghosts (per the
-          ghost pattern in `entity.md`) and hydrate later in the same load
-          pass.
+          references come back as ghosts and hydrate later in the same load.
         - scene-deserialize-constructs: Returns
-          `cls(id=model.id, name=model.name, body=model.body,
-          characters=resolved)`.
-
-        .implements: fs-dataflow-deserialize
-        .implemented-by: Scene.deserialize
+          `cls(id=..., name=..., body=..., characters=resolved)`.
         """
-        # Lazy import to avoid circular imports at module load.
         from sidestage.server import App
 
         resolved: list["Character"] = [
@@ -192,34 +176,14 @@ class Scene(Entity):
             characters=resolved,
         )
 
-    @abstractmethod
-    def dispatch(self, message: Message) -> MessageId:
-        """Dispatch an incoming message; return its assigned `MessageId`.
-
-        Abstract on Scene — concrete subclasses define the routing policy.
-
-        .implements: message-dataflow-receive
-        .implemented-by: SimpleScene.dispatch
-        """
-        ...
-
 
 class SimpleScene(Scene):
-    """simple-scene: Two-party scene — one user-controlled character + one NPC.
+    """simple-scene: Two-party scene — exactly one user-controlled character
+    and one non-user character.
 
-    Assumes exactly two characters: `characters[0]` is the human-controlled
-    user, `characters[1]` is the NPC. The constructor validates this and
-    exposes named aliases for two-party routing.
-
-    Backing storage:
-    - `_messages: list[Message]` Backing storage for the inherited `messages`
-      property; initialized empty.
-    - `_user: Character` Alias for `self.characters[0]` — the human-controlled
-      character.
-    - `_npc: Character` Alias for `self.characters[1]` — the NPC character.
-
-    .implements: scene-class, message-simplescene-dispatch, message-simplescene-respond
-    .implemented-by: SimpleScene
+    `__init__` validates the count + roles, sets `_user` / `_npc` aliases,
+    and **subscribes every character to itself** so the listener-driven
+    response cycle is wired automatically (per `events.md`).
     """
 
     def __init__(
@@ -232,8 +196,7 @@ class SimpleScene(Scene):
     ) -> None:
         """Construct a SimpleScene with exactly two characters.
 
-        - simple-scene-init-count: Raises `ValueError` if
-          `len(characters) != 2`.
+        - simple-scene-init-count: Raises `ValueError` if `len(characters) != 2`.
         - simple-scene-init-user: Raises `ValueError` if
           `characters[0].has_human_actor()` is False.
         - simple-scene-init-npc: Raises `ValueError` if
@@ -241,9 +204,9 @@ class SimpleScene(Scene):
         - simple-scene-init-messages: Initializes `self._messages = []`.
         - simple-scene-init-aliases: Sets `_user = characters[0]` and
           `_npc = characters[1]`.
-
-        .implements: simple-scene
-        .implemented-by: SimpleScene.__init__
+        - simple-scene-init-subscribes-characters: Calls `self.subscribe(c)`
+          for every character in `characters`, wiring the listener-driven
+          response cycle.
         """
         if len(characters) != 2:
             raise ValueError(
@@ -261,70 +224,11 @@ class SimpleScene(Scene):
         object.__setattr__(self, "_messages", [])
         object.__setattr__(self, "_user", characters[0])
         object.__setattr__(self, "_npc", characters[1])
+        for c in characters:
+            self.subscribe(c)
 
     @property
     def messages(self) -> list[Message]:
         """simple-scene-messages: Returns `self._messages`. Mutable;
-        `_append_message` mutates in place.
-
-        .implements: scene-messages-property
-        .implemented-by: SimpleScene.messages
-        """
+        `_append_message` mutates in place."""
         return self._messages
-
-    def dispatch(self, message: Message) -> MessageId:
-        """Dispatch an incoming message: record it, kick off the NPC reply,
-        and return the new message's id.
-
-        - simple-scene-dispatch-append: Calls
-          `index = self._append_message(message)`.
-        - simple-scene-dispatch-task: Spawns
-          `asyncio.create_task(self._respond(message))`; does NOT await.
-        - simple-scene-dispatch-return: Returns
-          `MessageId(f"{self.id}:{index}")`.
-
-        .implements: message-simplescene-dispatch, message-dataflow-receive,
-            Scene.dispatch
-        .implemented-by: SimpleScene.dispatch
-        """
-        index = self._append_message(message)
-        asyncio.create_task(self._respond(message))
-        return MessageId(f"{self.id}:{index}")
-
-    def _make_scene_update(self, latest_index: int) -> SceneUpdatedEvent:
-        """Internal contract — build a `SceneUpdatedEvent` for `latest_index`.
-
-        Private to Scene; not part of the public spec surface (per
-        `spec-link-targets-private`). Documented here as an internal contract
-        because it is the only place Scene constructs notification events.
-
-        - scene-make-update: Returns
-          `SceneUpdatedEvent(scene_id=self.id,
-          latest_message_index=latest_index)`.
-        """
-        return SceneUpdatedEvent(
-            scene_id=self.id,
-            latest_message_index=latest_index,
-        )
-
-    async def _respond(self, message: Message) -> None:
-        """Internal contract — drive the NPC response and notify the user.
-
-        Private to Scene; not part of the public spec surface (per
-        `spec-link-targets-private`). Documented here as an internal contract
-        because the dispatch task depends on it.
-
-        - simple-scene-respond-call:
-          `response = await self._npc.respond(message)`.
-        - simple-scene-respond-append: If `response is not None`, calls
-          `latest_index = self._append_message(response)`.
-        - simple-scene-respond-notify: Builds an event via
-          `self._make_scene_update(latest_index)` and calls
-          `self._user.notify(event)` to wake the user's connected SSE
-          clients.
-        """
-        response = await self._npc.respond(message)
-        if response is not None:
-            latest_index = self._append_message(response)
-            event = self._make_scene_update(latest_index)
-            self._user.notify(event)

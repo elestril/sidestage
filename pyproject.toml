@@ -32,5 +32,9 @@ dev = [
 
 [tool.pytest.ini_options]
 python_files = "*_test.py test_*.py"
-testpaths = ["src/sidestage"]
+testpaths = ["src/sidestage", "tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: in-process multi-module flows; slower than unit tests",
+    "eval: behavioral evals; opt-in (require EVAL=1)",
+]
