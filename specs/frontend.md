@@ -51,54 +51,62 @@ regenerated whenever the server-side wire format changes.
   from the repo root. The file is committed to the repository.
 - frontend-types-source: The authoritative source is the Pydantic `BaseModel`
   subclasses across `sidestage.scene` (`SceneResponse`), `sidestage.campaign`
-  (`CampaignResponse`), `sidestage.actor` (`SceneUpdatedEvent`),
-  `sidestage.message` (`Message.Model`), `sidestage.character`
-  (`Character.Model`), and `sidestage.server` (`MessageRequest`,
-  `MessageAccepted`).
+  (`CampaignResponse`), `sidestage.message` (`Message.Model`),
+  `sidestage.character` (`Character.Model`), and `sidestage.server`
+  (`MessageRequest`, `MessageAccepted`). `EntityChangedEvent` (the SSE
+  wire shape — see `events-subscription`) is hand-rolled in `types.ts`
+  because the in-process `EntityChanged` is a `@dataclass`, not a
+  Pydantic model.
 - frontend-types-entityid: `EntityId` is generated as `string` (Pydantic's
   `NewType` has no TypeScript equivalent). A branded alias
   `type EntityId = string & { readonly _brand: 'EntityId' }` is added
   manually in a thin `frontend/src/types_ext.ts` that re-exports everything
   from `types.ts` and overrides the `EntityId` definition. All application
   code imports from `types_ext.ts`, never directly from `types.ts`.
-- frontend-types-discriminated: `ServerEvent = SceneUpdatedEvent` is defined
-  in `types_ext.ts`. Today there is exactly one event variant; the type is
-  a discriminated union scaffold for future variants.
+- frontend-types-discriminated: `ServerEvent = EntityChangedEvent` is
+  defined in `types_ext.ts`. Today there is exactly one event variant;
+  the type is a discriminated union scaffold for future variants.
 
 ## frontend-sse-client-dataflow: Client SSE dataflow
 
-The SSE connection is a process boundary (server→client only). Every step is labelled.
+The SSE connection is a process boundary (server→client only). Bootstrap
+runs first, then SSE opens on the resolved scene's per-entity URL.
 
-1. sse-client-connect: On `App` mount, open `EventSource('/api/events')`.
-   - .implements: cuj-hello-respond
-2. sse-client-list-campaigns: Immediately after opening SSE, fetch
-   `GET /api/campaigns` → pick the only entry today (in the future, by name
-   from URL or user choice). Store its id (`name`) as `campaignId`; every
-   subsequent call uses `/api/campaigns/{campaignId}/...`.
+1. sse-client-list-campaigns: On `App` mount, fetch `GET /api/campaigns` →
+   pick the only entry today (in the future, by name from URL or user
+   choice). Store its id (`name`) as `campaignId`.
    - .implements: cuj-startup-ready
-3. sse-client-campaign: Fetch `GET /api/campaigns/{campaignId}` → read
+2. sse-client-campaign: Fetch `GET /api/campaigns/{campaignId}` → read
    `default_scene_id`. Pick which scene to display: the URL fragment if the
-   user navigated to a specific scene, otherwise `default_scene_id`. (No
-   singular "active scene" — the client navigates freely and multiple clients
-   may attach to different scenes.)
+   user navigated to a specific scene, otherwise `default_scene_id`.
    - .implements: cuj-startup-ready
-4. sse-client-scene: Fetch `GET /api/campaigns/{campaignId}/scenes/{sceneId}`
+3. sse-client-scene: Fetch `GET /api/campaigns/{campaignId}/scenes/{sceneId}`
    for the chosen scene → store `sceneId`, `playerCharacterIds`, and
    `character_ids`.
    - .implements: cuj-startup-ready
-4a. sse-client-entities: Fetch `GET /api/campaigns/{campaignId}/entities/{id}`
+4. sse-client-entities: Fetch `GET /api/campaigns/{campaignId}/entities/{id}`
    for each `character_id` in parallel → populate `entityCache`.
    - .implements: cuj-startup-ready
-5. sse-client-event: Receive `scene_updated` SSE event → if `event.scene_id`
-   matches the displayed scene, fetch the new slice via
-   `GET /api/campaigns/{campaignId}/scenes/{id}/messages?from=…` → resolve
-   senders from `entityCache` → append to `messages`. Events for other scenes
-   are ignored (or used to update a scene-list badge, future).
+5. sse-client-history: Fetch `GET /api/campaigns/{campaignId}/scenes/{sceneId}/messages`
+   → resolve senders from `entityCache` → replace `messages`. Track
+   `lastFetchedIndex` from the last entry.
+   - .implements: cuj-startup-ready
+6. sse-client-connect: Open
+   `EventSource('/api/campaigns/{campaignId}/entities/{sceneId}/events')` —
+   per-entity stream per `events-subscription`. Opens AFTER bootstrap so
+   the URL is well-defined.
    - .implements: cuj-hello-respond
-6. sse-client-disconnect: On SSE close, set `connected = false`; reconnect
+7. sse-client-event: Receive `entity_changed` SSE event with payload
+   `{entity_id, attributes}` → if `entity_id` is the displayed `sceneId`
+   AND `attributes` contains `"messages"`, fetch the new slice via
+   `GET /messages?from={lastFetchedIndex+1}` → resolve senders →
+   append to `messages` → update `lastFetchedIndex`.
+   - .implements: cuj-hello-respond
+8. sse-client-disconnect: On SSE close, set `connected = false`; reconnect
    with exponential backoff (initial 1 s, max 30 s).
-7. sse-client-reconnect: On reconnect, clear `entityCache`, `campaignId`, and
-   `playerCharacterIds`; retain `messages`. Re-enter at sse-client-connect.
+9. sse-client-reconnect: On reconnect, clear `entityCache`, `campaignId`,
+   `sceneId`, `playerCharacterIds`, and `lastFetchedIndex`; retain
+   `messages`. Re-enter at sse-client-list-campaigns.
 
 ## frontend-api-client-dataflow: Client REST dataflow
 
@@ -162,7 +170,7 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 
 - frontend-hook-opens: Opens `EventSource(eventsUrl)` on mount; closes on unmount.
 - frontend-hook-scene: Immediately after opening SSE, fetches `sceneUrl` and populates `entityCache`, `playerCharacterIds`, and `sceneId`.
-- frontend-hook-dispatches: Handles `scene_updated` SSE events per `sse-client-event`.
+- frontend-hook-dispatches: Handles `entity_changed` SSE events per `sse-client-event`.
 - frontend-hook-reconnects: On SSE close, schedules reconnect per `sse-client-reconnect`.
 - frontend-hook-returns: Returns `{ messages, entityCache, playerCharacterIds, campaignId, sceneId, defaultSceneId, connected }`.
 

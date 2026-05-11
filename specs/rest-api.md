@@ -193,7 +193,7 @@ class CharacterModel(EntityModel):  # Character.Model
 ### rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
 
 Authoritative source for all messages in the scene, in append order. Clients
-fetch this on initial load and on each `scene_updated` SSE notification —
+fetch this on initial load and on each `entity_changed` SSE notification —
 typically requesting only the slice they don't already have.
 
 **Query** — half-open range, Python slice semantics:

@@ -1,10 +1,9 @@
 import { useCallback } from 'react';
 import {
-  asMessageId,
+  asEntityId,
   type EntityId,
   type MessageAccepted,
   type MessageRequest,
-  type MessageId,
 } from '../types_ext';
 
 export interface UseSendMessageArgs {
@@ -14,20 +13,22 @@ export interface UseSendMessageArgs {
 }
 
 export interface UseSendMessageResult {
-  send: (body: string) => Promise<MessageId | null>;
+  send: (body: string) => Promise<MessageAccepted | null>;
 }
 
 /**
  * frontend-usesendmessage:
  * - frontend-send-hook-posts: POSTs MessageRequest to
  *   /api/campaigns/{campaignId}/scenes/{sceneId}/messages.
- * - frontend-send-hook-returns: exposes send(body) -> Promise<MessageId|null>.
+ * - frontend-send-hook-returns: exposes send(body) -> Promise<MessageAccepted|null>.
+ *   The `MessageAccepted` carries the composite `(scene_id, index)` identity
+ *   assigned by the server.
  *
  * The optimistic append (frontend-send-hook-optimistic) is intentionally
- * NOT done here: the server SSE-broadcasts a `scene_updated` for the user
- * message itself, and the useSSE hook's slice fetch picks it up. Doing
- * both would double-render. If a future spec change requires optimism for
- * latency reasons, plumb a setMessages callback through.
+ * NOT done here: the server SSE-broadcasts an `entity_changed` for the
+ * user's own POST, and useSSE's slice fetch picks it up. Doing both would
+ * double-render. If a future spec change requires optimism for latency
+ * reasons, plumb a setMessages callback through.
  */
 export function useSendMessage({
   campaignId,
@@ -35,7 +36,7 @@ export function useSendMessage({
   senderId,
 }: UseSendMessageArgs): UseSendMessageResult {
   const send = useCallback(
-    async (body: string): Promise<MessageId | null> => {
+    async (body: string): Promise<MessageAccepted | null> => {
       if (!campaignId || !sceneId || !senderId) return null;
       const trimmed = body.trim();
       if (!trimmed) return null;
@@ -51,8 +52,11 @@ export function useSendMessage({
       if (!res.ok) {
         throw new Error(`POST message → ${res.status}`);
       }
-      const accepted = (await res.json()) as MessageAccepted;
-      return asMessageId(accepted.id as unknown as string);
+      const accepted = (await res.json()) as { scene_id: string; index: number };
+      return {
+        scene_id: asEntityId(accepted.scene_id),
+        index: accepted.index,
+      };
     },
     [campaignId, sceneId, senderId],
   );

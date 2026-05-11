@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   asEntityId,
-  asMessageId,
   type CampaignResponse,
   type CharacterModel,
+  type EntityChangedEvent,
   type EntityId,
   type MessageModel,
   type SceneResponse,
-  type SceneUpdatedEvent,
 } from '../types_ext';
 
 // frontend-state-messages: { sender, body } pair retained across reconnects.
+// Phase 2 will widen this with {scene_id, index} so messages carry their
+// own identity (per `spec-coverage-required`).
 export interface ChatMessage {
   sender: CharacterModel;
   body: string;
@@ -72,25 +73,30 @@ function brandCampaignResponse(raw: unknown): CampaignResponse {
 }
 
 function brandMessage(raw: unknown): MessageModel {
-  const r = raw as { id: string; sender_id: string; body: string };
+  const r = raw as { scene_id: string; index: number; sender_id: string; body: string };
   return {
-    id: asMessageId(r.id),
+    scene_id: asEntityId(r.scene_id),
+    index: r.index,
     sender_id: asEntityId(r.sender_id),
     body: r.body,
   };
 }
 
 /**
- * frontend-usesse: opens an SSE connection and drives the
- * subscribe-then-fetch dataflow described in `frontend-sse-client-dataflow`.
+ * frontend-usesse: drives the bootstrap-then-subscribe SSE dataflow
+ * described in `frontend-sse-client-dataflow`.
  *
- * - frontend-hook-opens: opens EventSource on mount; closes on unmount.
- * - frontend-hook-scene: after open, fetches campaigns -> campaign -> scene
- *   -> entities and populates state.
- * - frontend-hook-dispatches: handles `scene_updated` events by fetching the
- *   new message slice.
- * - frontend-hook-reconnects: on close, schedules an exponential-backoff
- *   reconnect and clears per-connection state per `sse-client-reconnect`.
+ * - frontend-hook-bootstraps-first: on mount, fetches campaigns -> campaign
+ *   -> scene -> entities -> history, populating state. THEN opens the SSE
+ *   stream on the resolved scene's per-entity URL.
+ * - frontend-hook-subscribes-per-entity: opens
+ *   `EventSource('/api/campaigns/{cid}/entities/{sceneId}/events')` —
+ *   per-entity stream, per `events-subscription`.
+ * - frontend-hook-dispatches: handles `entity_changed` events by fetching
+ *   the message slice from `lastFetchedIndex + 1` when the event names the
+ *   current scene and `attributes` contains `"messages"`.
+ * - frontend-hook-reconnects: on transport error, schedules an exponential
+ *   backoff reconnect and clears per-connection state per `sse-client-reconnect`.
  */
 export function useSSE(): UseSSEResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -130,7 +136,72 @@ export function useSSE(): UseSSEResult {
       lastFetchedIndexRef.current = -1;
     };
 
-    const bootstrap = async () => {
+    const handleEntityChanged = async (event: EntityChangedEvent) => {
+      const cid = campaignIdRef.current;
+      const sid = sceneIdRef.current;
+      if (!cid || !sid) return;
+      if (event.entity_id !== sid) return;
+      if (!event.attributes.includes('messages')) return;
+      const fromIdx = lastFetchedIndexRef.current + 1;
+      const sliceRes = await fetch(
+        `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(sid)}/messages?from=${fromIdx}`,
+      );
+      if (!sliceRes.ok) return;
+      const sliceRaw = (await sliceRes.json()) as unknown[];
+      const slice = sliceRaw.map(brandMessage);
+      if (slice.length === 0) return;
+      const cache = entityCacheRef.current;
+      const additions: ChatMessage[] = slice.flatMap((m) => {
+        const sender = cache.get(m.sender_id);
+        return sender ? [{ sender, body: m.body }] : [];
+      });
+      if (additions.length > 0) {
+        setMessages((prev) => [...prev, ...additions]);
+      }
+      lastFetchedIndexRef.current = slice[slice.length - 1].index;
+    };
+
+    const subscribe = (cid: string, sid: EntityId) => {
+      // frontend-hook-subscribes-per-entity: open per-entity SSE stream.
+      source = new EventSource(
+        `/api/campaigns/${encodeURIComponent(cid)}/entities/${encodeURIComponent(sid)}/events`,
+      );
+
+      source.addEventListener('open', () => {
+        if (cancelled) return;
+        setConnected(true);
+        backoff = INITIAL_BACKOFF_MS;
+      });
+
+      source.addEventListener('entity_changed', (ev) => {
+        const me = ev as MessageEvent<string>;
+        try {
+          const raw = JSON.parse(me.data) as { entity_id: string; attributes: string[] };
+          void handleEntityChanged({
+            entity_id: asEntityId(raw.entity_id),
+            attributes: raw.attributes,
+          });
+        } catch (err) {
+          console.error('Failed to parse entity_changed event', err);
+        }
+      });
+
+      source.addEventListener('error', () => {
+        // EventSource auto-reconnects on transient errors but we want
+        // explicit control of state and backoff per the spec.
+        if (cancelled) return;
+        setConnected(false);
+        if (source) {
+          source.close();
+          source = null;
+        }
+        const delay = backoff;
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+        reconnectTimer = setTimeout(connect, delay);
+      });
+    };
+
+    const bootstrap = async (): Promise<{ cid: string; sceneId: EntityId } | null> => {
       // sse-client-list-campaigns
       const campaignsRes = await fetch('/api/campaigns');
       if (!campaignsRes.ok) throw new Error(`GET /api/campaigns → ${campaignsRes.status}`);
@@ -155,7 +226,7 @@ export function useSSE(): UseSSEResult {
       if (!chosenSceneId) {
         // No scene to display; bootstrap stops here. The client could surface
         // a scene-picker UI in the future.
-        return;
+        return null;
       }
 
       // sse-client-scene
@@ -199,71 +270,28 @@ export function useSSE(): UseSSEResult {
       // reconnects but the bootstrap full-fetch is the source of truth at
       // this point in the lifecycle.
       setMessages(resolved);
-      lastFetchedIndexRef.current = history.length - 1;
-    };
+      lastFetchedIndexRef.current = history.length > 0 ? history[history.length - 1].index : -1;
 
-    const handleSceneUpdated = async (raw: SceneUpdatedEvent) => {
-      const cid = campaignIdRef.current;
-      const sid = sceneIdRef.current;
-      if (!cid || !sid) return;
-      if (raw.scene_id !== (sid as unknown as string)) return;
-      const fromIdx = lastFetchedIndexRef.current + 1;
-      const toIdx = raw.latest_message_index + 1;
-      if (toIdx <= fromIdx) return;
-      const sliceRes = await fetch(
-        `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(sid)}/messages?from=${fromIdx}&to=${toIdx}`,
-      );
-      if (!sliceRes.ok) return;
-      const sliceRaw = (await sliceRes.json()) as unknown[];
-      const slice = sliceRaw.map(brandMessage);
-      const cache = entityCacheRef.current;
-      const additions: ChatMessage[] = slice.flatMap((m) => {
-        const sender = cache.get(m.sender_id);
-        return sender ? [{ sender, body: m.body }] : [];
-      });
-      if (additions.length > 0) {
-        setMessages((prev) => [...prev, ...additions]);
-      }
-      lastFetchedIndexRef.current = raw.latest_message_index;
+      return { cid, sceneId: scene.id };
     };
 
     const connect = () => {
       if (cancelled) return;
       clearPerConnectionState();
-      source = new EventSource('/api/events');
-
-      source.addEventListener('open', () => {
-        if (cancelled) return;
-        setConnected(true);
-        backoff = INITIAL_BACKOFF_MS;
-        bootstrap().catch((err) => {
+      bootstrap()
+        .then((result) => {
+          if (cancelled || !result) return;
+          // frontend-hook-bootstraps-first: SSE opens only AFTER bootstrap
+          // resolves the scene, so the per-entity URL is well-defined.
+          subscribe(result.cid, result.sceneId);
+        })
+        .catch((err) => {
           console.error('SSE bootstrap failed', err);
+          if (cancelled) return;
+          const delay = backoff;
+          backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+          reconnectTimer = setTimeout(connect, delay);
         });
-      });
-
-      source.addEventListener('scene_updated', (ev) => {
-        const me = ev as MessageEvent<string>;
-        try {
-          const payload = JSON.parse(me.data) as SceneUpdatedEvent;
-          void handleSceneUpdated(payload);
-        } catch (err) {
-          console.error('Failed to parse scene_updated event', err);
-        }
-      });
-
-      source.addEventListener('error', () => {
-        // EventSource auto-reconnects on transient errors but we want
-        // explicit control of state and backoff per the spec.
-        if (cancelled) return;
-        setConnected(false);
-        if (source) {
-          source.close();
-          source = null;
-        }
-        const delay = backoff;
-        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-        reconnectTimer = setTimeout(connect, delay);
-      });
     };
 
     connect();

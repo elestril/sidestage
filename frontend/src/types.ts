@@ -10,7 +10,6 @@
 // All app code imports from `./types_ext`, NOT from this file directly.
 
 export type EntityId = string;
-export type MessageId = string;
 
 export type EntityType = 'character' | 'scene' | 'entity';
 
@@ -44,7 +43,8 @@ export interface CampaignResponse {
 
 // Mirror of sidestage.message.Message.Model
 export interface MessageModel {
-  id: MessageId;
+  scene_id: EntityId;
+  index: number;
   sender_id: EntityId;
   body: string;
 }
@@ -57,11 +57,13 @@ export interface MessageRequest {
 
 // Mirror of sidestage.server.MessageAccepted
 export interface MessageAccepted {
-  id: MessageId;
+  scene_id: EntityId;
+  index: number;
 }
 
-// Mirror of sidestage.actor.SceneUpdatedEvent
-export interface SceneUpdatedEvent {
-  scene_id: EntityId;
-  latest_message_index: number;
+// Mirror of sidestage.events.EntityChanged (SSE wire shape — see
+// `events-subscription` in specs/events.md).
+export interface EntityChangedEvent {
+  entity_id: EntityId;
+  attributes: string[];
 }

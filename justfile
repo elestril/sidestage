@@ -8,16 +8,20 @@ default:
 
 # -------- tests --------
 
-# Run the whole test suite (Python + frontend).
+# Run the whole test suite (Python + frontend, with FE typecheck).
 test: test-py test-fe
 
 # Python tests.
 test-py:
     uv run pytest
 
-# Frontend tests (vitest, one-shot).
-test-fe:
+# Frontend tests (typecheck + vitest, one-shot).
+test-fe: typecheck
     cd frontend && npm run test:run
+
+# Frontend TypeScript typecheck (no emit).
+typecheck:
+    cd frontend && npm run typecheck
 
 # -------- build / spec --------
 

@@ -6,21 +6,20 @@
 import type {
   CampaignResponse as _CampaignResponse,
   CharacterModel as _CharacterModel,
+  EntityChangedEvent as _EntityChangedEvent,
   EntityModel as _EntityModel,
   EntityType,
-  MessageAccepted,
+  MessageAccepted as _MessageAccepted,
   MessageRequest as _MessageRequest,
   MessageModel as _MessageModel,
   SceneResponse as _SceneResponse,
-  SceneUpdatedEvent,
 } from './types';
 
-// frontend-types-entityid: brand the opaque id types so they cannot be
+// frontend-types-entityid: brand the opaque id type so it cannot be
 // confused with arbitrary strings at the type level.
 export type EntityId = string & { readonly _brand: 'EntityId' };
-export type MessageId = string & { readonly _brand: 'MessageId' };
 
-export type { EntityType, MessageAccepted, SceneUpdatedEvent };
+export type { EntityType };
 
 export interface EntityModel extends Omit<_EntityModel, 'id'> {
   id: EntityId;
@@ -40,8 +39,8 @@ export interface CampaignResponse extends Omit<_CampaignResponse, 'default_scene
   default_scene_id: EntityId | null;
 }
 
-export interface MessageModel extends Omit<_MessageModel, 'id' | 'sender_id'> {
-  id: MessageId;
+export interface MessageModel extends Omit<_MessageModel, 'scene_id' | 'sender_id'> {
+  scene_id: EntityId;
   sender_id: EntityId;
 }
 
@@ -49,12 +48,19 @@ export interface MessageRequest extends Omit<_MessageRequest, 'sender_id'> {
   sender_id: EntityId;
 }
 
-// Helpers to coerce raw strings into branded ids at the trust boundary
-// (i.e. when reading from the wire). After this, the type system enforces
-// the brand throughout the app.
+export interface MessageAccepted extends Omit<_MessageAccepted, 'scene_id'> {
+  scene_id: EntityId;
+}
+
+export interface EntityChangedEvent extends Omit<_EntityChangedEvent, 'entity_id'> {
+  entity_id: EntityId;
+}
+
+// Helper to coerce raw strings into branded EntityId at the trust
+// boundary (i.e. when reading from the wire). After this, the type
+// system enforces the brand throughout the app.
 export const asEntityId = (s: string): EntityId => s as EntityId;
-export const asMessageId = (s: string): MessageId => s as MessageId;
 
 // frontend-types-discriminated: ServerEvent union for SSE event payloads.
 // Today only one variant exists; the union is exhaustive on `type`.
-export type ServerEvent = SceneUpdatedEvent & { type: 'scene_updated' };
+export type ServerEvent = EntityChangedEvent & { type: 'entity_changed' };

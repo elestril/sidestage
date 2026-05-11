@@ -1,6 +1,5 @@
-/// <reference types="vitest" />
 import path from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // frontend-vite-root: root pinned to this config file's directory so paths
