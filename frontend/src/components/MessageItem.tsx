@@ -10,10 +10,18 @@ export interface MessageItemProps {
  * - frontend-messageitem-own: isOwn → right-aligned with distinct classes.
  * - frontend-messageitem-other: non-own → left-aligned.
  * - frontend-messageitem-sender: sender.name displayed above body.
+ * - frontend-messageitem-data: carries `data-scene-id` and `data-index` for
+ *   stable selectors (browser tests, debugging).
  */
 export function MessageItem({ message, isOwn }: MessageItemProps) {
   return (
-    <li className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+    <li
+      data-testid="message-item"
+      data-scene-id={message.scene_id}
+      data-index={message.index}
+      data-sender-id={message.sender.id}
+      className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
+    >
       <div className={`flex max-w-[75%] flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
         <span className="mb-0.5 text-xs font-medium text-slate-500">
           {message.sender.name}

@@ -27,9 +27,10 @@ describe('ChatView', () => {
   test('frontend-chatview-list', () => {
     const alice = character('alice', 'Alice');
     const bob = character('bob', 'Bob');
+    const sceneId = 'parlor' as unknown as EntityId;
     const messages = [
-      { sender: alice, body: 'Hi' },
-      { sender: bob, body: '*nods quietly*' },
+      { scene_id: sceneId, index: 0, sender: alice, body: 'Hi' },
+      { scene_id: sceneId, index: 1, sender: bob, body: '*nods quietly*' },
     ];
     render(
       <ChatView

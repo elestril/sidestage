@@ -122,7 +122,10 @@ Managed in `useSSE` hook; passed down as props.
 - frontend-state-campaign-id: `campaignId: string | null` — set from the first entry of `GET /api/campaigns` (today there is exactly one); used as `{cid}` path param on every campaign-scoped route. Cleared on SSE reconnect.
 - frontend-state-scene-id: `sceneId: EntityId | null` — set from URL fragment or `CampaignResponse.default_scene_id`; used as path param for scene-keyed routes.
 - frontend-state-default-scene-id: `defaultSceneId: EntityId | null` — populated from `CampaignResponse.default_scene_id`; used only as a navigation hint when the user has no other intent.
-- frontend-state-messages: `messages: { sender: CharacterModel; body: string }[]` — append-only; retained across reconnects.
+- frontend-state-messages: `messages: ChatMessage[]` where
+  `ChatMessage = { scene_id: EntityId; index: number; sender: CharacterModel; body: string }` —
+  append-only; retained across reconnects. `(scene_id, index)` is the
+  composite wire identity and the pagination cursor.
 - frontend-state-connected: `connected: boolean` — reflects live SSE state; disables input when false.
 
 ## frontend-components: Component specs
@@ -146,15 +149,21 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 `messages` `playerCharacterIds`
 
 - frontend-messagelist-scroll: Scrolls to the bottom whenever `messages` grows.
-- frontend-messagelist-items: Renders one `MessageItem` per message.
+- frontend-messagelist-items: Renders one `MessageItem` per message; keyed
+  by `(message.scene_id, message.index)` so React reconciliation stays
+  stable when slices arrive out of order.
+- frontend-messagelist-testid: The `<ul>` carries `data-testid="message-list"`.
 
 ### frontend-messageitem: MessageItem
 
-`message: { sender: CharacterModel; body: string }` `isOwn: boolean`
+`message: ChatMessage` `isOwn: boolean`
 
 - frontend-messageitem-own: `isOwn` is true when `message.sender.id ∈ playerCharacterIds`; right-aligned with distinct Tailwind classes.
 - frontend-messageitem-other: Non-own messages are left-aligned.
 - frontend-messageitem-sender: Displays `message.sender.name` above the message body.
+- frontend-messageitem-data: Carries `data-testid="message-item"`,
+  `data-scene-id={message.scene_id}`, `data-index={message.index}`, and
+  `data-sender-id={message.sender.id}` for stable selectors.
 
 ### frontend-messageinput: MessageInput
 
@@ -163,6 +172,8 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 - frontend-input-disabled: Input and button are disabled when `connected` is false.
 - frontend-input-submit-button: Clicking the send button calls `onSend(body)` and clears the input.
 - frontend-input-submit-enter: Pressing Enter (without Shift) also calls `onSend(body)`.
+- frontend-input-testid: Textarea carries `data-testid="message-input"`;
+  Send button carries `data-testid="send-button"`.
 
 ### frontend-usesse: useSSE()
 

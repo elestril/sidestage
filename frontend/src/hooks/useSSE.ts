@@ -9,10 +9,12 @@ import {
   type SceneResponse,
 } from '../types_ext';
 
-// frontend-state-messages: { sender, body } pair retained across reconnects.
-// Phase 2 will widen this with {scene_id, index} so messages carry their
-// own identity (per `spec-coverage-required`).
+// frontend-state-messages: a message carries its composite wire identity
+// `(scene_id, index)`, resolved sender, and body. Retained across reconnects.
+// `(scene_id, index)` is the React key and the pagination cursor.
 export interface ChatMessage {
+  scene_id: EntityId;
+  index: number;
   sender: CharacterModel;
   body: string;
 }
@@ -25,6 +27,13 @@ export interface UseSSEResult {
   sceneId: EntityId | null;
   defaultSceneId: EntityId | null;
   connected: boolean;
+}
+
+// frontend-usesse-deps: injection seam for unit tests. Production callers
+// pass nothing; defaults route to the real globals.
+export interface UseSSEDeps {
+  fetcher?: typeof fetch;
+  eventSourceFactory?: (url: string) => EventSource;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -98,7 +107,10 @@ function brandMessage(raw: unknown): MessageModel {
  * - frontend-hook-reconnects: on transport error, schedules an exponential
  *   backoff reconnect and clears per-connection state per `sse-client-reconnect`.
  */
-export function useSSE(): UseSSEResult {
+export function useSSE(deps: UseSSEDeps = {}): UseSSEResult {
+  const doFetch = deps.fetcher ?? fetch;
+  const makeEventSource =
+    deps.eventSourceFactory ?? ((url: string) => new EventSource(url));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [entityCache, setEntityCache] = useState<Map<EntityId, CharacterModel>>(
     () => new Map(),
@@ -110,11 +122,12 @@ export function useSSE(): UseSSEResult {
   const [connected, setConnected] = useState<boolean>(false);
 
   // Refs so the SSE event handler can read the current scene/cache without
-  // re-subscribing on every render.
+  // re-subscribing on every render. `messagesRef` mirrors `messages` so the
+  // slice handler can read the latest index without a stale closure.
   const sceneIdRef = useRef<EntityId | null>(null);
   const campaignIdRef = useRef<string | null>(null);
   const entityCacheRef = useRef<Map<EntityId, CharacterModel>>(new Map());
-  const lastFetchedIndexRef = useRef<number>(-1);
+  const messagesRef = useRef<ChatMessage[]>([]);
 
   useEffect(() => {
     let backoff = INITIAL_BACKOFF_MS;
@@ -133,7 +146,23 @@ export function useSSE(): UseSSEResult {
       sceneIdRef.current = null;
       campaignIdRef.current = null;
       entityCacheRef.current = new Map();
-      lastFetchedIndexRef.current = -1;
+    };
+
+    const lastIndexFor = (sid: EntityId): number => {
+      // Find the highest index in `messagesRef` for this scene; -1 if empty.
+      const arr = messagesRef.current;
+      for (let i = arr.length - 1; i >= 0; i -= 1) {
+        if (arr[i].scene_id === sid) return arr[i].index;
+      }
+      return -1;
+    };
+
+    const setMessagesTracked = (next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+      setMessages((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        messagesRef.current = resolved;
+        return resolved;
+      });
     };
 
     const handleEntityChanged = async (event: EntityChangedEvent) => {
@@ -142,8 +171,8 @@ export function useSSE(): UseSSEResult {
       if (!cid || !sid) return;
       if (event.entity_id !== sid) return;
       if (!event.attributes.includes('messages')) return;
-      const fromIdx = lastFetchedIndexRef.current + 1;
-      const sliceRes = await fetch(
+      const fromIdx = lastIndexFor(sid) + 1;
+      const sliceRes = await doFetch(
         `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(sid)}/messages?from=${fromIdx}`,
       );
       if (!sliceRes.ok) return;
@@ -153,17 +182,18 @@ export function useSSE(): UseSSEResult {
       const cache = entityCacheRef.current;
       const additions: ChatMessage[] = slice.flatMap((m) => {
         const sender = cache.get(m.sender_id);
-        return sender ? [{ sender, body: m.body }] : [];
+        return sender
+          ? [{ scene_id: m.scene_id, index: m.index, sender, body: m.body }]
+          : [];
       });
       if (additions.length > 0) {
-        setMessages((prev) => [...prev, ...additions]);
+        setMessagesTracked((prev) => [...prev, ...additions]);
       }
-      lastFetchedIndexRef.current = slice[slice.length - 1].index;
     };
 
     const subscribe = (cid: string, sid: EntityId) => {
       // frontend-hook-subscribes-per-entity: open per-entity SSE stream.
-      source = new EventSource(
+      source = makeEventSource(
         `/api/campaigns/${encodeURIComponent(cid)}/entities/${encodeURIComponent(sid)}/events`,
       );
 
@@ -203,7 +233,7 @@ export function useSSE(): UseSSEResult {
 
     const bootstrap = async (): Promise<{ cid: string; sceneId: EntityId } | null> => {
       // sse-client-list-campaigns
-      const campaignsRes = await fetch('/api/campaigns');
+      const campaignsRes = await doFetch('/api/campaigns');
       if (!campaignsRes.ok) throw new Error(`GET /api/campaigns → ${campaignsRes.status}`);
       const campaignsRaw = (await campaignsRes.json()) as Array<{ name: string; default_scene_id: string | null }>;
       if (campaignsRaw.length === 0) throw new Error('No campaigns loaded');
@@ -213,7 +243,7 @@ export function useSSE(): UseSSEResult {
       setCampaignId(cid);
 
       // sse-client-campaign
-      const campaignRes = await fetch(`/api/campaigns/${encodeURIComponent(cid)}`);
+      const campaignRes = await doFetch(`/api/campaigns/${encodeURIComponent(cid)}`);
       if (!campaignRes.ok) throw new Error(`GET /api/campaigns/${cid} → ${campaignRes.status}`);
       const campaign = brandCampaignResponse(await campaignRes.json());
       setDefaultSceneId(campaign.default_scene_id);
@@ -230,7 +260,7 @@ export function useSSE(): UseSSEResult {
       }
 
       // sse-client-scene
-      const sceneRes = await fetch(
+      const sceneRes = await doFetch(
         `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(chosenSceneId)}`,
       );
       if (!sceneRes.ok) throw new Error(`GET scene ${chosenSceneId} → ${sceneRes.status}`);
@@ -242,7 +272,7 @@ export function useSSE(): UseSSEResult {
       // sse-client-entities — fetch all character entities in parallel.
       const entityResults = await Promise.all(
         scene.character_ids.map(async (eid) => {
-          const r = await fetch(
+          const r = await doFetch(
             `/api/campaigns/${encodeURIComponent(cid)}/entities/${encodeURIComponent(eid)}`,
           );
           if (!r.ok) throw new Error(`GET entity ${eid} → ${r.status}`);
@@ -256,7 +286,7 @@ export function useSSE(): UseSSEResult {
 
       // Initial history fetch — full slice. Append any messages so a
       // refresh shows existing history.
-      const histRes = await fetch(
+      const histRes = await doFetch(
         `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(scene.id)}/messages`,
       );
       if (!histRes.ok) throw new Error(`GET history → ${histRes.status}`);
@@ -264,13 +294,14 @@ export function useSSE(): UseSSEResult {
       const history = histRaw.map(brandMessage);
       const resolved: ChatMessage[] = history.flatMap((m) => {
         const sender = cache.get(m.sender_id);
-        return sender ? [{ sender, body: m.body }] : [];
+        return sender
+          ? [{ scene_id: m.scene_id, index: m.index, sender, body: m.body }]
+          : [];
       });
       // Replace messages on a fresh bootstrap — `messages` is retained across
       // reconnects but the bootstrap full-fetch is the source of truth at
       // this point in the lifecycle.
-      setMessages(resolved);
-      lastFetchedIndexRef.current = history.length > 0 ? history[history.length - 1].index : -1;
+      setMessagesTracked(resolved);
 
       return { cid, sceneId: scene.id };
     };

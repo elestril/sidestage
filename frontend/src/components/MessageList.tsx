@@ -11,7 +11,9 @@ export interface MessageListProps {
 /**
  * frontend-messagelist:
  * - frontend-messagelist-scroll: scrolls to the bottom whenever `messages` grows.
- * - frontend-messagelist-items: renders one MessageItem per message.
+ * - frontend-messagelist-items: renders one MessageItem per message; keyed by
+ *   the composite `(scene_id, index)` so React reconciliation stays stable
+ *   even when slices arrive out of order.
  */
 export function MessageList({ messages, playerCharacterIds }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -31,10 +33,10 @@ export function MessageList({ messages, playerCharacterIds }: MessageListProps) 
 
   return (
     <div ref={scrollRef} className="h-full overflow-y-auto px-4 py-3">
-      <ul className="flex flex-col gap-2">
-        {messages.map((m, i) => (
+      <ul data-testid="message-list" className="flex flex-col gap-2">
+        {messages.map((m) => (
           <MessageItem
-            key={i}
+            key={`${m.scene_id}:${m.index}`}
             message={m}
             isOwn={ownIds.has(m.sender.id as unknown as string)}
           />
