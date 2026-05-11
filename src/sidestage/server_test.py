@@ -218,14 +218,21 @@ class TestApp:
         app = App()
         assert app.state == ServerState.LOADING
 
-    def test_app_default_config_dir(self):
-        # server-run-config: default config_dir is "configs/".
+    def test_server_run_sidestage_dir(self):
+        # server-run-sidestage-dir: default is "sidestage/".
         app = App()
-        assert app.config_dir == "configs/"
+        assert app.sidestage_dir == "sidestage/", (
+            "server-run-sidestage-dir: default sidestage_dir MUST be "
+            f"'sidestage/'; got {app.sidestage_dir!r}"
+        )
 
-    def test_app_custom_config_dir(self):
-        app = App(config_dir="my/dir/")
-        assert app.config_dir == "my/dir/"
+    def test_server_run_sidestage_dir_custom(self):
+        # server-run-sidestage-dir: explicit override flows through.
+        app = App(sidestage_dir="my/dir/")
+        assert app.sidestage_dir == "my/dir/", (
+            "server-run-sidestage-dir: explicit override MUST be preserved "
+            f"on App.sidestage_dir; got {app.sidestage_dir!r}"
+        )
 
     def test_app_has_fastapi(self):
         app = App()
@@ -300,12 +307,19 @@ class TestAppPrivatePlumbing:
 
 
 class TestGetRoot:
-    def test_root_503_when_loading(self):
-        # rest-api-root-503: 503 if state == LOADING.
-        app = App()
+    def test_root_503_when_loading(self, tmp_path):
+        # rest-api-root-503: 503 if state == LOADING. The static-mount
+        # branch shadows the inline-HTML route, so a pre-built SPA at
+        # src/sidestage/static/ would mask the 503 — patch _STATIC_DIR
+        # to a missing path so the inline route is registered.
+        with patch("sidestage.server._STATIC_DIR", tmp_path / "does-not-exist"):
+            app = App()
         with TestClient(app._fastapi) as client:
             response = client.get("/")
-        assert response.status_code == 503
+        assert response.status_code == 503, (
+            "rest-api-root-503: GET / returns 503 while App.state == LOADING; "
+            f"got status={response.status_code}"
+        )
 
     def test_root_falls_back_to_inline_when_static_missing(self, tmp_path):
         # rest-api-root-fallback: inline HTML when static dir is absent.
@@ -646,8 +660,8 @@ class TestGetMessages:
         body = response.json()
         assert len(body) == 3
         assert body[0]["scene_id"] == "s1" and body[0]["index"] == 0, (
-            "message-model-fields: serialized messages carry scene_id + index; "
-            f"got body[0]={body[0]!r}"
+            "message-model-fields: serialized messages MUST carry scene_id "
+            f"and index on the wire; got body[0]={body[0]!r}"
         )
         assert body[2]["scene_id"] == "s1" and body[2]["index"] == 2
         assert body[1]["body"] == "m1"
@@ -1085,20 +1099,22 @@ class TestSseEventStream:
 
 
 class TestAppRun:
-    def _make_config_tree(self, tmp_path, campaign_names: list[str]) -> str:
-        """Build a `configs/` tree with one subdir per campaign name, each
-        carrying an empty `config.yaml` so the walk picks it up."""
-        root = tmp_path / "configs"
-        root.mkdir()
+    def _make_sidestage_tree(self, tmp_path, campaign_names: list[str]) -> str:
+        """Build a `<sidestage>/campaigns/` tree with one subdir per
+        campaign name, each carrying an empty `config.yaml` so the walk
+        picks it up."""
+        root = tmp_path / "sidestage"
+        campaigns = root / "campaigns"
+        campaigns.mkdir(parents=True)
         for n in campaign_names:
-            sub = root / n
+            sub = campaigns / n
             sub.mkdir()
             (sub / "config.yaml").write_text("name: " + n + "\n")
         return str(root) + "/"
 
     def test_run_loads_first_subdir_with_config_yaml(self, tmp_path):
         # server-run-load: first subdir (sorted) with config.yaml is loaded.
-        config_dir = self._make_config_tree(tmp_path, ["b_camp", "a_camp"])
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["b_camp", "a_camp"])
         loaded_paths: list = []
 
         def fake_load(path):
@@ -1111,7 +1127,7 @@ class TestAppRun:
             "sidestage.server.Campaign.load", side_effect=fake_load
         ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run(config_dir=config_dir)
+            App.run(sidestage_dir=sidestage_dir)
 
         # Sorted order: a_camp comes first.
         assert len(loaded_paths) == 1
@@ -1120,8 +1136,8 @@ class TestAppRun:
 
     def test_run_skips_subdirs_without_config_yaml(self, tmp_path):
         # server-run-load: subdirs without config.yaml are skipped.
-        root = tmp_path / "configs"
-        root.mkdir()
+        root = tmp_path / "sidestage" / "campaigns"
+        root.mkdir(parents=True)
         (root / "no_cfg").mkdir()  # no config.yaml — must be skipped
         good = root / "good"
         good.mkdir()
@@ -1139,27 +1155,40 @@ class TestAppRun:
             "sidestage.server.Campaign.load", side_effect=fake_load
         ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run(config_dir=str(root) + "/")
+            App.run(sidestage_dir=str(root.parent) + "/")
 
         assert len(loaded_paths) == 1
         assert loaded_paths[0].name == "good"
 
     def test_run_raises_when_no_campaign_subdir(self, tmp_path):
-        # server-run-load: empty config_dir -> RuntimeError on startup.
-        empty = tmp_path / "configs"
-        empty.mkdir()
+        # server-run-load: empty campaigns/ -> RuntimeError on startup.
+        root = tmp_path / "sidestage"
+        (root / "campaigns").mkdir(parents=True)
 
         with patch("sidestage.server.uvicorn.run"), patch(
             "sidestage.server.Campaign.load"
         ) as load_mock, patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
             with pytest.raises(RuntimeError):
-                App.run(config_dir=str(empty) + "/")
+                App.run(sidestage_dir=str(root) + "/")
+        load_mock.assert_not_called()
+
+    def test_run_raises_when_campaigns_dir_missing(self, tmp_path):
+        # server-run-load: missing campaigns/ entirely -> RuntimeError.
+        root = tmp_path / "sidestage"
+        root.mkdir()  # no campaigns/ subdir at all
+
+        with patch("sidestage.server.uvicorn.run"), patch(
+            "sidestage.server.Campaign.load"
+        ) as load_mock, patch("sidestage.server.DictEntityFactory") as factory_mock:
+            factory_mock.return_value = MagicMock()
+            with pytest.raises(RuntimeError):
+                App.run(sidestage_dir=str(root) + "/")
         load_mock.assert_not_called()
 
     def test_run_registers_campaign_by_name(self, tmp_path):
         # server-app-campaigns: loaded Campaign is keyed by campaign.name.
-        config_dir = self._make_config_tree(tmp_path, ["only_camp"])
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["only_camp"])
         captured: dict = {}
 
         fake_campaign = MagicMock()
@@ -1183,7 +1212,7 @@ class TestAppRun:
             App, "__init__", capturing_init
         ):
             factory_mock.return_value = MagicMock()
-            App.run(config_dir=config_dir)
+            App.run(sidestage_dir=sidestage_dir)
 
         assert captured.get("called") is True
         assert len(instances) == 1
@@ -1192,7 +1221,7 @@ class TestAppRun:
     def test_run_sets_factory_before_load(self, tmp_path):
         # App.factory is set BEFORE Campaign.load so deserialize-time code
         # can reach the factory via App.factory.
-        config_dir = self._make_config_tree(tmp_path, ["a_camp"])
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["a_camp"])
         observed = {}
 
         def fake_load(path):
@@ -1206,13 +1235,13 @@ class TestAppRun:
             "sidestage.server.Campaign.load", side_effect=fake_load
         ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run(config_dir=config_dir)
+            App.run(sidestage_dir=sidestage_dir)
 
         assert observed.get("factory_set") is True
 
     def test_run_state_serving_after_load(self, tmp_path):
         # server-run-state-serving: state flips to SERVING after Campaign.load.
-        config_dir = self._make_config_tree(tmp_path, ["a_camp"])
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["a_camp"])
 
         observed: dict = {}
         instances: list[App] = []
@@ -1234,9 +1263,51 @@ class TestAppRun:
             App, "__init__", capturing_init
         ):
             factory_mock.return_value = MagicMock()
-            App.run(config_dir=config_dir)
+            App.run(sidestage_dir=sidestage_dir)
 
         assert observed.get("state_at_serve") == ServerState.SERVING
+
+    def test_server_run_port_default(self, tmp_path):
+        # server-run-port: default port is 8000; reaches uvicorn.run.
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["a"])
+        observed: dict = {}
+
+        def fake_uvicorn_run(*_args, **kwargs):
+            observed["port"] = kwargs.get("port")
+
+        fake_campaign = MagicMock()
+        fake_campaign.name = "a"
+        with patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run), patch(
+            "sidestage.server.Campaign.load", return_value=fake_campaign
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
+            factory_mock.return_value = MagicMock()
+            App.run(sidestage_dir=sidestage_dir)
+
+        assert observed.get("port") == 8000, (
+            "server-run-port: default port MUST be 8000; "
+            f"got port={observed.get('port')!r}"
+        )
+
+    def test_server_run_port_custom(self, tmp_path):
+        # server-run-port: explicit override flows through to uvicorn.
+        sidestage_dir = self._make_sidestage_tree(tmp_path, ["a"])
+        observed: dict = {}
+
+        def fake_uvicorn_run(*_args, **kwargs):
+            observed["port"] = kwargs.get("port")
+
+        fake_campaign = MagicMock()
+        fake_campaign.name = "a"
+        with patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run), patch(
+            "sidestage.server.Campaign.load", return_value=fake_campaign
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
+            factory_mock.return_value = MagicMock()
+            App.run(sidestage_dir=sidestage_dir, port=54321)
+
+        assert observed.get("port") == 54321, (
+            "server-run-port: explicit port reaches uvicorn.run; "
+            f"got port={observed.get('port')!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -165,12 +165,14 @@ export function useSSE(deps: UseSSEDeps = {}): UseSSEResult {
       });
     };
 
-    const handleEntityChanged = async (event: EntityChangedEvent) => {
-      const cid = campaignIdRef.current;
-      const sid = sceneIdRef.current;
-      if (!cid || !sid) return;
-      if (event.entity_id !== sid) return;
-      if (!event.attributes.includes('messages')) return;
+    // Slice fetches MUST be serialized. Concurrent entity_changed events
+    // would otherwise both read `messagesRef` at fromIdx=N before either
+    // append completes, both fetch the same slice, and both append —
+    // duplicating messages. The chain guarantees each fetch observes the
+    // prior fetch's effects on `messagesRef`.
+    let sliceChain: Promise<void> = Promise.resolve();
+
+    const runSliceFetch = async (cid: string, sid: EntityId) => {
       const fromIdx = lastIndexFor(sid) + 1;
       const sliceRes = await doFetch(
         `/api/campaigns/${encodeURIComponent(cid)}/scenes/${encodeURIComponent(sid)}/messages?from=${fromIdx}`,
@@ -191,6 +193,21 @@ export function useSSE(deps: UseSSEDeps = {}): UseSSEResult {
       }
     };
 
+    const handleEntityChanged = (event: EntityChangedEvent): void => {
+      const cid = campaignIdRef.current;
+      const sid = sceneIdRef.current;
+      if (!cid || !sid) return;
+      if (event.entity_id !== sid) return;
+      if (!event.attributes.includes('messages')) return;
+      // Append to the chain so each slice fetch runs strictly after the
+      // previous one finishes — no overlapping fromIdx reads.
+      sliceChain = sliceChain
+        .then(() => runSliceFetch(cid, sid))
+        .catch((err) => {
+          console.error('slice fetch failed', err);
+        });
+    };
+
     const subscribe = (cid: string, sid: EntityId) => {
       // frontend-hook-subscribes-per-entity: open per-entity SSE stream.
       source = makeEventSource(
@@ -207,7 +224,7 @@ export function useSSE(deps: UseSSEDeps = {}): UseSSEResult {
         const me = ev as MessageEvent<string>;
         try {
           const raw = JSON.parse(me.data) as { entity_id: string; attributes: string[] };
-          void handleEntityChanged({
+          handleEntityChanged({
             entity_id: asEntityId(raw.entity_id),
             attributes: raw.attributes,
           });

@@ -1,0 +1,15 @@
+{
+  "name": "sidestage-playwright",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "playwright test",
+    "install-chromium": "playwright install chromium",
+    "pick-port": "get-port"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.5",
+    "get-port-cli": "^3.0.0"
+  }
+}

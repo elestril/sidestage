@@ -91,10 +91,11 @@ Specs split across two physical homes:
   - spec-links-implements: Upward link — "this spec point implements the named target."
   - spec-links-implemented-by: Downward link — "this spec point is implemented by the named target."
   - spec-links-tested-by: Test link — "this spec point is proven by the named
-    test(s)." The value is any `pytest -k <selector>` substring that uniquely
-    selects the test: a method name (`test_unsubscribes_on_disconnect`), a
-    class name (`TestDispatchFlow`), or a parametrize id
-    (`cuj-hello-send`).
+    test(s)." The value is any selector that uniquely picks out the test in
+    its runner: `pytest -k <selector>` for Python, `vitest -t <selector>`
+    for TypeScript, `playwright test -g <selector>` for browser tests. The
+    selector may be a method/test name, a class/`describe` name, or a
+    parametrize / `test('<name>')` id.
     - spec-links-tested-by-implicit: Every labeled spec invariant
       `foo-bar-baz` implicitly has a colocated unit test named after it.
       Python: `test_foo_bar_baz` in `*_test.py` (dashes → underscores,

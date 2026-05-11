@@ -102,11 +102,38 @@ runs first, then SSE opens on the resolved scene's per-entity URL.
    `GET /messages?from={lastFetchedIndex+1}` → resolve senders →
    append to `messages` → update `lastFetchedIndex`.
    - .implements: cuj-hello-respond
+   - sse-client-event-serialized: Concurrent `entity_changed` events
+     MUST NOT trigger overlapping slice fetches. Two fetches reading
+     `lastFetchedIndex` before either's append completes would both
+     compute the same `from` and double-append. Slice fetches are
+     serialized via a per-connection promise chain so each fetch
+     observes the prior fetch's `setMessages` effect.
+     - .tested-by: test_sse_client_event_serialized
 8. sse-client-disconnect: On SSE close, set `connected = false`; reconnect
    with exponential backoff (initial 1 s, max 30 s).
 9. sse-client-reconnect: On reconnect, clear `entityCache`, `campaignId`,
    `sceneId`, `playerCharacterIds`, and `lastFetchedIndex`; retain
    `messages`. Re-enter at sse-client-list-campaigns.
+
+## frontend-handles-api-503: SPA tolerates LOADING state
+
+While `App.state == LOADING` every API endpoint returns 503 (per
+`rest-api-*-503`). The SPA shell itself is just static assets — it loads
+regardless of backend state. The SPA treats 503 from API endpoints as a
+transient "backend loading" signal, not an error.
+
+- frontend-handles-api-503-no-crash: A 503 response from any
+  bootstrap-chain endpoint (`/api/campaigns`, `/api/campaigns/{cid}`,
+  etc.) does NOT propagate as an uncaught error. `useSSE` catches the
+  failure and routes it through the reconnect path.
+- frontend-handles-api-503-retry: Bootstrap is retried via the existing
+  SSE reconnect backoff (per `sse-client-reconnect`, 1s → 30s) until the
+  backend flips to SERVING.
+- frontend-handles-api-503-indicator: While retrying, `connected` stays
+  `false` so the header indicator surfaces the not-ready state. No
+  modal/error UI appears.
+- .implemented-by: useSSE
+- .tested-by: test_frontend_handles_api_503
 
 ## frontend-api-client-dataflow: Client REST dataflow
 
@@ -152,7 +179,9 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 - frontend-messagelist-items: Renders one `MessageItem` per message; keyed
   by `(message.scene_id, message.index)` so React reconciliation stays
   stable when slices arrive out of order.
+  - .tested-by: cuj-hello-browser
 - frontend-messagelist-testid: The `<ul>` carries `data-testid="message-list"`.
+  - .tested-by: cuj-hello-browser
 
 ### frontend-messageitem: MessageItem
 
@@ -164,6 +193,7 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 - frontend-messageitem-data: Carries `data-testid="message-item"`,
   `data-scene-id={message.scene_id}`, `data-index={message.index}`, and
   `data-sender-id={message.sender.id}` for stable selectors.
+  - .tested-by: cuj-hello-browser
 
 ### frontend-messageinput: MessageInput
 
@@ -171,9 +201,11 @@ Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 
 - frontend-input-disabled: Input and button are disabled when `connected` is false.
 - frontend-input-submit-button: Clicking the send button calls `onSend(body)` and clears the input.
+  - .tested-by: cuj-hello-browser
 - frontend-input-submit-enter: Pressing Enter (without Shift) also calls `onSend(body)`.
 - frontend-input-testid: Textarea carries `data-testid="message-input"`;
   Send button carries `data-testid="send-button"`.
+  - .tested-by: cuj-hello-browser
 
 ### frontend-usesse: useSSE()
 

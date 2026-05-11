@@ -219,12 +219,12 @@ class TestSceneSerializeMessage:
         model = scene.serialize_message(0)
         assert isinstance(model, Message.Model)
         assert model.scene_id == EntityId("scene-77"), (
-            "scene-serialize-message: model.scene_id echoes self.id; "
+            "scene-serialize-message: model.scene_id MUST echo self.id; "
             f"got {model.scene_id!r}"
         )
         assert model.index == 0, (
-            "scene-serialize-message: model.index is the position; "
-            f"got {model.index!r}"
+            "scene-serialize-message: model.index MUST equal the requested "
+            f"position; got {model.index!r}"
         )
         assert model.sender_id == EntityId("char-x")
         assert model.body == "hello"

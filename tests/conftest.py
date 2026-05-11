@@ -21,13 +21,13 @@ from sidestage.campaign import Campaign
 from sidestage.server import App, ServerState
 
 
-_TEST_CAMPAIGN_DIR = Path(__file__).parent / "test_campaign"
+_TEST_CAMPAIGN_DIR = Path(__file__).parent / "sidestage" / "campaigns" / "test_campaign"
 
 
 @pytest.fixture(scope="session")
 def test_campaign() -> Campaign:
     """testing-fixture-test-campaign: Session-scoped Campaign loaded from
-    `tests/test_campaign/` exactly once.
+    `tests/sidestage/campaigns/test_campaign/` exactly once.
 
     `Campaign.load` mutates `App.factory` and `App._actors` via
     `Character.__init__ -> App.get_actor`. The session-scoped fixture is

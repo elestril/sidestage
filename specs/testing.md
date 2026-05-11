@@ -12,10 +12,15 @@ domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
 - testing-categories-integration: Real Scene + Character + Actor + App,
   no API boundary. Asserts on entity-level state via direct method
   calls. Lives in `tests/integration/`.
-- testing-categories-e2e: Real uvicorn server on an ephemeral port (per
-  `testing-fixture-test-server`), real `httpx.AsyncClient` over TCP.
-  Required for tests crossing the HTTP boundary or exercising streaming
-  responses (SSE). Lives in `tests/e2e/`.
+- testing-categories-e2e: Real uvicorn server on an ephemeral port, real
+  client over TCP. Two flavors by driver:
+  - testing-categories-e2e-http: Python `httpx.AsyncClient` (per
+    `testing-fixture-test-server`). Lives in `tests/e2e/`.
+  - testing-categories-e2e-browser: Playwright + Chromium against the
+    built SPA. The browser tier owns the SSE → React → DOM path that
+    HTTP-tier doesn't touch. Lives in `tests/playwright/`. Invoked via
+    `just test-browser` (not part of `just test`'s inner loop because
+    of the build step + browser launch).
 - testing-categories-eval: Behavioral evals against rubrics. Today every
   actor is deterministic so evals reduce to property checks; once
   LLM-backed actors land, evals slot in as PyHamcrest matchers calling
@@ -25,18 +30,24 @@ domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
 
 ```
 src/sidestage/*_test.py     # unit tests, colocated
+frontend/src/**/*.test.tsx  # vitest unit tests, colocated
 tests/
 ├── conftest.py             # test_campaign, test_app, test_client
-├── test_campaign/          # canonical fixture campaign
+├── sidestage/              # canonical fixture instance-state root
+│   └── campaigns/test_campaign/
 ├── lib/                    # Scenario / runner / matcher scaffolding
 ├── integration/            # @pytest.mark.integration, no API boundary
 ├── e2e/                    # @pytest.mark.e2e, real uvicorn + httpx
 │   └── conftest.py         # test_server
+├── playwright/             # Playwright + Chromium against built SPA
+│   ├── package.json        # @playwright/test, get-port-cli
+│   ├── playwright.config.ts
+│   └── *.spec.ts
 └── eval/                   # @pytest.mark.eval, opt-in
 ```
 
 - testing-layout-test-campaign: Single canonical fixture campaign at
-  `tests/test_campaign/`. Minimal — alice (user) + bob (stub) + parlor scene.
+  `tests/sidestage/campaigns/test_campaign/`. Minimal — alice (user) + bob (stub) + parlor scene.
   Scenarios specialize via `scene_from(...)` overrides.
 - testing-layout-no-matchers-module: Matchers come from `pyhamcrest`
   (dev dep). No custom matcher classes — `assert_that(actual, has_properties(...))`
@@ -56,20 +67,26 @@ skip-by-default (eval).
 ## testing-failure-message
 
 Every assertion that proves a spec invariant MUST include the spec label
-verbatim in its message, followed by a prose description of what the
-invariant requires and how the actual value violated it. The
-label-in-message rule applies even when the enclosing test name already
-encodes the label (per `spec-links-tested-by-implicit`) — duplication
-keeps the failure line self-contained, so an agent reading only the
-failure output knows which spec to load without opening the test file.
+verbatim in its message, followed by a description of what the invariant
+requires and the observed value that violated it. The label-in-message
+rule applies even when the enclosing test name already encodes the label
+(per `spec-links-tested-by-implicit`) — duplication keeps the failure
+line self-contained, so an agent reading only the failure output knows
+which spec to load without opening the test file.
 
 ```python
 assert len(scene.messages) == 1, (
-    "scene-append-records: scene.messages must contain the appended "
+    "scene-append-records: scene.messages MUST contain the appended "
     f"message; got len={len(scene.messages)}"
 )
 ```
 
+- testing-failure-message-modal: State the requirement in modal terms
+  ("MUST", "expected") rather than indicative. A message like
+  `"default port is 8000; got 54321"` is self-contradictory in the
+  failure log — the assertion failed precisely because the claim isn't
+  true. Write `"default port MUST be 8000; got 54321"` or
+  `"expected port 8000; got 54321"` instead.
 - testing-failure-message-exempt: Setup/precondition assertions (object
   is not None, fixture wired correctly) are exempt — they prove no spec
   invariant. Their failure points at infrastructure, not at a spec.
@@ -83,7 +100,7 @@ Shared fixtures live in `tests/conftest.py`. E2E-only fixtures live in
 `tests/e2e/conftest.py`.
 
 - testing-fixture-test-campaign: `test_campaign` (**session-scoped**) —
-  loads `tests/test_campaign/` once. Characters and factory are read-only
+  loads `tests/sidestage/campaigns/test_campaign/` once. Characters and factory are read-only
   and shared across the session.
 - testing-fixture-test-app: `test_app` (function-scoped) — fresh `App`
   with `App.campaigns` and `App.factory` set from `test_campaign`,

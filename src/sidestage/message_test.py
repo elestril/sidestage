@@ -26,8 +26,8 @@ class TestMessage:
         sender = MagicMock()
         msg = Message(sender=sender, body="Hello")
         assert not hasattr(msg, "id"), (
-            "message-class-fields: Message instances carry no `id` attribute; "
-            "identity is the position in scene.messages"
+            "message-class-fields: Message instances MUST NOT carry an "
+            "`id` attribute; identity is the position in scene.messages"
         )
 
     def test_message_has_no_serialize_method(self):

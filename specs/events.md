@@ -177,3 +177,4 @@ No client-side filtering, no cross-scene leakage.
    `queue.put_nowait(event)`; the response generator yields
    `event: entity_changed\ndata: {"entity_id": ..., "attributes": [...]}\n\n`.
    - .implemented-by: rest-api-get-entity-events
+   - .tested-by: cuj-hello-browser

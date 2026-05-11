@@ -6,8 +6,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-dist/
-build/
 *.egg-info/
 
 # Environment
@@ -17,16 +15,20 @@ build/
 # Generated specs (rebuilt via `uv run pydoc-markdown`)
 specs/generated/
 
-# Runtime artifacts
-logs/
-.sidestage-*.pid
-.sidestage-*.log
+# Instance runtime artifacts
+sidestage/logs/
 
-# Frontend
-frontend/node_modules/
+# Node — covers frontend/ and tests/playwright/ trees
+node_modules/
+
+# Frontend build output (also written to FastAPI static mount)
 frontend/dist/
 frontend/.vite/
 src/sidestage/static/
+
+# Playwright artifacts
+tests/playwright/test-results/
+tests/playwright/playwright-report/
 
 # IDE / OS
 .idea/

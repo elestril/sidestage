@@ -16,9 +16,9 @@ the config directory and begins serving the web UI.
 `App` is the FastAPI process container. Owns `state` (LOADING/SERVING),
 `campaigns: dict[str, Campaign]`, the class-level `_actors` registry
 (via `App.get_actor(owner)`), and the class-level `factory` slot consulted
-by `Scene.deserialize` during load. `App.run(config_dir, reload)` walks
-`config_dir` for the first campaign subdir, loads it, flips state to
-SERVING, launches uvicorn.
+by `Scene.deserialize` during load. `App.run(sidestage_dir, port)` walks
+`<sidestage_dir>/campaigns/` for the first campaign subdir, loads it,
+flips state to SERVING, launches uvicorn.
 
 Wire models defined in this module: `SceneResponse`, `MessageRequest`,
 `MessageAccepted`. (`CampaignResponse` lives in `campaign.py`;
@@ -71,7 +71,8 @@ per `spec-location-markdown`. Per-route 503/422/404 details live in
 `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`
 - server-route-post-message: Accepts `MessageRequest`; constructs `Message`,
   calls `scene.append(message)`, returns `201 Created` with
-  `MessageAccepted{id}` carrying the appended id. The npc response cycle
+  `MessageAccepted{scene_id, index}` carrying the appended message's
+  composite identity. The npc response cycle
   fires asynchronously via listener fanout (per `events.md`); the POST
   handler does not await it. 404 if campaign or scene is unknown.
 - .implements: rest-api-post-message

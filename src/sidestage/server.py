@@ -180,18 +180,26 @@ class App:
     .implemented-by: App.run, App.get_actor
     """
 
-    config_dir: str
-    """server-app-config-dir: Filesystem path the campaign is loaded from;
-    set by `__init__` from the `--config` CLI flag (default `"configs/"`).
+    sidestage_dir: str
+    """server-app-sidestage-dir: Filesystem path to the instance state
+    root; set by `__init__` from the `--sidestage-dir` CLI flag (default
+    `"sidestage/"`). Layout:
 
-    .implements: server-run-config
+    ```
+    <sidestage_dir>/
+    ├── sidestage.yaml          # instance-level config (today: unused)
+    ├── campaigns/<name>/...    # one or more campaign trees
+    └── logs/                   # instance logs (future)
+    ```
+
+    .implements: server-run-sidestage-dir
     """
 
     campaigns: dict[str, Campaign]
     """server-app-campaigns: Loaded campaigns keyed by `campaign.name`. Today
     contains at most one entry (per `App.run` loading the first subdir found
-    in `config_dir`). The dict shape is the scaffold for future multi-campaign
-    support.
+    in `<sidestage_dir>/campaigns/`). The dict shape is the scaffold for
+    future multi-campaign support.
 
     .implements: cuj-startup-load
     """
@@ -219,9 +227,9 @@ class App:
     # `spec-link-targets-private`; the public surface is `App.get_actor`.
     _actors: dict[str, "Actor"] = {}
 
-    def __init__(self, config_dir: str = "configs/") -> None:
-        # server-run-config: default config dir is "configs/".
-        self.config_dir = config_dir
+    def __init__(self, sidestage_dir: str = "sidestage/") -> None:
+        # server-run-sidestage-dir: default instance state root is "sidestage/".
+        self.sidestage_dir = sidestage_dir
         self.campaigns = {}
         # server-state-loading: initial state is LOADING.
         self.state = ServerState.LOADING
@@ -485,7 +493,7 @@ class App:
     # ----------------------- run -----------------------
 
     @classmethod
-    def run(cls, config_dir: str = "configs/") -> None:
+    def run(cls, sidestage_dir: str = "sidestage/", port: int = 8000) -> None:
         """server-run: CLI entry point — construct the App, load the single
         campaign, and start serving.
 
@@ -494,23 +502,29 @@ class App:
         runs so that any deserialize-time code can resolve cross-references
         via `App.factory.get(...)`.
 
-        - server-run-config: The `--config` flag (or the `config_dir` argument)
-          sets `config_dir`; defaults to `"configs/"`.
+        - server-run-sidestage-dir: The `--sidestage-dir` flag (or the
+          `sidestage_dir` argument) sets the instance state root; defaults
+          to `"sidestage/"`. Campaign trees live under
+          `<sidestage_dir>/campaigns/<name>/`.
+        - server-run-port: The `--port` flag (or the `port` argument) sets
+          the listen port; defaults to `8000`. Test harnesses (browser e2e)
+          pass an ephemeral port to avoid colliding with the dev server.
         - server-run-state-loading: Sets `state = LOADING` before campaign
           load; while in this state every API route returns 503.
-        - server-run-load: Walks `config_dir` for subdirectories containing
-          `config.yaml` and loads the FIRST one found (sorted, deterministic);
-          registers it as `App.campaigns[campaign.name] = campaign`. Raises
-          `RuntimeError` if no campaign subdir is found.
+        - server-run-load: Walks `<sidestage_dir>/campaigns/` for
+          subdirectories containing `config.yaml` and loads the FIRST one
+          found (sorted, deterministic); registers it as
+          `App.campaigns[campaign.name] = campaign`. Raises `RuntimeError`
+          if `<sidestage_dir>/campaigns/` is missing or empty.
         - server-run-state-serving: Sets `state = SERVING` after the campaign
           is fully loaded; API endpoints become active.
         - server-run-serve: Starts the FastAPI server (uvicorn) on
-          `0.0.0.0:8000`.
+          `0.0.0.0:<port>`.
 
         .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
         """
-        # server-run-config.
-        instance = cls(config_dir=config_dir)
+        # server-run-sidestage-dir.
+        instance = cls(sidestage_dir=sidestage_dir)
         # server-run-state-loading.
         instance.state = ServerState.LOADING
 
@@ -519,33 +533,42 @@ class App:
         # App.factory.
         cls.factory = DictEntityFactory()
 
-        # server-run-load: walk for subdirs with a `config.yaml` and load the
-        # first one; today's single-campaign world maps to dict[name] -> Campaign.
+        # server-run-load: walk `<sidestage_dir>/campaigns/` for subdirs
+        # with a `config.yaml`. Today's single-campaign world maps to
+        # dict[name] -> Campaign.
+        campaigns_root = Path(sidestage_dir) / "campaigns"
+        if not campaigns_root.is_dir():
+            raise RuntimeError(
+                f"No campaigns/ directory under {sidestage_dir}"
+            )
         campaign_dirs = sorted(
-            d for d in Path(config_dir).iterdir()
+            d for d in campaigns_root.iterdir()
             if d.is_dir() and (d / "config.yaml").exists()
         )
         if not campaign_dirs:
             raise RuntimeError(
-                f"No campaign subdir with config.yaml in {config_dir}"
+                f"No campaign with config.yaml in {campaigns_root}"
             )
         campaign = Campaign.load(campaign_dirs[0])
         instance.campaigns[campaign.name] = campaign
         # server-run-state-serving.
         instance.state = ServerState.SERVING
         # server-run-serve.
-        uvicorn.run(instance._fastapi, host="0.0.0.0", port=8000)
+        uvicorn.run(instance._fastapi, host="0.0.0.0", port=port)
 
 
 def main() -> None:
     """server-main: CLI entry point for the `sidestage` console script.
 
-    Parses `--config` and runs `App.run(...)`. Typically invoked via
-    `just run` (which also brings up the Vite dev server).
+    Parses `--sidestage-dir` and `--port`, then runs `App.run(...)`.
+    Typically invoked via `just run` (which also brings up the Vite
+    dev server) on port 8000; browser e2e (`just test-browser`) invokes
+    with an ephemeral port.
 
     .implements: cuj-startup-launch
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/")
+    parser.add_argument("--sidestage-dir", default="sidestage/")
+    parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    App.run(args.config)
+    App.run(args.sidestage_dir, port=args.port)

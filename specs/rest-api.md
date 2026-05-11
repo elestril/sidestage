@@ -12,6 +12,7 @@ all message content is fetched via REST.
 
 1. sse-dataflow-connect: Client opens `GET /api/campaigns/{cid}/entities/{eid}/events`.
    - .implements: cuj-hello-respond
+   - .tested-by: cuj-hello-browser
 2. sse-dataflow-lameduck: Server returns 503 if `App.state == LOADING`.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-entity-events
@@ -88,12 +89,22 @@ but the prefix is the multi-campaign scaffold.
 
 ### rest-api-get-root: GET /
 
+`/` is only nominally a REST surface — it serves the SPA in the small-scale
+single-process deployment. Production deployments behind a reverse proxy
+(nginx/Caddy) serve the SPA bundle directly and proxy only `/api/*` to
+FastAPI; in that topology, FastAPI's own handling of `/` is unused.
+
 - rest-api-root-static: Serves `src/sidestage/static/index.html` if the
-  static directory exists.
-- rest-api-root-fallback: Falls back to inline HTML if static dir is absent.
-- rest-api-root-503: Returns 503 if `App.state == LOADING`.
+  static directory exists (i.e., the SPA has been built). The static
+  mount intentionally has no `App.state` gate — the SPA shell is just
+  assets, and backend lifecycle is signalled by API 503s which the SPA
+  handles per `frontend-handles-api-503`.
+- rest-api-root-fallback-503: When the static directory is absent
+  (dev workflow with no built SPA), returns 503 while
+  `App.state == LOADING`; once SERVING, returns inline placeholder HTML.
+  This branch is the only place the lifecycle gate applies to `/`.
 - .implements: cuj-startup-ready
-- .implemented-by: server-route-root
+- .implemented-by: server-route-root, frontend-handles-api-503
 
 ### rest-api-list-campaigns: GET /api/campaigns
 
@@ -243,6 +254,7 @@ class MessageAccepted(BaseModel):
 - rest-api-post-returns: Returns `201 Created` with `MessageAccepted{scene_id, index}`; the message itself and any character response arrive via SSE.
 - .implements: api-dataflow-send, api-dataflow-dispatch, api-dataflow-respond
 - .implemented-by: server-route-post-message
+- .tested-by: cuj-hello-browser
 
 ### rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
 
@@ -270,3 +282,4 @@ Each frame: `event: entity_changed\ndata: <EntityChanged JSON>\n\n`
 - rest-api-events-cleanup: On disconnect, calls `App.get_actor(current_user).unsubscribe_from(entity, queue)`.
 - .implements: sse-dataflow-lameduck, sse-dataflow-accept, sse-dataflow-event, sse-dataflow-disconnect, events-subscription
 - .implemented-by: server-route-entity-events
+- .tested-by: cuj-hello-browser

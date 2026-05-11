@@ -73,7 +73,7 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
         )
 
         assert status == 200, (
-            "sse-dataflow-connect: SSE subscribe returns 200; "
+            "sse-dataflow-connect: SSE subscribe MUST return 200; "
             f"got status={status}"
         )
         assert "text/event-stream" in ctype, (
@@ -81,7 +81,7 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
             f"text/event-stream; got {ctype!r}"
         )
         assert post_resp.status_code == 201, (
-            "rest-api-post-message: POST /messages returns 201 on the "
+            "rest-api-post-message: POST /messages MUST return 201 on the "
             f"happy path; got status={post_resp.status_code} "
             f"body={post_resp.text!r}"
         )
@@ -100,17 +100,17 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
                 "entity_id": "parlor",
                 "attributes": ["messages"],
             }, (
-                "events-dataflow-deliver: SSE frame payload is "
-                "`{entity_id, attributes}` with `attributes=['messages']` "
-                f"for a Scene message append; frame[{i}]={frame!r}"
+                "events-dataflow-deliver: SSE frame payload for a Scene "
+                "message append MUST be `{entity_id, attributes}` with "
+                f"`attributes=['messages']`; got frame[{i}]={frame!r}"
             )
 
         # History check via GET /messages — confirms alice + bob landed.
         hist_resp = await client.get(messages_url)
 
     assert hist_resp.status_code == 200, (
-        "rest-api-get-messages: GET /messages returns 200; "
-        f"got status={hist_resp.status_code}"
+        "rest-api-get-messages: GET /messages MUST return 200 on the "
+        f"happy path; got status={hist_resp.status_code}"
     )
     messages = hist_resp.json()
     assert len(messages) == 2, (
