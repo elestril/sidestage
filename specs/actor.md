@@ -1,45 +1,26 @@
 # actor: The controller of a Character
 
-An Actor controls a Character. It is either a human (UserActor) or an AI
-model. Actors do not store world-state — all world-state lives on the Character.
-An Actor may play multiple characters (e.g. a DM or an LLM model).
+An Actor controls one or more Characters. Actors are runtime singletons owned
+by `App` (not Entity subclasses); each Character holds a reference to the
+shared Actor instance for its `owner`. Three actors exist today: `StubActor`
+(deterministic test scaffold), `UserActor` (SSE notification target), and
+`NpcActor` (LLM-backed responder, future).
 
-## actor-impl: Actor, StubActor, and UserActor classes
+## actor-impl: Actor, StubActor, UserActor classes
 
-### actor-base: Actor (ABC)
+The class specs — class-level invariants and method invariants for `Actor`,
+`StubActor`, and `UserActor` — live in pydoc on `src/sidestage/actor.py` per
+`spec-location-pydoc`.
 
-`is_human(self) -> bool` *(abstract)*
+Run `uv run pydoc-markdown` to render the generated
+markdown view at `specs/generated/api.md`.
 
-`respond(self, message: Message, character: Character) -> Optional[Message]` *(abstract)*
-
-### stub-actor: StubActor(Actor)
-
-Scaffold actor for testing.
-
-`is_human(self) -> bool`
-- stub-actor-is-human: Returns False.
-
-`respond(self, message: Message, character: Character) -> Optional[Message]`
-- stub-actor-respond-ignores: Returns None if `message.sender.has_human_actor()` is False.
-- stub-actor-respond-returns: Returns `Message(sender=character, body="Hello User!")`.
-- .implements: message-simplescene-respond
-
-### user-actor: UserActor(Actor)
-
-Marker actor for a connected human player. Holds the SSE event queue created
-by the SSE route handler at connect time. Does not generate responses —
-human input arrives via REST POST, not via `respond()`.
-
-`queue: asyncio.Queue`
-`scene: Scene`
-
-`is_human(self) -> bool`
-- user-actor-is-human: Returns True.
-
-`respond(self, message: Message, character: Character) -> Optional[Message]`
-- user-actor-respond-noop: Returns None unconditionally. Human responses arrive via REST,
-  not from this method.
-
-`notify_messages(self, latest_index: int) -> None`
-- user-actor-notify-enqueue: Constructs a `SceneUpdatedEvent(scene_id=self.scene.id, latest_message_index=latest_index)` and puts it onto `self.queue` via `put_nowait`.
-- .implements: sse-dataflow-event, message-simplescene-respond
+Key labels defined in pydoc (for cross-reference from this and other markdown specs):
+- `actor-base` — the `Actor` (ABC) class spec
+- `actor-notify-default-noop` — default `Actor.notify` invariant
+- `stub-actor` — the `StubActor` class spec
+- `stub-actor-is-human`, `stub-actor-respond-returns` — invariants of `StubActor`
+- `user-actor` — the `UserActor` class spec
+- `user-actor-is-human`, `user-actor-respond-noop`, `user-actor-add-queue`,
+  `user-actor-remove-queue`, `user-actor-notify-broadcast` — invariants of
+  `UserActor`

@@ -15,6 +15,38 @@ journeys down to testable invariants and ultimately the actual implementation.
   load specs incrementally without overwhelming their context window. If a spec
   grows beyond this, split it into focused sub-files.
 
+### spec-location: Where specs live
+
+Specs split across two physical homes:
+
+- spec-location-markdown: `specs/*.md` owns top-down design — product goal,
+  CUJs, dataflows that cross process boundaries, and any cross-cutting
+  concern that does not belong to a single class.
+- spec-location-pydoc: Per-class realisation lives in pydoc on the
+  corresponding Python class, attribute, method, or module-level symbol.
+  The docstring IS the spec — same labels, same invariants, same link
+  bullets that would otherwise live in markdown. This eliminates the
+  spec-vs-code drift that bare type declarations enable.
+- spec-location-split: Class spec files in `specs/` keep the prose and any
+  cross-cutting sections (dataflows, on-disk format, CUJ-implementing
+  routes) but defer per-symbol invariants to pydoc.
+
+### spec-build: Generated markdown view
+
+- spec-build-tool: `pydoc-markdown` (dev dependency, configured in
+  `pydoc-markdown.yml` at the repo root). It walks `src/sidestage` and
+  emits a clean markdown view — public surface only, no implementation
+  bodies — so agents and reviewers can reason about specs without loading
+  the full source.
+- spec-build-style: Pydoc uses the **Google** docstring convention.
+  `pydoc-markdown` is configured with the Google parser. New code SHOULD
+  use Google sections (`Args:`, `Returns:`, `Raises:`) where they apply;
+  the labeled-invariant + `.implements:` lines are plain Markdown content
+  inside the docstring and render as-is.
+- spec-build-output: Generated markdown lives at `specs/generated/api.md`
+  (gitignored, regenerated on demand).
+- spec-build-invocation: `uv run pydoc-markdown` from the repo root.
+
 ### spec-format: How specs are formatted in markdown
 
 - spec-labels: All binding specs have labels, which precede the actual text of
@@ -73,10 +105,10 @@ journeys down to testable invariants and ultimately the actual implementation.
     implementation detail and are NOT spec targets. Reference the public
     surface instead.
 
-- spec-class-format: Class and method specs use a single preformatted signature
-  line followed by labeled invariant bullets. Each invariant is a first-class
-  spec label and implicitly defines a unit test case. Link bullets appear at
-  the end:
+- spec-class-format: Class, method, and attribute specs ALL use a single
+  preformatted signature line followed by labeled invariant bullets. Each
+  invariant is a first-class spec label and implicitly defines a unit test
+  case. Link bullets appear at the end:
 
   `dispatch(self, message: Message) -> list[Message]`
   - scene-dispatch-appends: Appends incoming message to history.
@@ -84,6 +116,51 @@ journeys down to testable invariants and ultimately the actual implementation.
   - scene-dispatch-returns: Returns the list of non-None responses.
   - .implements: cuj-hello-send
   - .implemented-by: SimpleScene.dispatch
+
+  `active_scene_id: EntityId` *(attribute)*
+  - campaign-active-scene-id-source: Loaded from `config.yaml`'s `active_scene_id` field.
+  - campaign-active-scene-id-resolves: Resolves to the active Scene via `factory.get(self.active_scene_id)`.
+  - .implements: campaign-config-active-scene
+  - .implemented-by: Campaign.active_scene_id
+
+  - spec-class-format-no-bare: Bare `attr: type` declarations without a
+    labeled invariant are NOT a valid spec form. They describe a type
+    without explaining what the attribute means or where its value comes
+    from — and they let attributes slip into the codebase without anyone
+    having to defend the design.
+
+- spec-enum-members: Python's `Enum` has no per-member docstring convention
+  (PEP 224 was rejected). When spec'ing an enum class, document each member
+  as a labeled bullet inside the class docstring. The class itself takes
+  the `<name>` label; each member takes a `<name>-<member>` label.
+  ```python
+  class ServerState(Enum):
+      """server-state: Enum of server lifecycle states.
+
+      - server-state-loading: Initial state during campaign load; all API
+        endpoints return 503.
+      - server-state-serving: Set once the campaign is fully loaded; API
+        endpoints are active.
+      """
+      LOADING = 1
+      SERVING = 2
+  ```
+
+- spec-public-required: ALL public symbols in code (classes, methods, properties,
+  attributes, module-level functions and constants) MUST appear as specs with
+  a full bidirectional link chain. Private members (leading underscore) are
+  implementation detail and need no spec.
+  - spec-public-required-implements: Every public spec MUST carry an
+    `.implements` link pointing upward to its parent spec or higher-level CUJ.
+    A spec with no upward link is unjustified — it has no reason to exist.
+  - spec-public-required-implemented-by: Every spec describing observable
+    behavior MUST carry an `.implemented-by` link pointing to the code symbol
+    (or sub-spec) that realises it.
+  - spec-public-required-no-orphan-code: Code may not introduce a public
+    symbol without a corresponding spec. Adding an unspec'd public symbol is
+    a defect — flag it during review and either spec it or make it private.
+  - spec-public-required-no-orphan-spec: Likewise, a spec describing a public
+    symbol that no longer exists in code is a defect — flag and resolve.
 
 ### spec-chain: The traceability chain
 

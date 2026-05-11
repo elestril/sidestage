@@ -67,18 +67,26 @@ The SSE connection is a process boundary (server→client only). Every step is l
 
 1. sse-client-connect: On `App` mount, open `EventSource('/api/events')`.
    - .implements: cuj-hello-respond
-2. sse-client-scene: Immediately after opening SSE, fetch `GET /api/scenes/active` →
+2. sse-client-campaign: Immediately after opening SSE, fetch `GET /api/campaign` →
+   read `default_scene_id`. Pick which scene to display: the URL fragment if the
+   user navigated to a specific scene, otherwise `default_scene_id`. (No singular
+   "active scene" — the client navigates freely and multiple clients may attach
+   to different scenes.)
+   - .implements: cuj-startup-ready
+3. sse-client-scene: Fetch `GET /api/scenes/{sceneId}` for the chosen scene →
    store `sceneId`, `playerCharacterIds`, and `character_ids`.
    - .implements: cuj-startup-ready
-2a. sse-client-entities: Fetch `GET /api/entities/{id}` for each `character_id` in
+3a. sse-client-entities: Fetch `GET /api/entities/{id}` for each `character_id` in
    parallel → populate `entityCache`.
    - .implements: cuj-startup-ready
-3. sse-client-event: Receive `message_created` SSE event → parse `MessageCreatedEvent`
-   → if `message` is present, resolve sender from `entityCache` → append to `messages`.
+4. sse-client-event: Receive `scene_updated` SSE event → if `event.scene_id` matches
+   the displayed scene, fetch the new slice via `GET /api/scenes/{id}/messages?from=…`
+   → resolve senders from `entityCache` → append to `messages`. Events for other
+   scenes are ignored (or used to update a scene-list badge, future).
    - .implements: cuj-hello-respond
-4. sse-client-disconnect: On SSE close, set `connected = false`; reconnect with
+5. sse-client-disconnect: On SSE close, set `connected = false`; reconnect with
    exponential backoff (initial 1 s, max 30 s).
-5. sse-client-reconnect: On reconnect, clear `entityCache` and `playerCharacterIds`;
+6. sse-client-reconnect: On reconnect, clear `entityCache` and `playerCharacterIds`;
    retain `messages`. Re-enter at sse-client-connect.
 
 ## frontend-api-client-dataflow: Client REST dataflow
@@ -90,9 +98,10 @@ The SSE connection is a process boundary (server→client only). Every step is l
 
 Managed in `useSSE` hook; passed down as props.
 
-- frontend-state-cache: `entityCache: Map<EntityId, CharacterModel>` — populated from `GET /api/scenes/active`; cleared on SSE reconnect.
+- frontend-state-cache: `entityCache: Map<EntityId, CharacterModel>` — populated from `GET /api/scenes/{id}`; cleared on SSE reconnect.
 - frontend-state-player-ids: `playerCharacterIds: EntityId[]` — populated from `SceneResponse.player_character_ids`; cleared on SSE reconnect.
-- frontend-state-scene-id: `sceneId: EntityId | null` — populated from `SceneResponse.id`; used as path param for `POST /api/scenes/{id}/messages`.
+- frontend-state-scene-id: `sceneId: EntityId | null` — set from URL fragment or `CampaignResponse.default_scene_id`; used as path param for scene-keyed routes.
+- frontend-state-default-scene-id: `defaultSceneId: EntityId | null` — populated from `CampaignResponse.default_scene_id`; used only as a navigation hint when the user has no other intent.
 - frontend-state-messages: `messages: { sender: CharacterModel; body: string }[]` — append-only; retained across reconnects.
 - frontend-state-connected: `connected: boolean` — reflects live SSE state; disables input when false.
 

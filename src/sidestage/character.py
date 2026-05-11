@@ -1,35 +1,81 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Self
+from typing import TYPE_CHECKING, Literal, Optional, Self
 
 from sidestage.entity import Entity, EntityId, EntityType
 
 if TYPE_CHECKING:
-    from sidestage.actor import Actor
+    from sidestage.actor import Actor, SceneUpdatedEvent
     from sidestage.message import Message
 
 
 class Character(Entity):
-    class Model(Entity.Model):
-        actor_type: str
-        model: Optional[str] = None
+    """character-class: A person in the game world — player character, NPC, or
+    meta-character such as the GM. Persistent world-state plus an `owner`
+    discriminator that selects which runtime Actor handles responses.
 
-    def __init__(self, id: EntityId, *, _loaded: bool = False) -> None:
-        super().__init__(id, _loaded=_loaded)
+    .implements: character
+    """
+
+    owner: str
+    """character-owner: Persistent role discriminator — `"user"`, `"npc"`, or
+    `"stub"`. Serialized to disk; selects the runtime Actor via
+    `App.get_actor(self.owner)`.
+
+    .implements: character
+    """
+
+    class Model(Entity.Model):
+        """character-model: Inner Pydantic model — the on-disk / on-wire shape
+        of a Character. Adds the `owner` Literal field on top of `EntityModel`.
+
+        .implements: character
+        """
+
+        owner: Literal["user", "npc", "stub"]
+
+    def __init__(
+        self,
+        *,
+        id: EntityId,
+        name: str,
+        body: str,
+        owner: Literal["user", "npc", "stub"],
+    ) -> None:
+        """Construct a fully-loaded (non-ghost) Character.
+
+        - character-init-stores-owner: Stores `owner` as an attribute.
+        - character-init-binds-actor: Calls `App.get_actor(self.owner)` and
+          stores the returned Actor instance as `self._actor`. The Actor is
+          a shared singleton managed by App; multiple characters with the
+          same `owner` share one Actor.
+
+        .implements: character
+        """
+        # Initialise as a fully-loaded (non-ghost) Entity.
+        super().__init__(id, _loaded=True)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "type", EntityType.CHARACTER)
+        object.__setattr__(self, "body", body)
+        # character-init-stores-owner.
+        object.__setattr__(self, "owner", owner)
+        # character-init-binds-actor: lookup the shared Actor singleton via App.
+        # Lazy import — server.py imports character.py, so a top-level import
+        # would cycle.
+        from sidestage.server import App
+
+        actor = App.get_actor(owner)
+        object.__setattr__(self, "_actor", actor)
 
     @classmethod
     def deserialize(cls, model: Character.Model) -> Self:
-        instance = cls.__new__(cls)
-        object.__setattr__(instance, "id", model.id)
-        object.__setattr__(instance, "_loaded", True)
-        object.__setattr__(instance, "name", model.name)
-        object.__setattr__(instance, "type", EntityType.CHARACTER)
-        object.__setattr__(instance, "body", model.body)
-        object.__setattr__(instance, "actor_type", model.actor_type)
-        object.__setattr__(instance, "model", model.model)
-        from sidestage.actor import StubActor
-        object.__setattr__(instance, "_actor", StubActor())
-        return instance
+        # Construct via __init__ so the actor binding happens consistently.
+        return cls(
+            id=model.id,
+            name=model.name,
+            body=model.body,
+            owner=model.owner,
+        )
 
     def serialize(self) -> Character.Model:
         return self.Model(
@@ -37,12 +83,30 @@ class Character(Entity):
             name=self.name,
             type=self.type,
             body=self.body,
-            actor_type=self.actor_type,
-            model=self.model,
+            owner=self.owner,
         )
 
-    def respond(self, message: Message) -> Optional[Message]:
-        return self._actor.respond(message, self)
+    async def respond(self, message: Message) -> Optional[Message]:
+        """character-respond-passthrough: Pure pass-through —
+        `await self._actor.respond(message, self)`.
+
+        .implements: message-simplescene-respond
+        """
+        return await self._actor.respond(message, self)
+
+    def notify(self, event: SceneUpdatedEvent) -> None:
+        """character-notify-passthrough: Pure pass-through to
+        `self._actor.notify(event)`.
+
+        .implements: message-simplescene-respond
+        """
+        return self._actor.notify(event)
 
     def has_human_actor(self) -> bool:
-        return self._actor.is_human()
+        """character-has-human-actor: Returns `self.owner == "user"`. The check
+        is against the persistent role, not the live actor binding — owners do
+        not change over a character's lifetime.
+
+        .implements: character
+        """
+        return self.owner == "user"

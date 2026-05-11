@@ -13,29 +13,32 @@ the config directory and begins serving the web UI.
   4. cuj-startup-ready: The server begins serving the web UI
      - .implemented-by: frontend-serve, sse-client-scene, sse-client-entities, sse-dataflow-lameduck, sse-dataflow-accept, api-dataflow-subscribe, api-dataflow-scene, api-dataflow-entities, rest-api-get-root, App.run, Runner.run, Runner.start
 
-## server-state: ServerState
+## server-impl: App class and wire models
 
-`ServerState = Enum('ServerState', ['LOADING', 'SERVING'])`
-- server-state-loading: Initial state during campaign load; all API endpoints return 503.
-- server-state-serving: Set once the campaign is fully loaded; API endpoints are active.
+The `App` class spec, the `ServerState` enum spec, and the per-route wire
+model specs (`SceneResponse`, `MessageRequest`, `MessageAccepted`) live in
+pydoc on `src/sidestage/server.py` per `spec-location-pydoc`.
 
-## server-impl: App class
+Run `uv run pydoc-markdown`
+to render the generated markdown view at `specs/generated/api.md`.
 
-### server-app: App
+Key labels defined in pydoc (for cross-reference from this and other markdown specs):
 
-FastAPI application and CLI entry point.
+- `server-state`, `server-state-loading`, `server-state-serving` — the `ServerState` enum and its members
+- `server-app` — the `App` class
+- `server-app-config-dir`, `server-app-campaign`, `server-app-state`, `server-app-factory` — `App` attributes
+- `server-get-actor`, `server-get-actor-lazy`, `server-get-actor-cached`, `server-get-actor-unknown` — `App.get_actor`
+- `server-run`, `server-run-config`, `server-run-state-loading`, `server-run-load`, `server-run-state-serving`, `server-run-serve` — `App.run`
+- `server-scene-response` (+ `-id`, `-name`, `-character-ids`, `-player-character-ids`) — `SceneResponse` wire model
+- `server-message-request` (+ `-sender-id`, `-body`) — `MessageRequest` wire model
+- `server-message-accepted` (+ `-id`) — `MessageAccepted` wire model
 
-`config_dir: str`
-`campaign: Campaign`
-`state: ServerState`
+## server-routes: HTTP route table
 
-`run(cls, config_dir: str = "configs/") -> None` *(classmethod)*
-- server-run-config: The `--config` flag sets `config_dir`; defaults to `"configs/"`.
-- server-run-state-loading: Sets `state = LOADING` before campaign load.
-- server-run-load: Loads the single Campaign from `config_dir` on startup.
-- server-run-state-serving: Sets `state = SERVING` after the campaign is fully loaded.
-- server-run-serve: Starts the FastAPI server.
-- .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
+The route handlers themselves are registered by `App._setup_routes`. Each
+route is a process-boundary surface and so its spec stays here in markdown
+per `spec-location-markdown`. Per-route 503/422/404 details live in
+`specs/rest-api.md`.
 
 `GET /`
 - server-route-root: Serves SPA or inline HTML fallback.
@@ -45,8 +48,16 @@ FastAPI application and CLI entry point.
 - server-route-events: SSE notification stream.
 - .implements: rest-api-get-events
 
-`GET /api/scenes/active`
-- server-route-scene: Returns `SceneResponse` for the active scene.
+`GET /api/campaign`
+- server-route-campaign: Returns `CampaignResponse` (name + default_scene_id hint).
+- .implements: rest-api-get-campaign
+
+`GET /api/scenes`
+- server-route-scenes: Returns `list[SceneResponse]` — every scene in the campaign.
+- .implements: rest-api-get-scenes
+
+`GET /api/scenes/{scene_id}`
+- server-route-scene: Returns `SceneResponse` for the named scene; 404 if unknown.
 - .implements: rest-api-get-scene
 
 `GET /api/entities/{entity_id}`

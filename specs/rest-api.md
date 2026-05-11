@@ -15,9 +15,8 @@ via REST.
 2. sse-dataflow-lameduck: Server returns 503 if `App.state == LOADING`.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-events
-3. sse-dataflow-accept: Server creates an `asyncio.Queue`, instantiates a
-   `UserActor` bound to the active scene's human character, and injects
-   the queue.
+3. sse-dataflow-accept: Server creates an `asyncio.Queue` and registers it with
+   the shared user actor via `App.get_actor("user").add_queue(queue)`.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-events
 4. sse-dataflow-event: Server yields each `SceneUpdatedEvent` dequeued
@@ -26,8 +25,9 @@ via REST.
 5. sse-dataflow-fetch: On each `scene_updated`, the client issues
    `GET /api/scenes/{scene_id}/messages?from=…&to=…` to fetch the slice
    it hasn't seen.
-6. sse-dataflow-disconnect: On client disconnect, server removes `UserActor`,
-   restores `StubActor`, and discards the queue.
+6. sse-dataflow-disconnect: On client disconnect, server calls
+   `App.get_actor("user").remove_queue(queue)` and discards the queue. The
+   `UserActor` singleton stays in place for any other connected clients.
    - .implemented-by: rest-api-get-events
 7. sse-dataflow-reconnect: A new connection re-enters at sse-dataflow-connect.
    Missed events are NOT replayed; the client refetches via `GET /messages`.
@@ -35,30 +35,37 @@ via REST.
 ## api-dataflow: REST request dataflow
 
 The subscribe-then-fetch pattern ensures no events are missed between opening
-the SSE stream and loading scene state.
+the SSE stream and loading scene state. There is no singular "active scene" —
+the client navigates to a scene of its choosing; multiple clients may attach
+to different scenes simultaneously.
 
 1. api-dataflow-subscribe: Client opens SSE before fetching any state.
    - .implements: cuj-startup-ready
-2. api-dataflow-scene: Client fetches `GET /api/scenes/active`; response
-   yields `character_ids` and `player_character_ids`.
+2. api-dataflow-campaign: Client fetches `GET /api/campaign`; response yields
+   `name` and `default_scene_id` (a hint for which scene to load if the client
+   has no other navigation context).
+   - .implements: cuj-startup-ready
+   - .implemented-by: rest-api-get-campaign
+3. api-dataflow-scene: Client fetches `GET /api/scenes/{scene_id}` for the
+   scene it wants to display (typically `default_scene_id`); response yields
+   `character_ids` and `player_character_ids`.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-scene
-2a. api-dataflow-entities: Client fetches `GET /api/entities/{id}` for each
+3a. api-dataflow-entities: Client fetches `GET /api/entities/{id}` for each
    `character_id`; responses populate the entity cache.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-entity
-2b. api-dataflow-history: Client fetches `GET /api/scenes/{scene_id}/messages`
+3b. api-dataflow-history: Client fetches `GET /api/scenes/{scene_id}/messages`
    to load existing history (omitting `from`/`to` for a full fetch).
-3. api-dataflow-send: Client POSTs `MessageRequest` to
+4. api-dataflow-send: Client POSTs `MessageRequest` to
    `POST /api/scenes/{scene_id}/messages`.
    - .implements: cuj-hello-send, message-dataflow-receive
    - .implemented-by: rest-api-post-message
-4. api-dataflow-dispatch: Server constructs `Message(sender, body)` and calls
-   `scene.dispatch(message)` synchronously; the npc response cycle runs in
-   a background task.
+5. api-dataflow-dispatch: Server calls `scene.dispatch(message)` synchronously;
+   the npc response cycle runs in a background task.
    - .implements: message-simplescene-dispatch
    - .implemented-by: rest-api-post-message
-5. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
+6. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
    The message itself and any character response arrive via `scene_updated`
    SSE notifications followed by `GET /messages`.
    - .implements: cuj-hello-send
@@ -75,9 +82,39 @@ the SSE stream and loading scene state.
 - .implements: cuj-startup-ready
 - .implemented-by: server-route-root
 
-### rest-api-get-scene: GET /api/scenes/active
+### rest-api-get-campaign: GET /api/campaign
 
-Returns the active scene. Entity content is NOT embedded — resolve each id
+Returns campaign-level metadata. Used by the client on initial load to learn
+the campaign name and the optional `default_scene_id` hint.
+
+#### CampaignResponse(BaseModel)
+
+```python
+class CampaignResponse(BaseModel):
+    name: str
+    default_scene_id: EntityId | None  # hint for the client; absent = "client picks"
+```
+
+**Response 200** `CampaignResponse`
+
+- rest-api-campaign-503: Returns 503 if `App.state == LOADING`.
+- .implements: api-dataflow-campaign
+- .implemented-by: server-route-campaign
+
+### rest-api-get-scenes: GET /api/scenes
+
+Returns the list of scenes in the campaign. Each entry is a `SceneResponse`
+(same shape as `GET /api/scenes/{id}`); the client uses the list to navigate.
+
+**Response 200** `list[SceneResponse]`
+
+- rest-api-scenes-503: Returns 503 if `App.state == LOADING`.
+- .implements: api-dataflow-scene
+- .implemented-by: server-route-scenes
+
+### rest-api-get-scene: GET /api/scenes/{scene_id}
+
+Returns the named scene. Entity content is NOT embedded — resolve each id
 via `GET /api/entities/{id}`.
 
 #### SceneResponse(BaseModel)
@@ -91,8 +128,10 @@ class SceneResponse(BaseModel):
 ```
 
 **Response 200** `SceneResponse`
+**Response 404** `scene_id` not found in this campaign
 
 - rest-api-scene-503: Returns 503 if `App.state == LOADING`.
+- rest-api-scene-404: Returns 404 if `campaign.scene(scene_id)` returns None.
 - .implements: api-dataflow-scene
 - .implemented-by: server-route-scene
 
@@ -109,8 +148,7 @@ class EntityModel(BaseModel):       # base — Entity.Model
     body: str
 
 class CharacterModel(EntityModel):  # Character.Model
-    actor_type: str                  # "user" | "npc"
-    model: str | None = None         # LLM model identifier for npc actors
+    owner: Literal["user", "npc", "stub"]  # selects the runtime Actor via App.get_actor
 ```
 
 **Response 200** `EntityModel` (or concrete subclass)
@@ -127,16 +165,19 @@ Authoritative source for all messages in the scene, in append order. Clients
 fetch this on initial load and on each `scene_updated` SSE notification —
 typically requesting only the slice they don't already have.
 
-**Query**
+**Query** — half-open range, Python slice semantics:
 - `from: int` (optional, default `0`) — first message index, inclusive.
-- `to: int` (optional, default `len(scene.messages) - 1`) — last message index, inclusive.
+- `to: int` (optional, default `len(scene.messages)`) — end of range, exclusive.
 
 **Response 200** `list[Message.Model]`
 
 - rest-api-get-messages-404: Returns 404 if `scene_id` does not match the active scene.
 - rest-api-get-messages-503: Returns 503 if `App.state == LOADING`.
-- rest-api-get-messages-422: Returns 422 if `from` or `to` are out of range, or if `from > to`.
-- rest-api-get-messages-build: Builds the response as `[scene.serialize_message(i) for i in range(from, to + 1)]`.
+- rest-api-get-messages-empty: An empty scene returns 200 with `[]` for the default range
+  (`from=0, to=0`). Empty result is a valid state, NOT a 422.
+- rest-api-get-messages-422: Returns 422 if `from` or `to` are negative, if `from > to`, or
+  if `to > len(scene.messages)`.
+- rest-api-get-messages-build: Builds the response as `[scene.serialize_message(i) for i in range(from, to)]`.
 - .implemented-by: server-route-get-messages
 
 ### rest-api-post-message: POST /api/scenes/{scene_id}/messages
@@ -194,8 +235,11 @@ Each frame: `event: scene_updated\ndata: <SceneUpdatedEvent JSON>\n\n`
 
 - rest-api-events-503: Returns 503 if `App.state == LOADING`.
 - rest-api-events-keepalive: Sends `": keepalive"` comment every 15 s to prevent proxy timeouts.
-- rest-api-events-accept: On connect, creates an `asyncio.Queue`, instantiates a `UserActor` with that queue bound to the active scene's human character.
+- rest-api-events-accept: On connect, creates an `asyncio.Queue` and registers it with the
+  user-owned actor: `App.get_actor("user").add_queue(queue)`. The UserActor singleton is shared
+  across all connected SSE clients; no actor swap happens at connect time.
 - rest-api-events-yield: Yields each `SceneUpdatedEvent` dequeued from the queue as a `scene_updated` event.
-- rest-api-events-cleanup: On disconnect, removes the `UserActor`, restores a `StubActor`, and discards the queue.
+- rest-api-events-cleanup: On disconnect, calls `App.get_actor("user").remove_queue(queue)`
+  and discards the queue. The UserActor singleton remains in place for other connected clients.
 - .implements: sse-dataflow-lameduck, sse-dataflow-accept, sse-dataflow-event, sse-dataflow-disconnect
 - .implemented-by: server-route-events

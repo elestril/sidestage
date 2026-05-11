@@ -36,9 +36,12 @@ The campaign folder has the following format:
 The campaign-root `config.yaml` carries top-level campaign settings.
 
 `name: str`
-`active_scene_id: EntityId`
+`default_scene_id: EntityId | None`  *(optional)*
 - campaign-config-name: Display name of the campaign; sets `Campaign.name`.
-- campaign-config-active-scene: `EntityId` of the scene to make active after load; sets `Campaign.scene`.
+- campaign-config-default-scene: Optional `EntityId` of a scene that the
+  client should load by default if it has no other navigation context. Just
+  a hint — there is no singular "active scene", clients navigate freely.
+  Sets `Campaign.default_scene_id`.
 
 ## fs-dataflow: Filesystem dataflow
 
@@ -46,7 +49,7 @@ The campaign-root `config.yaml` carries top-level campaign settings.
 single forward pass that uses the ghost pattern to resolve forward references
 without needing a topological sort.
 
-1. fs-dataflow-config: Read `<path>/config.yaml`; parse `name` and `active_scene_id`.
+1. fs-dataflow-config: Read `<path>/config.yaml`; parse `name` and `default_scene_id`.
    - .implements: cuj-startup-load
    - .implemented-by: Campaign.load
 2. fs-dataflow-walk: Walk `<path>` recursively, enumerating every entity file or directory per `entity-disk-format`.
@@ -67,29 +70,30 @@ without needing a topological sort.
 7. fs-dataflow-add: Call `factory.add(entity)`; this registers the entity and hydrates any matching ghost in place.
    - .implements: cuj-startup-load
    - .implemented-by: Campaign.load
-8. fs-dataflow-finalize: After the walk completes, look up `active_scene_id` in the factory and assign it to `Campaign.scene`. Log a warning for any ghost that remains unresolved; leave it in place — access raises `UnresolvedEntityError` per `entity-ghost-unresolved`.
+8. fs-dataflow-finalize: After the walk completes, store `default_scene_id`
+   on the Campaign as a client navigation hint. Log a warning for any ghost
+   that remains unresolved; leave it in place — access raises
+   `UnresolvedEntityError` per `entity-ghost-unresolved`.
    - .implements: cuj-startup-load
    - .implemented-by: Campaign.load
 
 ## campaign-impl: Campaign class
 
-### campaign-class: Campaign
+The `Campaign` class spec — class-level invariants, attribute invariants
+(`name`, `factory`, `default_scene_id`), and `Campaign.load` invariants —
+lives in pydoc on `src/sidestage/campaign.py` per `spec-location-pydoc`.
 
-The core world container.
+Run `uv run pydoc-markdown` to render the generated
+markdown view at `specs/generated/api.md`.
 
-`name: str`
-`scene: Scene`
-`factory: EntityFactory`
-
-`load(cls, path: Path) -> Campaign` *(classmethod)*
-- campaign-load-config: Reads `<path>/config.yaml` and stores `name` and `active_scene_id`.
-- campaign-load-walks: Performs a single forward pass over all entity files in `path`.
-- campaign-load-classifies: Determines each path's concrete entity type from its location and structure.
-- campaign-load-parses: Parses YAML frontmatter + markdown body into `EntityClass.Model`.
-- campaign-load-ghosts: Uses `factory.ghost()` for forward references encountered before the target is loaded.
-- campaign-load-deserializes: Calls `EntityClass.deserialize(model)` to construct each entity.
-- campaign-load-adds: Calls `factory.add(entity)` for each fully parsed entity, hydrating any existing ghosts.
-- campaign-load-active-scene: Resolves `active_scene_id` against the factory and assigns the result to `self.scene`.
-- campaign-load-warns-dangling: Logs a warning listing any ghost ids still unresolved at end of load; ghosts are left in place.
-- campaign-load-returns: Returns a fully initialised Campaign.
-- .implements: fs-dataflow-config, fs-dataflow-walk, fs-dataflow-classify, fs-dataflow-parse, fs-dataflow-resolve-refs, fs-dataflow-deserialize, fs-dataflow-add, fs-dataflow-finalize
+Key labels defined in pydoc (for cross-reference from this and other markdown specs):
+- `campaign-class` — the class spec
+- `campaign-name`, `campaign-factory`, `campaign-default-scene-id` — attributes
+- `campaign-scenes` — `scenes() -> list[Scene]` accessor
+- `campaign-scene` — `scene(id) -> Optional[Scene]` accessor
+- `campaign-to-response` — `to_response() -> CampaignResponse` for the wire layer
+- `campaign-load` — classmethod
+- `campaign-load-config`, `campaign-load-walks`, `campaign-load-classifies`,
+  `campaign-load-parses`, `campaign-load-ghosts`, `campaign-load-deserializes`,
+  `campaign-load-adds`, `campaign-load-default-scene-id`, `campaign-load-warns-dangling`,
+  `campaign-load-returns` — invariants of `Campaign.load`

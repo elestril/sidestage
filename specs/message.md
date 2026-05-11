@@ -3,18 +3,13 @@
 A Message is created by an Actor and flows through the system from sender to
 recipients via the Scene.
 
-## message-id: MessageId type
+Per `spec-location-pydoc`, the `MessageId` NewType, `Message` class, and
+`Message.Model` inner class invariants now live in pydoc on
+`src/sidestage/message.py`. This file retains the prose intro, the
+cross-cutting dataflow spec, and a label index for cross-reference.
 
-`MessageId = NewType('MessageId', str)`
-
-- message-id-newtype: All message references use `MessageId` rather than bare
-  `str`.
-- message-id-format: A `MessageId` is formatted as `"{scene_id}:{index}"` where
-  `index` is a per-scene monotonically increasing integer; ids within a scene
-  are consecutive.
-- message-id-assign: A `Message` arrives at `Scene._append_message` without an
-  id; the scene assigns the next available `MessageId` there. This is the only
-  place ids are assigned.
+Run `uv run pydoc-markdown` to
+render the generated markdown view at `specs/generated/api.md`.
 
 ## message-dataflow: Dataflow
 
@@ -36,26 +31,14 @@ assigned to the message.
    self.\_user.notify_messages() is called with the latest message id.
    - .implemented-by: SimpleScene.dispatch, Character.respond, Character.notify_messages, StubActor.respond, UserActor.notify_messages
 
-## message-impl: Message class
+## message-labels: Label index (defined in pydoc)
 
-### message-class: Message
+The following labels are defined in pydoc on `src/sidestage/message.py` and are
+available as link targets from this and other markdown specs:
 
-`sender: Character`
-`body: str`
-
-The domain `Message` carries no id field — its position in `scene.messages` is
-its identity. Wire serialization is performed by `Scene.serialize_message(index)`
-since constructing the `MessageId` requires the scene's id.
-
-### message-model: Message.Model
-
-Inner Pydantic model defining the canonical wire shape used both in
-`GET /api/scenes/{scene_id}/messages` responses and in SSE `message_created`
-event payloads.
-
-```python
-class Model(BaseModel):
-    id: MessageId        # "{scene_id}:{index}" — built by Scene.serialize_message
-    sender_id: EntityId  # resolves against the client entity cache
-    body: str
-```
+- `message-id` — the `MessageId` NewType (module docstring)
+  - `message-id-newtype`, `message-id-format`, `message-id-assign` — invariants
+- `message-class` — the `Message` dataclass
+  - `message-class-fields`, `message-class-no-serialize` — invariants
+- `message-model` — the `Message.Model` inner Pydantic class
+  - `message-model-fields`, `message-model-inner`, `message-model-built-by` — invariants

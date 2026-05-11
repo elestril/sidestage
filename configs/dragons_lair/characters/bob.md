@@ -1,5 +1,5 @@
 ---
 name: Bob
-actor: user
+owner: user
 ---
 A somewhat unremarkable adventurer who stumbled into this quest by accident.
