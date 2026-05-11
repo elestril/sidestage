@@ -4,12 +4,34 @@ import asyncio
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Self
 
+from pydantic import BaseModel
+
 from sidestage.actor import SceneUpdatedEvent
 from sidestage.entity import Entity, EntityId, EntityType
 from sidestage.message import Message, MessageId
 
 if TYPE_CHECKING:
     from sidestage.character import Character
+
+
+class SceneResponse(BaseModel):
+    """scene-response: Wire shape for GET /api/scenes/{id} and GET /api/scenes.
+
+    Carries the scene's identity, display name, and the two id lists the
+    client needs to render and gate input: every character in the scene
+    (`character_ids`) and the subset whose `has_human_actor()` is True
+    (`player_character_ids`, the player-controllable ones).
+
+    Constructed exclusively by `Scene.to_response()`.
+
+    .implements: rest-api-get-scene, rest-api-get-scenes
+    .implemented-by: Scene.to_response
+    """
+
+    id: EntityId
+    name: str
+    character_ids: list[EntityId]
+    player_character_ids: list[EntityId]
 
 
 class Scene(Entity):
@@ -91,6 +113,34 @@ class Scene(Entity):
         msgs = self.messages
         msgs.append(message)
         return len(msgs) - 1
+
+    @property
+    def user_characters(self) -> list["Character"]:
+        """scene-user-characters: Subset of `characters` with `has_human_actor()` True.
+
+        Single source of truth for "which characters can a client send messages
+        as". Server consumes this via `Scene.to_response()`; never iterates
+        characters or reads `Character.owner` itself.
+
+        .implements: rest-api-get-scene
+        .implemented-by: Scene.user_characters
+        """
+        return [c for c in self.characters if c.has_human_actor()]
+
+    def to_response(self) -> SceneResponse:
+        """scene-to-response: Build the wire shape for this scene.
+
+        The only place `SceneResponse` is constructed.
+
+        .implements: rest-api-get-scene, rest-api-get-scenes
+        .implemented-by: Scene.to_response
+        """
+        return SceneResponse(
+            id=self.id,
+            name=self.name,
+            character_ids=[c.id for c in self.characters],
+            player_character_ids=[c.id for c in self.user_characters],
+        )
 
     def serialize_message(self, index: int) -> Message.Model:
         """scene-serialize-message: Returns

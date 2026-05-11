@@ -9,13 +9,14 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from sidestage.actor import SceneUpdatedEvent, StubActor, UserActor
-from sidestage.entity import EntityId, EntityType
+from sidestage.campaign import CampaignResponse
+from sidestage.entity import EntityId
 from sidestage.message import Message, MessageId
+from sidestage.scene import SceneResponse
 from sidestage.server import (
     App,
     MessageAccepted,
     MessageRequest,
-    SceneResponse,
     ServerState,
 )
 
@@ -49,13 +50,12 @@ def _clear_app_state():
 
 
 def make_human_character(id: str = "bob") -> MagicMock:
-    """A character with owner='user'. Spec character-class field is `owner`."""
+    """A character whose `has_human_actor()` is True."""
     char = MagicMock(spec=[])
     char.id = EntityId(id)
     char.name = id.capitalize()
-    char.owner = "user"
     char._actor = StubActor()
-    char.has_human_actor = lambda: char.owner == "user"
+    char.has_human_actor = lambda: True
     return char
 
 
@@ -63,18 +63,31 @@ def make_npc_character(id: str = "elara") -> MagicMock:
     char = MagicMock(spec=[])
     char.id = EntityId(id)
     char.name = id.capitalize()
-    char.owner = "npc"
     char._actor = StubActor()
     char.has_human_actor = lambda: False
     return char
 
 
 def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
+    """Mock Scene exposing the surface the server now relies on:
+    - `to_response()` builds the wire shape (server no longer constructs it).
+    - `user_characters` is the player-character subset.
+    - `serialize_message`, `messages`, `dispatch` are the message API.
+    """
     scene = MagicMock(spec=[])
     scene.id = EntityId(scene_id)
     scene.name = "Test Scene"
     scene.characters = [human, npc]
+    scene.user_characters = [c for c in scene.characters if c.has_human_actor()]
     scene.messages = []
+
+    def to_response() -> SceneResponse:
+        return SceneResponse(
+            id=scene.id,
+            name=scene.name,
+            character_ids=[c.id for c in scene.characters],
+            player_character_ids=[c.id for c in scene.user_characters],
+        )
 
     def serialize_message(idx: int) -> Message.Model:
         m = scene.messages[idx]
@@ -88,19 +101,35 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
         scene.messages.append(msg)
         return MessageId(f"{scene.id}:{len(scene.messages) - 1}")
 
+    scene.to_response = to_response
     scene.serialize_message = serialize_message
     scene.dispatch = MagicMock(side_effect=dispatch)
     return scene
 
 
-def make_campaign(scene) -> MagicMock:
-    """Spec'd Campaign no longer carries `.scene` — the active Scene is
-    resolved at call time via `campaign.factory.get(campaign.active_scene_id)`.
-    Mock that lookup here so server routes can resolve the active scene.
+def make_campaign(scene, name: str = "Test Campaign") -> MagicMock:
+    """Mock Campaign exposing the new method surface:
+    - `scene(id)` is a method (not an attribute) returning Optional[Scene].
+    - `scenes()` is a method returning list[Scene].
+    - `default_scene_id` replaces the dropped `active_scene_id`.
+    - `to_response()` builds the CampaignResponse.
+    - `factory.get(id)` still serves the entity route.
     """
     campaign = MagicMock(spec=[])
-    campaign.name = "Test Campaign"
-    campaign.active_scene_id = scene.id
+    campaign.name = name
+    campaign.default_scene_id = scene.id
+
+    def _scene(eid):
+        if eid == scene.id:
+            return scene
+        return None
+
+    campaign.scene = MagicMock(side_effect=_scene)
+    campaign.scenes = MagicMock(return_value=[scene])
+    campaign.to_response = lambda: CampaignResponse(
+        name=campaign.name,
+        default_scene_id=campaign.default_scene_id,
+    )
     campaign.factory = MagicMock()
 
     def _factory_get(eid):
@@ -112,13 +141,16 @@ def make_campaign(scene) -> MagicMock:
     return campaign
 
 
+CAMPAIGN_ID = "Test Campaign"
+
+
 def make_loaded_app(scene_id: str = "s1") -> tuple[App, MagicMock, MagicMock, MagicMock]:
     human = make_human_character("bob")
     npc = make_npc_character("elara")
     scene = make_scene(human, npc, scene_id=scene_id)
     campaign = make_campaign(scene)
     app = App()
-    app.campaign = campaign
+    app.campaigns = {campaign.name: campaign}
     app.state = ServerState.SERVING
     return app, scene, human, npc
 
@@ -142,22 +174,8 @@ class TestServerState:
 
 
 # ---------------------------------------------------------------------------
-# Wire models
+# Wire models — only those still owned by server.py
 # ---------------------------------------------------------------------------
-
-
-class TestSceneResponse:
-    def test_fields(self):
-        resp = SceneResponse(
-            id=EntityId("s1"),
-            name="Test",
-            character_ids=[EntityId("a"), EntityId("b")],
-            player_character_ids=[EntityId("a")],
-        )
-        assert resp.id == "s1"
-        assert resp.name == "Test"
-        assert resp.character_ids == ["a", "b"]
-        assert resp.player_character_ids == ["a"]
 
 
 class TestMessageRequest:
@@ -197,9 +215,9 @@ class TestApp:
         app = App()
         assert isinstance(app._fastapi, FastAPI)
 
-    def test_app_campaign_initially_none(self):
+    def test_app_campaigns_initially_empty(self):
         app = App()
-        assert app.campaign is None
+        assert app.campaigns == {}
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +268,41 @@ class TestAppGetActor:
 
 
 # ---------------------------------------------------------------------------
+# Private plumbing: App._current_user, App._subscribe, App._unsubscribe
+# ---------------------------------------------------------------------------
+
+
+class TestAppPrivatePlumbing:
+    def test_current_user_returns_user(self):
+        # _current_user is a classmethod stub returning "user" today.
+        assert App._current_user() == "user"
+
+    def test_subscribe_routes_to_user_actor(self):
+        # _subscribe finds the actor for `user_id` (via get_actor) and calls
+        # add_queue on it.
+        queue: asyncio.Queue = asyncio.Queue()
+        App._subscribe("user", queue)
+        actor = App.get_actor("user")
+        assert queue in actor._queues
+
+    def test_unsubscribe_removes_queue(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        App._subscribe("user", queue)
+        App._unsubscribe("user", queue)
+        actor = App.get_actor("user")
+        assert queue not in actor._queues
+
+    def test_subscribe_unsubscribe_singleton_remains(self):
+        # The singleton actor stays registered after unsubscribe (so other
+        # connections continue to receive events).
+        queue: asyncio.Queue = asyncio.Queue()
+        App._subscribe("user", queue)
+        original = App._actors["user"]
+        App._unsubscribe("user", queue)
+        assert App._actors.get("user") is original
+
+
+# ---------------------------------------------------------------------------
 # rest-api-get-root: GET /
 # ---------------------------------------------------------------------------
 
@@ -294,30 +347,184 @@ class TestGetRoot:
 
 
 # ---------------------------------------------------------------------------
-# rest-api-get-scene: GET /api/scenes/active
+# rest-api-list-campaigns: GET /api/campaigns
 # ---------------------------------------------------------------------------
 
 
-class TestGetActiveScene:
+class TestListCampaigns:
+    def test_list_503_when_loading(self):
+        # rest-api-list-campaigns-503.
+        app = App()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns")
+        assert response.status_code == 503
+
+    def test_list_returns_one_entry_today(self):
+        # server-route-list-campaigns: returns list[CampaignResponse] from
+        # `App.campaigns.values()`. Today there is exactly one entry.
+        app, scene, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns")
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body, list)
+        assert len(body) == 1
+        assert body[0]["name"] == "Test Campaign"
+        assert body[0]["default_scene_id"] == "s1"
+
+    def test_list_empty_returns_empty_list(self):
+        # server-route-list-campaigns: empty App.campaigns -> [].
+        app = App()
+        app.state = ServerState.SERVING
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+# ---------------------------------------------------------------------------
+# rest-api-get-campaign: GET /api/campaigns/{cid}
+# ---------------------------------------------------------------------------
+
+
+class TestGetCampaign:
+    def test_campaign_503_when_loading(self):
+        # rest-api-campaign-503.
+        app = App()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
+        assert response.status_code == 503
+
+    def test_campaign_404_when_unknown(self):
+        # rest-api-campaign-404: campaigns.get returns None -> 404.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns/no-such-campaign")
+        assert response.status_code == 404
+
+    def test_campaign_returns_response(self):
+        # server-route-campaign: returns CampaignResponse from
+        # `campaign.to_response()`. Server constructs nothing.
+        app, scene, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "Test Campaign"
+        assert body["default_scene_id"] == "s1"
+
+    def test_campaign_delegates_to_campaign_to_response(self):
+        # The route must call `campaign.to_response()`, not build its own
+        # CampaignResponse.
+        app, *_ = make_loaded_app()
+        campaign = app.campaigns[CAMPAIGN_ID]
+        campaign.to_response = MagicMock(
+            return_value=CampaignResponse(name="X", default_scene_id=None)
+        )
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
+        assert response.status_code == 200
+        campaign.to_response.assert_called_once()
+        assert response.json() == {"name": "X", "default_scene_id": None}
+
+
+# ---------------------------------------------------------------------------
+# rest-api-get-scenes: GET /api/scenes
+# ---------------------------------------------------------------------------
+
+
+class TestGetScenes:
+    def test_scenes_503_when_loading(self):
+        # rest-api-scenes-503.
+        app = App()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes")
+        assert response.status_code == 503
+
+    def test_scenes_404_when_campaign_unknown(self):
+        # 404 when campaign id is unknown.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns/no-such/scenes")
+        assert response.status_code == 404
+
+    def test_scenes_returns_list_of_scene_responses(self):
+        # server-route-scenes: returns list[SceneResponse] = one entry per
+        # scene in `campaign.scenes()`.
+        app, scene, human, npc = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes")
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 1
+        assert body[0]["id"] == "s1"
+        assert body[0]["name"] == "Test Scene"
+        assert set(body[0]["character_ids"]) == {"bob", "elara"}
+        assert body[0]["player_character_ids"] == ["bob"]
+
+    def test_scenes_delegates_to_campaign_scenes(self):
+        # Server iterates `campaign.scenes()`, not factory internals.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes")
+        app.campaigns[CAMPAIGN_ID].scenes.assert_called_once()
+
+    def test_scenes_empty_campaign_returns_empty_list(self):
+        app, *_ = make_loaded_app()
+        app.campaigns[CAMPAIGN_ID].scenes = MagicMock(return_value=[])
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+# ---------------------------------------------------------------------------
+# rest-api-get-scene: GET /api/scenes/{scene_id}
+# ---------------------------------------------------------------------------
+
+
+class TestGetScene:
     def test_scene_503_when_loading(self):
         # rest-api-scene-503.
         app = App()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/active")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
         assert response.status_code == 503
 
+    def test_scene_404_when_campaign_unknown(self):
+        # 404 when campaign id is unknown.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns/no-such/scenes/s1")
+        assert response.status_code == 404
+
     def test_scene_returns_response(self):
-        # server-route-scene: returns SceneResponse for active scene.
-        # Player ids derive from `owner == "user"` per character spec.
+        # server-route-scene: returns the SceneResponse from
+        # `campaign.scene(id).to_response()`. Server constructs nothing.
         app, scene, human, npc = make_loaded_app()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/active")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
         assert response.status_code == 200
         body = response.json()
         assert body["id"] == "s1"
         assert body["name"] == "Test Scene"
         assert set(body["character_ids"]) == {"bob", "elara"}
         assert body["player_character_ids"] == ["bob"]
+
+    def test_scene_404_when_unknown(self):
+        # rest-api-scene-404: campaign.scene returns None -> 404.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/no-such-scene")
+        assert response.status_code == 404
+
+    def test_scene_delegates_to_campaign_scene(self):
+        # Server resolves the scene via `campaign.scene(id)`, never via
+        # any singular "active scene" helper.
+        app, scene, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
+        app.campaigns[CAMPAIGN_ID].scene.assert_called_with(EntityId("s1"))
 
 
 # ---------------------------------------------------------------------------
@@ -330,29 +537,36 @@ class TestGetEntity:
         # rest-api-entity-503.
         app = App()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/entities/anyid")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/anyid")
         assert response.status_code == 503
+
+    def test_entity_404_when_campaign_unknown(self):
+        # 404 when campaign id is unknown.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get("/api/campaigns/no-such/entities/anyid")
+        assert response.status_code == 404
 
     def test_entity_404_when_missing(self):
         # rest-api-entity-404: factory.get returns None.
         app, *_ = make_loaded_app()
-        app.campaign.factory.get = MagicMock(return_value=None)
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=None)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/entities/missing")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/missing")
         assert response.status_code == 404
 
     def test_entity_404_when_unresolved(self):
         # rest-api-entity-404: ghost (unresolved) entity should 404.
-        from sidestage.entity import Entity, UnresolvedEntityError
+        from sidestage.entity import Entity
 
         ghost = Entity.__new__(Entity)
         object.__setattr__(ghost, "id", EntityId("ghost-id"))
         object.__setattr__(ghost, "_loaded", False)
 
         app, *_ = make_loaded_app()
-        app.campaign.factory.get = MagicMock(return_value=ghost)
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=ghost)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/entities/ghost-id")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/ghost-id")
         assert response.status_code == 404
 
     def test_entity_returns_serialized_model(self):
@@ -370,9 +584,9 @@ class TestGetEntity:
         mock_entity.serialize = MagicMock(return_value=mock_model)
 
         app, *_ = make_loaded_app()
-        app.campaign.factory.get = MagicMock(return_value=mock_entity)
+        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=mock_entity)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/entities/alice")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/alice")
         assert response.status_code == 200
         body = response.json()
         assert body["id"] == "alice"
@@ -394,14 +608,21 @@ class TestGetMessages:
         # rest-api-get-messages-503.
         app = App()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages")
         assert response.status_code == 503
 
-    def test_messages_404_when_scene_id_mismatch(self):
-        # rest-api-get-messages-404.
+    def test_messages_404_when_campaign_unknown(self):
+        # 404 when campaign id is unknown.
         app, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/other/messages")
+            response = client.get("/api/campaigns/no-such/scenes/s1/messages")
+        assert response.status_code == 404
+
+    def test_messages_404_when_scene_unknown(self):
+        # rest-api-get-messages-404: campaign.scene returns None.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/other/messages")
         assert response.status_code == 404
 
     def test_messages_default_full_range(self):
@@ -410,7 +631,7 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 3)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages")
         assert response.status_code == 200
         body = response.json()
         assert len(body) == 3
@@ -424,7 +645,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 5)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=1&to=3")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=1&to=3"
+            )
         assert response.status_code == 200
         body = response.json()
         assert [m["id"] for m in body] == ["s1:1", "s1:2"]
@@ -434,7 +657,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 3)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=0&to=3")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=0&to=3"
+            )
         assert response.status_code == 200
         body = response.json()
         assert len(body) == 3
@@ -444,7 +669,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 3)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=2&to=2")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=2&to=2"
+            )
         assert response.status_code == 200
         assert response.json() == []
 
@@ -453,7 +680,7 @@ class TestGetMessages:
         # Default is from=0, to=len(messages)=0. range(0,0) yields nothing.
         app, scene, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages")
+            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages")
         assert response.status_code == 200
         assert response.json() == []
 
@@ -462,7 +689,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 2)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=-1&to=1")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=-1&to=1"
+            )
         assert response.status_code == 422
 
     def test_messages_422_negative_to(self):
@@ -470,7 +699,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 2)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=0&to=-1")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=0&to=-1"
+            )
         assert response.status_code == 422
 
     def test_messages_422_to_greater_than_len(self):
@@ -478,7 +709,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 2)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=0&to=99")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=0&to=99"
+            )
         assert response.status_code == 422
 
     def test_messages_422_from_greater_than_to(self):
@@ -486,7 +719,9 @@ class TestGetMessages:
         app, scene, *_ = make_loaded_app()
         self._seed_messages(scene, 5)
         with TestClient(app._fastapi) as client:
-            response = client.get("/api/scenes/s1/messages?from=3&to=1")
+            response = client.get(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages?from=3&to=1"
+            )
         assert response.status_code == 422
 
 
@@ -501,17 +736,27 @@ class TestPostMessage:
         app = App()
         with TestClient(app._fastapi) as client:
             response = client.post(
-                "/api/scenes/s1/messages",
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
                 json={"sender_id": "bob", "body": "hi"},
             )
         assert response.status_code == 503
 
-    def test_post_404_when_scene_id_mismatch(self):
-        # rest-api-post-404.
+    def test_post_404_when_campaign_unknown(self):
+        # 404 when campaign id is unknown.
         app, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
-                "/api/scenes/other/messages",
+                "/api/campaigns/no-such/scenes/s1/messages",
+                json={"sender_id": "bob", "body": "hi"},
+            )
+        assert response.status_code == 404
+
+    def test_post_404_when_scene_unknown(self):
+        # rest-api-post-404: campaign.scene returns None.
+        app, *_ = make_loaded_app()
+        with TestClient(app._fastapi) as client:
+            response = client.post(
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/other/messages",
                 json={"sender_id": "bob", "body": "hi"},
             )
         assert response.status_code == 404
@@ -521,17 +766,17 @@ class TestPostMessage:
         app, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
-                "/api/scenes/s1/messages",
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
                 json={"body": "missing sender_id"},
             )
         assert response.status_code == 422
 
     def test_post_422_when_sender_not_player(self):
-        # rest-api-post-422: sender_id not in player_character_ids.
+        # rest-api-post-422: sender_id not in user_characters.
         app, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
-                "/api/scenes/s1/messages",
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
                 json={"sender_id": "elara", "body": "hi"},  # elara is npc, not player
             )
         assert response.status_code == 422
@@ -541,7 +786,7 @@ class TestPostMessage:
         app, scene, human, npc = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.post(
-                "/api/scenes/s1/messages",
+                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
                 json={"sender_id": "bob", "body": "hello"},
             )
         assert response.status_code == 201
@@ -573,17 +818,11 @@ class TestGetEvents:
         paths = {route.path for route in app._fastapi.routes if hasattr(route, "path")}
         assert "/api/events" in paths
 
-    async def test_events_accept_calls_add_queue_on_user_actor_singleton(self):
-        # rest-api-events-accept: on connect, gets the user actor via
-        # App.get_actor("user") and calls add_queue(queue) on it. NO actor swap
-        # on the character. Drive the route directly (avoid sync TestClient
-        # which can't open and close an SSE generator cleanly).
-        # UserActor is now constructed with NO arguments per the spec change.
-        app, scene, human, npc = make_loaded_app()
-        user_actor_singleton = UserActor()
-        App._actors["user"] = user_actor_singleton
-
-        original_actor = human._actor
+    async def test_events_accept_calls_subscribe(self):
+        # rest-api-events-accept / sse-dataflow-accept: route calls
+        # App._subscribe(user_id, queue) on connect. Drive the route directly
+        # to avoid sync TestClient SSE complications.
+        app, *_ = make_loaded_app()
 
         # Locate the get_events route handler.
         handler = None
@@ -593,8 +832,6 @@ class TestGetEvents:
                 break
         assert handler is not None
 
-        # Build a minimal request stub. The handler only needs `is_disconnected`
-        # to be awaitable in the streaming generator (called inside the loop).
         request = MagicMock()
 
         async def is_disconnected() -> bool:
@@ -602,29 +839,28 @@ class TestGetEvents:
 
         request.is_disconnected = is_disconnected
 
-        response = await handler(request)
-        # The streaming response carries the body iterator; the route handler
-        # itself has already called add_queue on the singleton.
-        # `_queues` is the (private) backing list per actor-spec.
-        assert len(user_actor_singleton._queues) == 1
-        # Drain the iterator so the `finally` block fires `on_close` ->
-        # remove_queue. is_disconnected returns True so the loop exits at top.
-        body_iter = response.body_iterator
-        async for _ in body_iter:
-            pass
+        with patch.object(App, "_subscribe") as sub_mock, patch.object(
+            App, "_unsubscribe"
+        ) as unsub_mock:
+            response = await handler(request)
+            # Subscribe is called synchronously in the route body — before the
+            # streaming response is consumed.
+            sub_mock.assert_called_once()
+            sub_args = sub_mock.call_args[0]
+            assert sub_args[0] == "user"
+            queue = sub_args[1]
+            assert isinstance(queue, asyncio.Queue)
 
-        assert user_actor_singleton._queues == []
-        # Character actor is untouched (no actor swap).
-        assert human._actor is original_actor
+            # Drain the streaming body so the finally block fires _unsubscribe.
+            async for _ in response.body_iterator:
+                pass
 
-    async def test_events_cleanup_calls_remove_queue(self):
-        # rest-api-events-cleanup: on disconnect, the queue is removed from
-        # the UserActor singleton. The singleton itself remains in App._actors
-        # for any other connected clients.
-        # UserActor is now constructed with NO arguments per the spec change.
-        app, scene, human, npc = make_loaded_app()
-        user_actor_singleton = UserActor()
-        App._actors["user"] = user_actor_singleton
+            unsub_mock.assert_called_once_with("user", queue)
+
+    async def test_events_cleanup_calls_unsubscribe(self):
+        # rest-api-events-cleanup: on disconnect, the queue is removed via
+        # App._unsubscribe.
+        app, *_ = make_loaded_app()
 
         handler = None
         for r in app._fastapi.routes:
@@ -640,13 +876,14 @@ class TestGetEvents:
 
         request.is_disconnected = is_disconnected
 
-        response = await handler(request)
-        async for _ in response.body_iterator:
-            pass
+        with patch.object(App, "_subscribe"), patch.object(
+            App, "_unsubscribe"
+        ) as unsub_mock:
+            response = await handler(request)
+            async for _ in response.body_iterator:
+                pass
 
-        assert user_actor_singleton._queues == []
-        # Singleton stays put for any other (or future) connected clients.
-        assert App._actors.get("user") is user_actor_singleton
+            unsub_mock.assert_called_once()
 
     async def test_sse_event_stream_yields_scene_updated(self):
         # rest-api-events-yield + sse-dataflow-event: helper emits a
@@ -708,81 +945,158 @@ class TestGetEvents:
 
 
 class TestAppRun:
-    def test_run_default_config_dir(self):
-        # server-run-config: default "configs/".
+    def _make_config_tree(self, tmp_path, campaign_names: list[str]) -> str:
+        """Build a `configs/` tree with one subdir per campaign name, each
+        carrying an empty `config.yaml` so the walk picks it up."""
+        root = tmp_path / "configs"
+        root.mkdir()
+        for n in campaign_names:
+            sub = root / n
+            sub.mkdir()
+            (sub / "config.yaml").write_text("name: " + n + "\n")
+        return str(root) + "/"
+
+    def test_run_loads_first_subdir_with_config_yaml(self, tmp_path):
+        # server-run-load: first subdir (sorted) with config.yaml is loaded.
+        config_dir = self._make_config_tree(tmp_path, ["b_camp", "a_camp"])
+        loaded_paths: list = []
+
+        def fake_load(path):
+            loaded_paths.append(path)
+            c = MagicMock()
+            c.name = path.name
+            return c
+
         with patch("sidestage.server.uvicorn.run") as run_mock, patch(
-            "sidestage.server.Campaign.load"
-        ) as load_mock, patch(
-            "sidestage.server.Path"
-        ) as path_mock, patch(
-            "sidestage.server.DictEntityFactory"
-        ) as factory_mock:
-            path_mock.return_value.iterdir.return_value = iter([MagicMock()])
-            load_mock.return_value = MagicMock()
+            "sidestage.server.Campaign.load", side_effect=fake_load
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run()
+            App.run(config_dir=config_dir)
+
+        # Sorted order: a_camp comes first.
+        assert len(loaded_paths) == 1
+        assert loaded_paths[0].name == "a_camp"
         run_mock.assert_called_once()
 
-    def test_run_custom_config_dir(self):
-        with patch("sidestage.server.uvicorn.run") as run_mock, patch(
-            "sidestage.server.Campaign.load"
-        ) as load_mock, patch(
-            "sidestage.server.Path"
-        ) as path_mock, patch(
-            "sidestage.server.DictEntityFactory"
-        ) as factory_mock:
-            path_mock.return_value.iterdir.return_value = iter([MagicMock()])
-            load_mock.return_value = MagicMock()
+    def test_run_skips_subdirs_without_config_yaml(self, tmp_path):
+        # server-run-load: subdirs without config.yaml are skipped.
+        root = tmp_path / "configs"
+        root.mkdir()
+        (root / "no_cfg").mkdir()  # no config.yaml — must be skipped
+        good = root / "good"
+        good.mkdir()
+        (good / "config.yaml").write_text("name: good\n")
+
+        loaded_paths: list = []
+
+        def fake_load(path):
+            loaded_paths.append(path)
+            c = MagicMock()
+            c.name = path.name
+            return c
+
+        with patch("sidestage.server.uvicorn.run"), patch(
+            "sidestage.server.Campaign.load", side_effect=fake_load
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run(config_dir="my/configs/")
-            path_mock.assert_called_with("my/configs/")
-        run_mock.assert_called_once()
+            App.run(config_dir=str(root) + "/")
 
-    def test_run_loads_campaign_and_serves(self):
-        # server-run-state-loading + server-run-load + server-run-state-serving + server-run-serve.
-        captured = {}
+        assert len(loaded_paths) == 1
+        assert loaded_paths[0].name == "good"
 
-        def fake_uvicorn_run(app_obj, **kwargs):
-            captured["called"] = True
+    def test_run_raises_when_no_campaign_subdir(self, tmp_path):
+        # server-run-load: empty config_dir -> RuntimeError on startup.
+        empty = tmp_path / "configs"
+        empty.mkdir()
+
+        with patch("sidestage.server.uvicorn.run"), patch(
+            "sidestage.server.Campaign.load"
+        ) as load_mock, patch("sidestage.server.DictEntityFactory") as factory_mock:
+            factory_mock.return_value = MagicMock()
+            with pytest.raises(RuntimeError):
+                App.run(config_dir=str(empty) + "/")
+        load_mock.assert_not_called()
+
+    def test_run_registers_campaign_by_name(self, tmp_path):
+        # server-app-campaigns: loaded Campaign is keyed by campaign.name.
+        config_dir = self._make_config_tree(tmp_path, ["only_camp"])
+        captured: dict = {}
 
         fake_campaign = MagicMock()
+        fake_campaign.name = "Only Campaign"
+
+        def fake_uvicorn_run(app_obj, **kwargs):
+            # The FastAPI app is `instance._fastapi`; reach back via the
+            # captured `instance` we stash from the constructor.
+            captured["called"] = True
+
+        original_init = App.__init__
+        instances: list[App] = []
+
+        def capturing_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            instances.append(self)
 
         with patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run), patch(
             "sidestage.server.Campaign.load", return_value=fake_campaign
-        ) as load_mock, patch(
-            "sidestage.server.Path"
-        ) as path_mock, patch(
-            "sidestage.server.DictEntityFactory"
-        ) as factory_mock:
-            path_mock.return_value.iterdir.return_value = iter([MagicMock()])
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock, patch.object(
+            App, "__init__", capturing_init
+        ):
             factory_mock.return_value = MagicMock()
-            App.run(config_dir="cfgs/")
+            App.run(config_dir=config_dir)
 
-        load_mock.assert_called_once()
         assert captured.get("called") is True
+        assert len(instances) == 1
+        assert instances[0].campaigns == {"Only Campaign": fake_campaign}
 
-    def test_run_sets_factory_before_load(self):
+    def test_run_sets_factory_before_load(self, tmp_path):
         # App.factory is set BEFORE Campaign.load so deserialize-time code
         # can reach the factory via App.factory.
+        config_dir = self._make_config_tree(tmp_path, ["a_camp"])
         observed = {}
 
         def fake_load(path):
             # When Campaign.load is invoked, App.factory must already be set.
             observed["factory_set"] = hasattr(App, "factory") and App.factory is not None
-            return MagicMock()
+            c = MagicMock()
+            c.name = "a"
+            return c
 
         with patch("sidestage.server.uvicorn.run"), patch(
             "sidestage.server.Campaign.load", side_effect=fake_load
-        ), patch(
-            "sidestage.server.Path"
-        ) as path_mock, patch(
-            "sidestage.server.DictEntityFactory"
-        ) as factory_mock:
-            path_mock.return_value.iterdir.return_value = iter([MagicMock()])
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock:
             factory_mock.return_value = MagicMock()
-            App.run(config_dir="cfgs/")
+            App.run(config_dir=config_dir)
 
         assert observed.get("factory_set") is True
+
+    def test_run_state_serving_after_load(self, tmp_path):
+        # server-run-state-serving: state flips to SERVING after Campaign.load.
+        config_dir = self._make_config_tree(tmp_path, ["a_camp"])
+
+        observed: dict = {}
+        instances: list[App] = []
+        original_init = App.__init__
+
+        def capturing_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            instances.append(self)
+
+        fake_campaign = MagicMock()
+        fake_campaign.name = "a"
+
+        def fake_uvicorn_run(*args, **kwargs):
+            observed["state_at_serve"] = instances[-1].state
+
+        with patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run), patch(
+            "sidestage.server.Campaign.load", return_value=fake_campaign
+        ), patch("sidestage.server.DictEntityFactory") as factory_mock, patch.object(
+            App, "__init__", capturing_init
+        ):
+            factory_mock.return_value = MagicMock()
+            App.run(config_dir=config_dir)
+
+        assert observed.get("state_at_serve") == ServerState.SERVING
 
 
 # ---------------------------------------------------------------------------
@@ -792,14 +1106,21 @@ class TestAppRun:
 
 class TestEndpointDataflowIntegration:
     def test_subscribe_then_fetch_pattern(self):
-        # api-dataflow-subscribe + api-dataflow-scene + api-dataflow-history.
+        # api-dataflow-list-campaigns + api-dataflow-campaign + api-dataflow-scene
+        # + api-dataflow-history.
         app, scene, human, npc = make_loaded_app()
         scene.messages.append(Message(sender=human, body="hi"))
 
         with TestClient(app._fastapi) as client:
-            r1 = client.get("/api/scenes/active")
-            r2 = client.get("/api/scenes/s1/messages")
+            r0 = client.get("/api/campaigns")
+            r1 = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
+            r2 = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1")
+            r3 = client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages")
+        assert r0.status_code == 200
         assert r1.status_code == 200
         assert r2.status_code == 200
-        assert r1.json()["id"] == "s1"
-        assert len(r2.json()) == 1
+        assert r3.status_code == 200
+        assert r0.json()[0]["name"] == "Test Campaign"
+        assert r1.json()["default_scene_id"] == "s1"
+        assert r2.json()["id"] == "s1"
+        assert len(r3.json()) == 1

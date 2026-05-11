@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sidestage.campaign import Campaign, CampaignConfig
+from sidestage.campaign import Campaign, CampaignConfig, CampaignResponse
 from sidestage.character import Character
 from sidestage.entity import EntityId
 from sidestage.scene import Scene
@@ -106,13 +106,18 @@ class TestCampaignConfig:
 
     def test_config_has_name(self):
         # campaign-config-name.
-        config = CampaignConfig(name="Test", active_scene_id="s1")
+        config = CampaignConfig(name="Test", default_scene_id="s1")
         assert config.name == "Test"
 
-    def test_config_has_active_scene_id(self):
-        # campaign-config-active-scene.
-        config = CampaignConfig(name="Test", active_scene_id="s1")
-        assert config.active_scene_id == "s1"
+    def test_config_has_default_scene_id(self):
+        # campaign-config-default-scene.
+        config = CampaignConfig(name="Test", default_scene_id="s1")
+        assert config.default_scene_id == "s1"
+
+    def test_config_default_scene_id_optional(self):
+        # campaign-config-default-scene: field is optional; absent → None.
+        config = CampaignConfig(name="Test")
+        assert config.default_scene_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -137,26 +142,27 @@ class TestCampaignLoadMinimal:
         # campaign-load-config / campaign-config-name.
         assert minimal_campaign.name == "Minimal Campaign"
 
-    def test_load_active_scene_id(self, minimal_campaign):
-        # campaign-load-active-scene-id: stored as EntityId, NOT a Scene
+    def test_load_default_scene_id(self, minimal_campaign):
+        # campaign-load-default-scene-id: stored as EntityId, NOT a Scene
         # reference.
-        assert minimal_campaign.active_scene_id == "parlor"
+        assert minimal_campaign.default_scene_id == "parlor"
 
-    def test_active_scene_id_is_entity_id_not_scene(self, minimal_campaign):
-        # campaign-active-scene-id: it's the id, not the Scene object. The
+    def test_default_scene_id_is_entity_id_not_scene(self, minimal_campaign):
+        # campaign-default-scene-id: it's the id, not the Scene object. The
         # spec is explicit that Campaign no longer carries a `.scene`.
-        assert isinstance(minimal_campaign.active_scene_id, str)
-        assert not isinstance(minimal_campaign.active_scene_id, Scene)
+        assert isinstance(minimal_campaign.default_scene_id, str)
+        assert not isinstance(minimal_campaign.default_scene_id, Scene)
 
-    def test_active_scene_resolves_via_factory(self, minimal_campaign):
-        # campaign-active-scene-id-resolves: factory.get(active_scene_id).
-        scene = minimal_campaign.factory.get(minimal_campaign.active_scene_id)
+    def test_default_scene_resolves_via_factory(self, minimal_campaign):
+        # campaign-default-scene-id: factory.get(default_scene_id) yields the
+        # Scene the hint points at.
+        scene = minimal_campaign.factory.get(minimal_campaign.default_scene_id)
         assert isinstance(scene, Scene)
         assert scene.id == "parlor"
         assert scene.name == "The Parlor"
 
-    def test_factory_holds_active_scene(self, minimal_campaign):
-        # fs-dataflow-add: active scene was added to the factory.
+    def test_factory_holds_default_scene(self, minimal_campaign):
+        # fs-dataflow-add: default scene was added to the factory.
         assert minimal_campaign.factory.get("parlor") is not None
 
     def test_factory_holds_all_characters(self, minimal_campaign):
@@ -164,21 +170,21 @@ class TestCampaignLoadMinimal:
         for cid in ("alice", "bob"):
             assert minimal_campaign.factory.get(cid) is not None
 
-    def test_active_scene_characters_are_real_characters(self, minimal_campaign):
+    def test_default_scene_characters_are_real_characters(self, minimal_campaign):
         # scene-deserialize-resolves: ids in `model.characters` resolve to
         # real Character instances (not ghosts, not ids).
-        scene = minimal_campaign.factory.get(minimal_campaign.active_scene_id)
+        scene = minimal_campaign.factory.get(minimal_campaign.default_scene_id)
         assert all(isinstance(c, Character) for c in scene.characters)
         assert {c.id for c in scene.characters} == {"alice", "bob"}
 
-    def test_active_scene_user_is_first(self, minimal_campaign):
+    def test_default_scene_user_is_first(self, minimal_campaign):
         # simple-scene-init-user: characters[0] must be human.
-        scene = minimal_campaign.factory.get(minimal_campaign.active_scene_id)
+        scene = minimal_campaign.factory.get(minimal_campaign.default_scene_id)
         assert scene.characters[0].owner == "user"
 
-    def test_active_scene_npc_is_second(self, minimal_campaign):
+    def test_default_scene_npc_is_second(self, minimal_campaign):
         # simple-scene-init-npc: characters[1] must be non-human.
-        scene = minimal_campaign.factory.get(minimal_campaign.active_scene_id)
+        scene = minimal_campaign.factory.get(minimal_campaign.default_scene_id)
         assert scene.characters[1].has_human_actor() is False
 
 
@@ -203,7 +209,7 @@ class TestCampaignLoadOwners:
             )
 
         (root / "config.yaml").write_text(
-            "name: Owners Test\nactive_scene_id: s1\n"
+            "name: Owners Test\ndefault_scene_id: s1\n"
         )
         user = next(c for c, o in owners.items() if o == "user")
         npc = next(c for c, o in owners.items() if o == "npc")
@@ -253,7 +259,7 @@ class TestCampaignLoadOwners:
             "---\nname: Mystery\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
-            "name: Test\nactive_scene_id: s1\n"
+            "name: Test\ndefault_scene_id: s1\n"
         )
         (tmp_path / "scenes" / "s1.md").write_text(
             "---\nname: Scene\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
@@ -283,7 +289,7 @@ class TestCharacterActorBinding:
             "---\nname: Bob\nowner: npc\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
-            "name: Test\nactive_scene_id: s1\n"
+            "name: Test\ndefault_scene_id: s1\n"
         )
         (tmp_path / "scenes" / "s1.md").write_text(
             "---\nname: Scene\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
@@ -338,7 +344,7 @@ class TestSceneDeserializeViaAppFactory:
             "---\nname: Bob\nowner: npc\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
-            "name: Test\nactive_scene_id: s1\n"
+            "name: Test\ndefault_scene_id: s1\n"
         )
         (tmp_path / "scenes" / "s1.md").write_text(
             "---\nname: Scene\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
@@ -392,14 +398,14 @@ class TestDanglingGhostWarning:
 
 
 # ---------------------------------------------------------------------------
-# Active scene resolution — multiple scenes, active id picks the right one.
+# Default scene resolution — multiple scenes, default_scene_id picks one.
 # ---------------------------------------------------------------------------
 
 
-class TestActiveScene:
-    """campaign-load-active-scene-id: config.active_scene_id pins the scene."""
+class TestDefaultScene:
+    """campaign-load-default-scene-id: config.default_scene_id pins the hint."""
 
-    def test_load_active_scene_set_from_config(self, tmp_path, clean_app_state):
+    def test_load_default_scene_set_from_config(self, tmp_path, clean_app_state):
         (tmp_path / "characters").mkdir()
         (tmp_path / "scenes").mkdir()
         (tmp_path / "characters" / "alice.md").write_text(
@@ -409,7 +415,7 @@ class TestActiveScene:
             "---\nname: Bob\nowner: npc\n---\nbody\n"
         )
         (tmp_path / "config.yaml").write_text(
-            "name: Test\nactive_scene_id: s2\n"
+            "name: Test\ndefault_scene_id: s2\n"
         )
         (tmp_path / "scenes" / "s1.md").write_text(
             "---\nname: First\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
@@ -422,12 +428,124 @@ class TestActiveScene:
             campaign = Campaign.load(tmp_path)
 
         # Stored as id, not as Scene.
-        assert campaign.active_scene_id == "s2"
+        assert campaign.default_scene_id == "s2"
         # Resolves to the correct Scene via the factory.
-        scene = campaign.factory.get(campaign.active_scene_id)
+        scene = campaign.factory.get(campaign.default_scene_id)
         assert scene.id == "s2"
         assert scene.name == "Second"
-        # Both scenes are in the factory; the active one is just the one
-        # `active_scene_id` points at.
+        # Both scenes are in the factory; default_scene_id is just a hint.
         assert campaign.factory.get("s1") is not None
         assert campaign.factory.get("s2") is not None
+
+    def test_load_default_scene_id_optional(self, tmp_path, clean_app_state):
+        # campaign-load-default-scene-id: missing field → None (no raise).
+        (tmp_path / "characters").mkdir()
+        (tmp_path / "scenes").mkdir()
+        (tmp_path / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: npc\n---\nbody\n"
+        )
+        (tmp_path / "config.yaml").write_text("name: No Default\n")
+        (tmp_path / "scenes" / "s1.md").write_text(
+            "---\nname: Solo\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
+        )
+
+        with _patched_get_actor():
+            campaign = Campaign.load(tmp_path)
+
+        assert campaign.default_scene_id is None
+
+
+# ---------------------------------------------------------------------------
+# Campaign.scenes / Campaign.scene / Campaign.to_response — the public
+# accessors the server layer calls.
+# ---------------------------------------------------------------------------
+
+
+class TestCampaignScenes:
+    """campaign-scenes: list of all Scene entities in the factory."""
+
+    def test_scenes_returns_only_scenes(self, minimal_campaign):
+        # The minimal campaign has one scene (`parlor`) and two characters;
+        # only the scene should appear.
+        scenes = minimal_campaign.scenes()
+        assert isinstance(scenes, list)
+        assert all(isinstance(s, Scene) for s in scenes)
+        assert {s.id for s in scenes} == {"parlor"}
+
+    def test_scenes_returns_multiple(self, tmp_path, clean_app_state):
+        (tmp_path / "characters").mkdir()
+        (tmp_path / "scenes").mkdir()
+        (tmp_path / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: npc\n---\nbody\n"
+        )
+        (tmp_path / "config.yaml").write_text(
+            "name: Multi\ndefault_scene_id: s1\n"
+        )
+        (tmp_path / "scenes" / "s1.md").write_text(
+            "---\nname: First\ncharacters:\n  - alice\n  - bob\n---\nb\n"
+        )
+        (tmp_path / "scenes" / "s2.md").write_text(
+            "---\nname: Second\ncharacters:\n  - alice\n  - bob\n---\nb\n"
+        )
+
+        with _patched_get_actor():
+            campaign = Campaign.load(tmp_path)
+
+        scenes = campaign.scenes()
+        assert {s.id for s in scenes} == {"s1", "s2"}
+        assert all(isinstance(s, Scene) for s in scenes)
+
+
+class TestCampaignScene:
+    """campaign-scene: id-keyed scene lookup."""
+
+    def test_scene_resolves_by_id(self, minimal_campaign):
+        scene = minimal_campaign.scene(EntityId("parlor"))
+        assert scene is not None
+        assert isinstance(scene, Scene)
+        assert scene.id == "parlor"
+
+    def test_scene_unknown_returns_none(self, minimal_campaign):
+        assert minimal_campaign.scene(EntityId("does-not-exist")) is None
+
+    def test_scene_non_scene_id_returns_none(self, minimal_campaign):
+        # `alice` is a Character, not a Scene — must not be returned.
+        assert minimal_campaign.scene(EntityId("alice")) is None
+
+
+class TestCampaignToResponse:
+    """campaign-to-response: builds CampaignResponse with name + default_scene_id."""
+
+    def test_to_response_returns_campaign_response(self, minimal_campaign):
+        resp = minimal_campaign.to_response()
+        assert isinstance(resp, CampaignResponse)
+        assert resp.name == "Minimal Campaign"
+        assert resp.default_scene_id == "parlor"
+
+    def test_to_response_with_no_default(self, tmp_path, clean_app_state):
+        (tmp_path / "characters").mkdir()
+        (tmp_path / "scenes").mkdir()
+        (tmp_path / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: npc\n---\nbody\n"
+        )
+        (tmp_path / "config.yaml").write_text("name: Hintless\n")
+        (tmp_path / "scenes" / "s1.md").write_text(
+            "---\nname: Solo\ncharacters:\n  - alice\n  - bob\n---\nb\n"
+        )
+
+        with _patched_get_actor():
+            campaign = Campaign.load(tmp_path)
+
+        resp = campaign.to_response()
+        assert isinstance(resp, CampaignResponse)
+        assert resp.name == "Hintless"
+        assert resp.default_scene_id is None

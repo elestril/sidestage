@@ -9,7 +9,7 @@ from sidestage.actor import SceneUpdatedEvent
 from sidestage.character import Character
 from sidestage.entity import Entity, EntityId, EntityType
 from sidestage.message import Message, MessageId
-from sidestage.scene import Scene, SimpleScene
+from sidestage.scene import Scene, SceneResponse, SimpleScene
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +524,71 @@ class TestSceneMakeUpdate:
         event = scene._make_scene_update(0)
         assert event.scene_id == EntityId("another")
         assert event.latest_message_index == 0
+
+
+# ---------------------------------------------------------------------------
+# Scene.user_characters
+# ---------------------------------------------------------------------------
+
+
+class TestSceneUserCharacters:
+    def test_user_characters_returns_only_human_actors(self):
+        # scene-user-characters: subset of `characters` with has_human_actor() True.
+        user = make_character_mock("user", is_human=True)
+        npc = make_character_mock("npc", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc)
+        assert scene.user_characters == [user]
+
+    def test_user_characters_preserves_scene_order(self):
+        # scene-user-characters: order follows `characters` order — filter only.
+        user = make_character_mock("user", is_human=True)
+        npc = make_character_mock("npc", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc)
+        # user is at characters[0], so it appears first (and is the only one).
+        assert scene.user_characters == [c for c in scene.characters if c.has_human_actor()]
+
+    def test_user_characters_is_property(self):
+        # scene-user-characters: declared as a property on Scene.
+        attr = Scene.__dict__.get("user_characters")
+        assert isinstance(attr, property)
+
+
+# ---------------------------------------------------------------------------
+# Scene.to_response + SceneResponse
+# ---------------------------------------------------------------------------
+
+
+class TestSceneToResponse:
+    def test_to_response_builds_scene_response(self):
+        # scene-to-response: returns a SceneResponse with id, name,
+        # character_ids, and player_character_ids populated correctly.
+        user = make_character_mock("user-1", is_human=True)
+        npc = make_character_mock("npc-1", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc, scene_id="scn-7")
+        # SimpleScene constructor sets name="Test Scene".
+        resp = scene.to_response()
+        assert isinstance(resp, SceneResponse)
+        assert resp.id == EntityId("scn-7")
+        assert resp.name == "Test Scene"
+        assert resp.character_ids == [EntityId("user-1"), EntityId("npc-1")]
+        assert resp.player_character_ids == [EntityId("user-1")]
+
+    def test_to_response_player_character_ids_excludes_npcs(self):
+        # scene-to-response: player_character_ids only includes user_characters.
+        user = make_character_mock("u", is_human=True)
+        npc = make_character_mock("n", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc)
+        resp = scene.to_response()
+        assert EntityId("u") in resp.player_character_ids
+        assert EntityId("n") not in resp.player_character_ids
+
+    def test_to_response_character_ids_includes_all_characters(self):
+        # scene-to-response: character_ids has every character's id, in order.
+        user = make_character_mock("u", is_human=True)
+        npc = make_character_mock("n", is_human=False)
+        scene = make_simple_scene(user=user, npc=npc)
+        resp = scene.to_response()
+        assert resp.character_ids == [EntityId("u"), EntityId("n")]
 
 
 # ---------------------------------------------------------------------------

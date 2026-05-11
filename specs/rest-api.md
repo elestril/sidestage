@@ -23,8 +23,8 @@ via REST.
    from the queue as `event: scene_updated\ndata: <json>\n\n`.
    - .implemented-by: UserActor.notify_messages, rest-api-get-events
 5. sse-dataflow-fetch: On each `scene_updated`, the client issues
-   `GET /api/scenes/{scene_id}/messages?from=…&to=…` to fetch the slice
-   it hasn't seen.
+   `GET /api/campaigns/{cid}/scenes/{scene_id}/messages?from=…&to=…` to
+   fetch the slice it hasn't seen.
 6. sse-dataflow-disconnect: On client disconnect, server calls
    `App.get_actor("user").remove_queue(queue)` and discards the queue. The
    `UserActor` singleton stays in place for any other connected clients.
@@ -37,35 +37,43 @@ via REST.
 The subscribe-then-fetch pattern ensures no events are missed between opening
 the SSE stream and loading scene state. There is no singular "active scene" —
 the client navigates to a scene of its choosing; multiple clients may attach
-to different scenes simultaneously.
+to different scenes simultaneously. Every campaign-bearing endpoint is
+prefixed `/api/campaigns/{cid}` — today there is exactly one loaded campaign
+but the prefix is the multi-campaign scaffold.
 
 1. api-dataflow-subscribe: Client opens SSE before fetching any state.
    - .implements: cuj-startup-ready
-2. api-dataflow-campaign: Client fetches `GET /api/campaign`; response yields
-   `name` and `default_scene_id` (a hint for which scene to load if the client
-   has no other navigation context).
+2. api-dataflow-list-campaigns: Client fetches `GET /api/campaigns`; response
+   yields the list of loaded campaigns. Today there is exactly one entry —
+   the client picks it (or selects by name when multi-campaign loading lands).
+   - .implements: cuj-startup-ready
+   - .implemented-by: rest-api-list-campaigns
+3. api-dataflow-campaign: Client fetches `GET /api/campaigns/{cid}`; response
+   yields `name` and `default_scene_id` (a hint for which scene to load if
+   the client has no other navigation context).
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-campaign
-3. api-dataflow-scene: Client fetches `GET /api/scenes/{scene_id}` for the
-   scene it wants to display (typically `default_scene_id`); response yields
-   `character_ids` and `player_character_ids`.
+4. api-dataflow-scene: Client fetches `GET /api/campaigns/{cid}/scenes/{scene_id}`
+   for the scene it wants to display (typically `default_scene_id`); response
+   yields `character_ids` and `player_character_ids`.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-scene
-3a. api-dataflow-entities: Client fetches `GET /api/entities/{id}` for each
-   `character_id`; responses populate the entity cache.
+4a. api-dataflow-entities: Client fetches `GET /api/campaigns/{cid}/entities/{id}`
+   for each `character_id`; responses populate the entity cache.
    - .implements: cuj-startup-ready
    - .implemented-by: rest-api-get-entity
-3b. api-dataflow-history: Client fetches `GET /api/scenes/{scene_id}/messages`
-   to load existing history (omitting `from`/`to` for a full fetch).
-4. api-dataflow-send: Client POSTs `MessageRequest` to
-   `POST /api/scenes/{scene_id}/messages`.
+4b. api-dataflow-history: Client fetches
+   `GET /api/campaigns/{cid}/scenes/{scene_id}/messages` to load existing
+   history (omitting `from`/`to` for a full fetch).
+5. api-dataflow-send: Client POSTs `MessageRequest` to
+   `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`.
    - .implements: cuj-hello-send, message-dataflow-receive
    - .implemented-by: rest-api-post-message
-5. api-dataflow-dispatch: Server calls `scene.dispatch(message)` synchronously;
+6. api-dataflow-dispatch: Server calls `scene.dispatch(message)` synchronously;
    the npc response cycle runs in a background task.
    - .implements: message-simplescene-dispatch
    - .implemented-by: rest-api-post-message
-6. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
+7. api-dataflow-respond: Server returns `201 Created` with `MessageAccepted{id}`.
    The message itself and any character response arrive via `scene_updated`
    SSE notifications followed by `GET /messages`.
    - .implements: cuj-hello-send
@@ -82,10 +90,23 @@ to different scenes simultaneously.
 - .implements: cuj-startup-ready
 - .implemented-by: server-route-root
 
-### rest-api-get-campaign: GET /api/campaign
+### rest-api-list-campaigns: GET /api/campaigns
 
-Returns campaign-level metadata. Used by the client on initial load to learn
-the campaign name and the optional `default_scene_id` hint.
+Returns the list of loaded campaigns. The client calls this first on load,
+then picks a campaign id (or chooses by name) and uses it as the `{cid}` path
+parameter on every subsequent campaign-scoped endpoint. Today the list always
+contains exactly one entry; the shape is the multi-campaign scaffold.
+
+**Response 200** `list[CampaignResponse]`
+
+- rest-api-list-campaigns-503: Returns 503 if `App.state == LOADING`.
+- .implements: api-dataflow-list-campaigns
+- .implemented-by: server-route-list-campaigns
+
+### rest-api-get-campaign: GET /api/campaigns/{cid}
+
+Returns campaign-level metadata. Used by the client after `GET /api/campaigns`
+to learn the campaign name and the optional `default_scene_id` hint.
 
 #### CampaignResponse(BaseModel)
 
@@ -96,26 +117,31 @@ class CampaignResponse(BaseModel):
 ```
 
 **Response 200** `CampaignResponse`
+**Response 404** `cid` not found in `App.campaigns`
 
 - rest-api-campaign-503: Returns 503 if `App.state == LOADING`.
+- rest-api-campaign-404: Returns 404 if `App.campaigns.get(cid)` is None.
 - .implements: api-dataflow-campaign
 - .implemented-by: server-route-campaign
 
-### rest-api-get-scenes: GET /api/scenes
+### rest-api-get-scenes: GET /api/campaigns/{cid}/scenes
 
 Returns the list of scenes in the campaign. Each entry is a `SceneResponse`
-(same shape as `GET /api/scenes/{id}`); the client uses the list to navigate.
+(same shape as `GET /api/campaigns/{cid}/scenes/{id}`); the client uses the
+list to navigate.
 
 **Response 200** `list[SceneResponse]`
+**Response 404** `cid` not found
 
 - rest-api-scenes-503: Returns 503 if `App.state == LOADING`.
+- rest-api-scenes-404: Returns 404 if `App.campaigns.get(cid)` is None.
 - .implements: api-dataflow-scene
 - .implemented-by: server-route-scenes
 
-### rest-api-get-scene: GET /api/scenes/{scene_id}
+### rest-api-get-scene: GET /api/campaigns/{cid}/scenes/{scene_id}
 
 Returns the named scene. Entity content is NOT embedded — resolve each id
-via `GET /api/entities/{id}`.
+via `GET /api/campaigns/{cid}/entities/{id}`.
 
 #### SceneResponse(BaseModel)
 
@@ -123,19 +149,19 @@ via `GET /api/entities/{id}`.
 class SceneResponse(BaseModel):
     id: EntityId
     name: str
-    character_ids: list[EntityId]         # resolve each via GET /api/entities/{id}
+    character_ids: list[EntityId]         # resolve each via GET /api/campaigns/{cid}/entities/{id}
     player_character_ids: list[EntityId]  # EntityIds this connection may send as
 ```
 
 **Response 200** `SceneResponse`
-**Response 404** `scene_id` not found in this campaign
+**Response 404** `cid` or `scene_id` not found in this campaign
 
 - rest-api-scene-503: Returns 503 if `App.state == LOADING`.
-- rest-api-scene-404: Returns 404 if `campaign.scene(scene_id)` returns None.
+- rest-api-scene-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
 - .implements: api-dataflow-scene
 - .implemented-by: server-route-scene
 
-### rest-api-get-entity: GET /api/entities/{entity_id}
+### rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
 
 Single source of truth for entity content. Returns `entity.serialize()` —
 the concrete `Model` subclass discriminated by `type`.
@@ -152,14 +178,14 @@ class CharacterModel(EntityModel):  # Character.Model
 ```
 
 **Response 200** `EntityModel` (or concrete subclass)
-**Response 404** entity unknown or unresolved
+**Response 404** campaign unknown, or entity unknown / unresolved
 
 - rest-api-entity-503: Returns 503 if `App.state == LOADING`.
-- rest-api-entity-404: Returns 404 if `factory.get(entity_id)` returns None or the entity is unresolved.
+- rest-api-entity-404: Returns 404 if `App.campaigns.get(cid)` is None, if `campaign.factory.get(entity_id)` returns None, or if the entity is unresolved.
 - .implements: api-dataflow-entities
 - .implemented-by: server-route-entity
 
-### rest-api-get-messages: GET /api/scenes/{scene_id}/messages
+### rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
 
 Authoritative source for all messages in the scene, in append order. Clients
 fetch this on initial load and on each `scene_updated` SSE notification —
@@ -171,7 +197,7 @@ typically requesting only the slice they don't already have.
 
 **Response 200** `list[Message.Model]`
 
-- rest-api-get-messages-404: Returns 404 if `scene_id` does not match the active scene.
+- rest-api-get-messages-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
 - rest-api-get-messages-503: Returns 503 if `App.state == LOADING`.
 - rest-api-get-messages-empty: An empty scene returns 200 with `[]` for the default range
   (`from=0, to=0`). Empty result is a valid state, NOT a 422.
@@ -180,7 +206,7 @@ typically requesting only the slice they don't already have.
 - rest-api-get-messages-build: Builds the response as `[scene.serialize_message(i) for i in range(from, to)]`.
 - .implemented-by: server-route-get-messages
 
-### rest-api-post-message: POST /api/scenes/{scene_id}/messages
+### rest-api-post-message: POST /api/campaigns/{cid}/scenes/{scene_id}/messages
 
 Non-blocking acknowledgement endpoint. The handler resolves the sender, calls
 `scene.dispatch(message)`, and returns the assigned `MessageId`. The full
@@ -204,7 +230,7 @@ class MessageAccepted(BaseModel):
 **Request** `MessageRequest`
 **Response 201** `MessageAccepted`
 
-- rest-api-post-404: Returns 404 if `scene_id` does not match the active scene.
+- rest-api-post-404: Returns 404 if `App.campaigns.get(cid)` is None or `campaign.scene(scene_id)` returns None.
 - rest-api-post-422: Returns 422 if the request body fails Pydantic validation, or if `sender_id` is not in `player_character_ids`.
 - rest-api-post-503: Returns 503 if `App.state == LOADING`.
 - rest-api-post-dispatch: Constructs `Message(sender, body)` (no id), calls `scene.dispatch(message)`, and returns the assigned `MessageId`. The handler does not await any response cycle.

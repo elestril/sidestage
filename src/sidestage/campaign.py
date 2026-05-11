@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import frontmatter
 import yaml
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 
 from sidestage.character import Character
 from sidestage.entity import DictEntityFactory, EntityFactory, EntityId, EntityType
-from sidestage.scene import SimpleScene
+from sidestage.scene import Scene, SimpleScene
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +27,28 @@ class CampaignConfig(BaseModel):
     .implements: campaign-config-name
     """
 
-    active_scene_id: str
-    """campaign-config-active-scene: EntityId of the scene the player was last
-    in. NOT a Scene reference — resolved at use time via the factory.
+    default_scene_id: str | None = None
+    """campaign-config-default-scene: Optional `EntityId` of the scene the
+    client should load by default if it has no other navigation context.
+    Just a hint — there is no singular "active scene", clients navigate freely.
 
-    .implements: campaign-config-active-scene
+    .implements: campaign-config-default-scene
     """
+
+
+class CampaignResponse(BaseModel):
+    """campaign-response: Wire shape for GET /api/campaign.
+
+    .implements: rest-api-get-campaign
+    """
+
+    name: str
+    default_scene_id: EntityId | None
 
 
 class Campaign:
     """campaign-class: The core world container — name, factory of every loaded
-    Entity, and a persistent "where the player left off" pointer.
+    Entity, and an optional `default_scene_id` hint for the client.
 
     .implements: cuj-startup-load
     """
@@ -53,20 +65,25 @@ class Campaign:
     .implements: cuj-startup-load
     """
 
-    active_scene_id: EntityId
-    """campaign-active-scene-id: EntityId of the scene that is "current" — where
-    the player was last interacting. NOT a Scene reference — resolves to the
-    active Scene via `self.factory.get(self.active_scene_id)` at use time.
+    default_scene_id: EntityId | None
+    """campaign-default-scene-id: Optional `EntityId` hint for the client to
+    load if it has no other navigation context. NOT a Scene reference —
+    resolves via `self.factory.get(self.default_scene_id)` at use time. May
+    be `None` if `config.yaml` omits the field.
 
-    .implements: campaign-config-active-scene
+    .implements: campaign-config-default-scene
     """
 
     def __init__(
-        self, *, name: str, factory: EntityFactory, active_scene_id: EntityId
+        self,
+        *,
+        name: str,
+        factory: EntityFactory,
+        default_scene_id: EntityId | None = None,
     ) -> None:
         self.name = name
         self.factory = factory
-        self.active_scene_id = active_scene_id
+        self.default_scene_id = default_scene_id
 
     @classmethod
     def load(cls, path: Path) -> Campaign:
@@ -77,7 +94,7 @@ class Campaign:
         to consult the active factory.
 
         - campaign-load-config: Reads `<path>/config.yaml` and stores `name` and
-          `active_scene_id`.
+          `default_scene_id`.
         - campaign-load-walks: Performs a single forward pass over all entity
           files in `path`.
         - campaign-load-classifies: Determines each path's concrete entity type
@@ -90,8 +107,9 @@ class Campaign:
           construct each entity.
         - campaign-load-adds: Calls `factory.add(entity)` for each fully parsed
           entity, hydrating any existing ghosts.
-        - campaign-load-active-scene-id: Stores `config.active_scene_id` on the
-          returned Campaign. The Scene itself is resolved later via the factory.
+        - campaign-load-default-scene-id: Stores `config.default_scene_id` on
+          the returned Campaign as a client navigation hint. Stores `None` if
+          the field is absent from config; never raises.
         - campaign-load-warns-dangling: Logs a warning listing any ghost ids
           still unresolved at end of load; ghosts are left in place.
         - campaign-load-returns: Returns a fully initialised Campaign.
@@ -153,8 +171,47 @@ class Campaign:
         if dangling:
             logger.warning("Unresolved ghost entities after load: %s", dangling)
 
+        default_scene_id = (
+            EntityId(config.default_scene_id)
+            if config.default_scene_id is not None
+            else None
+        )
         return cls(
             name=config.name,
             factory=factory,
-            active_scene_id=EntityId(config.active_scene_id),
+            default_scene_id=default_scene_id,
+        )
+
+    def scenes(self) -> list[Scene]:
+        """campaign-scenes: All scenes registered in this campaign's factory.
+
+        Iterates the factory's registered entities and filters to those that
+        are `Scene` instances. Order is the factory's iteration order
+        (currently insertion order for `DictEntityFactory`).
+
+        .implements: rest-api-get-scenes
+        """
+        return [e for e in self.factory._entities.values() if isinstance(e, Scene)]
+
+    def scene(self, scene_id: EntityId) -> Optional[Scene]:
+        """campaign-scene: Look up a scene by id; `None` if unknown or if the
+        id resolves to a non-Scene entity.
+
+        .implements: rest-api-get-scene
+        """
+        entity = self.factory.get(scene_id)
+        if entity is None or not isinstance(entity, Scene):
+            return None
+        return entity
+
+    def to_response(self) -> CampaignResponse:
+        """campaign-to-response: Build the wire shape for this campaign.
+
+        The only place `CampaignResponse` is constructed.
+
+        .implements: rest-api-get-campaign
+        """
+        return CampaignResponse(
+            name=self.name,
+            default_scene_id=self.default_scene_id,
         )

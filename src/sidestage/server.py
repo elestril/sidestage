@@ -14,13 +14,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from sidestage.actor import Actor, SceneUpdatedEvent, StubActor, UserActor
-from sidestage.campaign import Campaign
+from sidestage.campaign import Campaign, CampaignResponse
 from sidestage.entity import (
     DictEntityFactory,
     EntityId,
     UnresolvedEntityError,
 )
 from sidestage.message import Message, MessageId
+from sidestage.scene import SceneResponse
 
 logger = logging.getLogger(__name__)
 
@@ -51,34 +52,10 @@ class ServerState(Enum):
 
 
 # ---------------------------------------------------------------------------
-# Wire models (per specs/rest-api.md).
+# Wire models for request bodies tied to POST endpoints. SceneResponse and
+# CampaignResponse live with their domain owners (sidestage.scene,
+# sidestage.campaign) per spec-location-pydoc.
 # ---------------------------------------------------------------------------
-
-
-class SceneResponse(BaseModel):
-    """server-scene-response: Wire shape of `GET /api/scenes/active`.
-
-    Carries the active scene's identity, display name, and the two id lists
-    the client needs to render and gate input: every character in the scene
-    and the subset whose `owner == "user"` (the player-controllable ones).
-
-    .implements: rest-api-get-scene
-    """
-
-    id: EntityId
-    """server-scene-response-id: EntityId of the active Scene."""
-
-    name: str
-    """server-scene-response-name: Human-readable Scene name."""
-
-    character_ids: list[EntityId]
-    """server-scene-response-character-ids: All character EntityIds in the scene,
-    in scene order."""
-
-    player_character_ids: list[EntityId]
-    """server-scene-response-player-character-ids: Subset of `character_ids`
-    whose Character has `owner == "user"`. The client uses this to decide which
-    characters can send messages."""
 
 
 class MessageRequest(BaseModel):
@@ -182,10 +159,9 @@ class App:
     `Character.__init__` and `Scene.deserialize` without being threaded
     through call signatures.
 
-    HTTP route handlers (`GET /`, `GET /api/events`, `GET /api/scenes/active`,
-    `GET /api/entities/{entity_id}`, `GET /api/scenes/{scene_id}/messages`,
-    `POST /api/scenes/{scene_id}/messages`) are registered by `_setup_routes`;
-    their per-route invariants live in `specs/server.md` and `specs/rest-api.md`.
+    HTTP route handlers are registered by `_setup_routes`; their per-route
+    invariants live in `specs/server.md` and `specs/rest-api.md`. Routes are
+    deliberately thin: they call domain methods and return the result.
 
     .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
     .implemented-by: App.run, App.get_actor
@@ -198,10 +174,11 @@ class App:
     .implements: server-run-config
     """
 
-    campaign: Optional[Campaign]
-    """server-app-campaign: The single loaded `Campaign`, or `None` until
-    `App.run` completes the load. Owns the `EntityFactory` and the
-    `active_scene_id` pointer used by route handlers.
+    campaigns: dict[str, Campaign]
+    """server-app-campaigns: Loaded campaigns keyed by `campaign.name`. Today
+    contains at most one entry (per `App.run` loading the first subdir found
+    in `config_dir`). The dict shape is the scaffold for future multi-campaign
+    support.
 
     .implements: cuj-startup-load
     """
@@ -232,7 +209,7 @@ class App:
     def __init__(self, config_dir: str = "configs/") -> None:
         # server-run-config: default config dir is "configs/".
         self.config_dir = config_dir
-        self.campaign = None
+        self.campaigns = {}
         # server-state-loading: initial state is LOADING.
         self.state = ServerState.LOADING
         self._fastapi: FastAPI = FastAPI()
@@ -280,37 +257,53 @@ class App:
         cls._actors[owner] = actor
         return actor
 
+    # ----------------------- private plumbing -----------------------
+
+    @classmethod
+    def _current_user(cls) -> str:
+        """Return the id of the user owning the current request.
+
+        Stub: today returns `"user"` unconditionally. Future: extract from
+        `Authorization: Bearer <token>` so multiple human users can be
+        distinguished. The returned id is always a key into `cls._actors`.
+        """
+        return "user"
+
+    @classmethod
+    def _user_actor(cls, user_id: str) -> UserActor:
+        """Resolve the `UserActor` for `user_id`. Raises `TypeError` if the
+        registered actor is not a `UserActor` — only user-owned queues
+        subscribe to scene updates.
+        """
+        actor = cls.get_actor(user_id)
+        if not isinstance(actor, UserActor):
+            raise TypeError(
+                f"Actor for user_id={user_id!r} is {type(actor).__name__}, "
+                "not UserActor; cannot subscribe a queue."
+            )
+        return actor
+
+    @classmethod
+    def _subscribe(cls, user_id: str, queue: asyncio.Queue) -> None:
+        """Register `queue` with the user's actor for SSE delivery.
+
+        Today: `user_id` is always `"user"` — routes to the singleton
+        `UserActor`. Subsequent events dispatched to that actor will be
+        enqueued on every registered queue, including this one.
+        """
+        cls._user_actor(user_id).add_queue(queue)
+
+    @classmethod
+    def _unsubscribe(cls, user_id: str, queue: asyncio.Queue) -> None:
+        """Deregister `queue` previously registered via `_subscribe`."""
+        cls._user_actor(user_id).remove_queue(queue)
+
     # ----------------------- helpers -----------------------
 
     def _require_serving(self) -> None:
         """Raise 503 if state == LOADING (per all rest-api-*-503 invariants)."""
         if self.state == ServerState.LOADING:
             raise HTTPException(status_code=503, detail="server loading")
-
-    def _active_scene(self):
-        """Resolve the active Scene via the campaign factory.
-
-        Per `campaign-active-scene-id` / `campaign-load-active-scene-id`,
-        Campaign no longer carries a direct `.scene` attribute; the active
-        Scene is looked up at use time from `factory.get(active_scene_id)`.
-        """
-        return self.campaign.factory.get(self.campaign.active_scene_id)
-
-    def _player_character_ids(self) -> list[EntityId]:
-        """Player ids = characters whose persistent `owner` field is "user".
-
-        Per Character.Model.owner (specs/character.md, specs/rest-api.md
-        rest-api-get-entity).
-        """
-        scene = self._active_scene()
-        return [c.id for c in scene.characters if getattr(c, "owner", None) == "user"]
-
-    def _character_by_id(self, entity_id: EntityId):
-        scene = self._active_scene()
-        for c in scene.characters:
-            if c.id == entity_id:
-                return c
-        return None
 
     # ----------------------- routes -----------------------
 
@@ -328,23 +321,50 @@ class App:
             # rest-api-root-fallback: inline HTML.
             return HTMLResponse(_INLINE_HTML)
 
-        # rest-api-get-scene: GET /api/scenes/active
-        @app.get("/api/scenes/active")
-        async def get_active_scene() -> SceneResponse:
+        # rest-api-list-campaigns: GET /api/campaigns
+        @app.get("/api/campaigns")
+        async def list_campaigns() -> list[CampaignResponse]:
             self._require_serving()
-            scene = self._active_scene()
-            return SceneResponse(
-                id=scene.id,
-                name=scene.name,
-                character_ids=[c.id for c in scene.characters],
-                player_character_ids=self._player_character_ids(),
-            )
+            return [c.to_response() for c in self.campaigns.values()]
 
-        # rest-api-get-entity: GET /api/entities/{entity_id}
-        @app.get("/api/entities/{entity_id}")
-        async def get_entity(entity_id: str) -> Response:
+        # rest-api-get-campaign: GET /api/campaigns/{cid}
+        @app.get("/api/campaigns/{cid}")
+        async def get_campaign(cid: str) -> CampaignResponse:
             self._require_serving()
-            entity = self.campaign.factory.get(entity_id)
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            return campaign.to_response()
+
+        # rest-api-get-scenes: GET /api/campaigns/{cid}/scenes
+        @app.get("/api/campaigns/{cid}/scenes")
+        async def get_scenes(cid: str) -> list[SceneResponse]:
+            self._require_serving()
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            return [s.to_response() for s in campaign.scenes()]
+
+        # rest-api-get-scene: GET /api/campaigns/{cid}/scenes/{scene_id}
+        @app.get("/api/campaigns/{cid}/scenes/{scene_id}")
+        async def get_scene(cid: str, scene_id: str) -> SceneResponse:
+            self._require_serving()
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            scene = campaign.scene(EntityId(scene_id))
+            if scene is None:
+                raise HTTPException(status_code=404, detail="scene not found")
+            return scene.to_response()
+
+        # rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
+        @app.get("/api/campaigns/{cid}/entities/{entity_id}")
+        async def get_entity(cid: str, entity_id: str) -> Response:
+            self._require_serving()
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            entity = campaign.factory.get(entity_id)
             # rest-api-entity-404: missing or unresolved entity.
             if entity is None:
                 raise HTTPException(status_code=404, detail="entity not found")
@@ -354,16 +374,20 @@ class App:
                 raise HTTPException(status_code=404, detail="entity not resolved")
             return JSONResponse(content=model.model_dump(mode="json"))
 
-        # rest-api-get-messages: GET /api/scenes/{scene_id}/messages
-        @app.get("/api/scenes/{scene_id}/messages")
+        # rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
+        @app.get("/api/campaigns/{cid}/scenes/{scene_id}/messages")
         async def get_messages(
+            cid: str,
             scene_id: str,
             request: Request,
         ) -> Response:
             self._require_serving()
-            scene = self._active_scene()
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            scene = campaign.scene(EntityId(scene_id))
             # rest-api-get-messages-404
-            if scene_id != scene.id:
+            if scene is None:
                 raise HTTPException(status_code=404, detail="scene not found")
 
             params = request.query_params
@@ -394,21 +418,31 @@ class App:
             ]
             return JSONResponse(content=payload)
 
-        # rest-api-post-message: POST /api/scenes/{scene_id}/messages
-        @app.post("/api/scenes/{scene_id}/messages", status_code=201)
-        async def post_message(scene_id: str, body: MessageRequest) -> MessageAccepted:
+        # rest-api-post-message: POST /api/campaigns/{cid}/scenes/{scene_id}/messages
+        @app.post(
+            "/api/campaigns/{cid}/scenes/{scene_id}/messages", status_code=201
+        )
+        async def post_message(
+            cid: str, scene_id: str, body: MessageRequest
+        ) -> MessageAccepted:
             self._require_serving()
-            scene = self._active_scene()
+            campaign = self.campaigns.get(cid)
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="campaign not found")
+            scene = campaign.scene(EntityId(scene_id))
             # rest-api-post-404.
-            if scene_id != scene.id:
+            if scene is None:
                 raise HTTPException(status_code=404, detail="scene not found")
-            # rest-api-post-422 (sender not in player_character_ids).
-            if body.sender_id not in self._player_character_ids():
+            # rest-api-post-422: sender must be a user-controlled character.
+            sender = next(
+                (c for c in scene.user_characters if c.id == body.sender_id),
+                None,
+            )
+            if sender is None:
                 raise HTTPException(
                     status_code=422,
                     detail="sender_id is not a player character",
                 )
-            sender = self._character_by_id(body.sender_id)
             # rest-api-post-dispatch: construct Message(sender, body), dispatch,
             # take returned MessageId.
             msg = Message(sender=sender, body=body.body)
@@ -422,17 +456,16 @@ class App:
             self._require_serving()
 
             # rest-api-events-accept / sse-dataflow-accept: register a queue
-            # with the shared user-owned Actor singleton. NO actor swap on the
-            # character.
+            # with the user's actor via App._subscribe. Today _current_user
+            # always returns "user"; the routing indirection lets multi-user
+            # auth land later without touching the route.
             queue: asyncio.Queue = asyncio.Queue()
-            user_actor = App.get_actor("user")
-            user_actor.add_queue(queue)
+            user_id = App._current_user()
+            App._subscribe(user_id, queue)
 
             def _on_close() -> None:
-                # rest-api-events-cleanup / sse-dataflow-disconnect: drop the
-                # queue from the singleton; the singleton itself stays in place
-                # for any other connected clients.
-                App.get_actor("user").remove_queue(queue)
+                # rest-api-events-cleanup / sse-dataflow-disconnect.
+                App._unsubscribe(user_id, queue)
 
             async def event_stream() -> AsyncIterator[bytes]:
                 async for chunk in _sse_event_stream(
@@ -464,8 +497,10 @@ class App:
           sets `config_dir`; defaults to `"configs/"`.
         - server-run-state-loading: Sets `state = LOADING` before campaign
           load; while in this state every API route returns 503.
-        - server-run-load: Loads the single `Campaign` from the first
-          subdirectory of `config_dir` on startup.
+        - server-run-load: Walks `config_dir` for subdirectories containing
+          `config.yaml` and loads the FIRST one found (sorted, deterministic);
+          registers it as `App.campaigns[campaign.name] = campaign`. Raises
+          `RuntimeError` if no campaign subdir is found.
         - server-run-state-serving: Sets `state = SERVING` after the campaign
           is fully loaded; API endpoints become active.
         - server-run-serve: Starts the FastAPI server (uvicorn) on
@@ -483,9 +518,18 @@ class App:
         # App.factory.
         cls.factory = DictEntityFactory()
 
-        # server-run-load.
-        campaign_path = next(Path(config_dir).iterdir())
-        instance.campaign = Campaign.load(campaign_path)
+        # server-run-load: walk for subdirs with a `config.yaml` and load the
+        # first one; today's single-campaign world maps to dict[name] -> Campaign.
+        campaign_dirs = sorted(
+            d for d in Path(config_dir).iterdir()
+            if d.is_dir() and (d / "config.yaml").exists()
+        )
+        if not campaign_dirs:
+            raise RuntimeError(
+                f"No campaign subdir with config.yaml in {config_dir}"
+            )
+        campaign = Campaign.load(campaign_dirs[0])
+        instance.campaigns[campaign.name] = campaign
         # server-run-state-serving.
         instance.state = ServerState.SERVING
         # server-run-serve.

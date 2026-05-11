@@ -26,7 +26,7 @@ Key labels defined in pydoc (for cross-reference from this and other markdown sp
 
 - `server-state`, `server-state-loading`, `server-state-serving` — the `ServerState` enum and its members
 - `server-app` — the `App` class
-- `server-app-config-dir`, `server-app-campaign`, `server-app-state`, `server-app-factory` — `App` attributes
+- `server-app-config-dir`, `server-app-campaigns`, `server-app-state`, `server-app-factory` — `App` attributes
 - `server-get-actor`, `server-get-actor-lazy`, `server-get-actor-cached`, `server-get-actor-unknown` — `App.get_actor`
 - `server-run`, `server-run-config`, `server-run-state-loading`, `server-run-load`, `server-run-state-serving`, `server-run-serve` — `App.run`
 - `server-scene-response` (+ `-id`, `-name`, `-character-ids`, `-player-character-ids`) — `SceneResponse` wire model
@@ -48,26 +48,32 @@ per `spec-location-markdown`. Per-route 503/422/404 details live in
 - server-route-events: SSE notification stream.
 - .implements: rest-api-get-events
 
-`GET /api/campaign`
-- server-route-campaign: Returns `CampaignResponse` (name + default_scene_id hint).
+`GET /api/campaigns`
+- server-route-list-campaigns: Returns `list[CampaignResponse]` — one entry
+  per loaded campaign in `App.campaigns.values()`. Today the list contains
+  exactly one entry; the shape is the multi-campaign scaffold.
+- .implements: rest-api-list-campaigns
+
+`GET /api/campaigns/{cid}`
+- server-route-campaign: Returns `CampaignResponse` (name + default_scene_id hint); 404 if `App.campaigns.get(cid)` is None.
 - .implements: rest-api-get-campaign
 
-`GET /api/scenes`
-- server-route-scenes: Returns `list[SceneResponse]` — every scene in the campaign.
+`GET /api/campaigns/{cid}/scenes`
+- server-route-scenes: Returns `list[SceneResponse]` — every scene in the campaign; 404 if campaign unknown.
 - .implements: rest-api-get-scenes
 
-`GET /api/scenes/{scene_id}`
-- server-route-scene: Returns `SceneResponse` for the named scene; 404 if unknown.
+`GET /api/campaigns/{cid}/scenes/{scene_id}`
+- server-route-scene: Returns `SceneResponse` for the named scene; 404 if campaign or scene is unknown.
 - .implements: rest-api-get-scene
 
-`GET /api/entities/{entity_id}`
-- server-route-entity: Returns `factory.get(entity_id).serialize()`; 404 if unknown.
+`GET /api/campaigns/{cid}/entities/{entity_id}`
+- server-route-entity: Returns `campaign.factory.get(entity_id).serialize()`; 404 if campaign, entity, or resolution is missing.
 - .implements: rest-api-get-entity
 
-`GET /api/scenes/{scene_id}/messages`
-- server-route-get-messages: Returns `list[Message.Model]` — the authoritative message history for the scene.
+`GET /api/campaigns/{cid}/scenes/{scene_id}/messages`
+- server-route-get-messages: Returns `list[Message.Model]` — the authoritative message history for the scene; 404 if campaign or scene is unknown.
 - .implements: rest-api-get-messages
 
-`POST /api/scenes/{scene_id}/messages`
-- server-route-post-message: Accepts `MessageRequest`; calls `scene.dispatch(message)`; returns `201 Created` with `MessageAccepted{id}`.
+`POST /api/campaigns/{cid}/scenes/{scene_id}/messages`
+- server-route-post-message: Accepts `MessageRequest`; calls `scene.dispatch(message)`; returns `201 Created` with `MessageAccepted{id}`. 404 if campaign or scene is unknown.
 - .implements: rest-api-post-message

@@ -1,2 +1,2 @@
 name: Minimal Campaign
-active_scene_id: parlor
+default_scene_id: parlor

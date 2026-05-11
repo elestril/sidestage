@@ -37,12 +37,14 @@ class TestStubActor:
         actor = StubActor()
         assert actor.is_human() is False
 
-    async def test_stub_actor_respond_returns_hello_world_unconditionally(self):
+    async def test_stub_actor_respond_returns_character_body(self):
         # stub-actor-respond-returns: Returns Message(sender=character,
-        # body="Hello World") regardless of message.sender. Caller decides
-        # when to invoke — no filter.
+        # body=character.body) regardless of message.sender. The body comes
+        # from the character, not a hardcoded string.
         actor = StubActor()
         character = MagicMock()
+        character.body = "canned response"
+
         # Try with a human sender.
         sender_human = MagicMock()
         sender_human.has_human_actor.return_value = True
@@ -50,7 +52,8 @@ class TestStubActor:
         result1 = await actor.respond(msg1, character)
         assert result1 is not None
         assert result1.sender is character
-        assert result1.body == "Hello World"
+        assert result1.body == character.body
+        assert result1.body == "canned response"
 
         # And with a non-human sender — same result, no filtering.
         sender_npc = MagicMock()
@@ -59,7 +62,8 @@ class TestStubActor:
         result2 = await actor.respond(msg2, character)
         assert result2 is not None
         assert result2.sender is character
-        assert result2.body == "Hello World"
+        assert result2.body == character.body
+        assert result2.body == "canned response"
 
 
 class TestUserActor:

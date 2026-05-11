@@ -61,14 +61,15 @@ class StubActor(Actor):
         self, message: "Message", character: "Character"
     ) -> Optional["Message"]:
         """stub-actor-respond-returns: Returns
-        `Message(sender=character, body="Hello World")`. No filtering, no
-        conditional — the caller decides when to invoke.
+        `Message(sender=character, body=character.body)`. The actor is a
+        deterministic mechanism; the actual response content comes from the
+        character's `body`.
 
         .implements: message-simplescene-respond
         """
         from sidestage.message import Message as Msg
 
-        return Msg(sender=character, body="Hello World")
+        return Msg(sender=character, body=character.body)
 
 
 class UserActor(Actor):
