@@ -11,6 +11,7 @@ from typing import AsyncIterator, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sidestage.actor import Actor, SceneUpdatedEvent, StubActor, UserActor
@@ -59,7 +60,7 @@ class ServerState(Enum):
 
 
 class MessageRequest(BaseModel):
-    """server-message-request: Wire shape of `POST /api/scenes/{scene_id}/messages`.
+    """server-message-request: Wire shape of `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`.
 
     The minimal payload a client sends to inject a player message into a scene.
     The server constructs the actual `Message` from this plus the resolved
@@ -79,7 +80,7 @@ class MessageRequest(BaseModel):
 
 class MessageAccepted(BaseModel):
     """server-message-accepted: Wire shape returned by
-    `POST /api/scenes/{scene_id}/messages` on success (201 Created).
+    `POST /api/campaigns/{cid}/scenes/{scene_id}/messages` on success (201 Created).
 
     Returns the server-assigned MessageId so the client can correlate its
     optimistic local message with the canonical entry in scene history.
@@ -310,16 +311,15 @@ class App:
     def _setup_routes(self) -> None:
         app = self._fastapi
 
-        # rest-api-get-root: GET /
-        @app.get("/")
-        async def get_root() -> Response:
-            self._require_serving()
-            # rest-api-root-static: serve static index.html if dir exists.
-            index = _STATIC_DIR / "index.html"
-            if _STATIC_DIR.exists() and index.exists():
-                return HTMLResponse(index.read_text())
-            # rest-api-root-fallback: inline HTML.
-            return HTMLResponse(_INLINE_HTML)
+        # rest-api-get-root: GET /. Registered only when the static dir is
+        # absent — when present, the static mount below shadows `/` and
+        # provides the SPA fallback (frontend-serve-mount/spa).
+        if not _STATIC_DIR.exists():
+            @app.get("/")
+            async def get_root() -> Response:
+                self._require_serving()
+                # rest-api-root-fallback: inline HTML.
+                return HTMLResponse(_INLINE_HTML)
 
         # rest-api-list-campaigns: GET /api/campaigns
         @app.get("/api/campaigns")
@@ -481,6 +481,18 @@ class App:
                 headers={"Cache-Control": "no-cache"},
             )
 
+        # frontend-serve-mount + frontend-serve-spa: mount StaticFiles at `/`
+        # AFTER all `/api/*` routes are registered. `html=True` provides SPA
+        # fallback to `index.html` for unknown paths. The mount shadows any
+        # explicit `GET /` handler — that handler is therefore only registered
+        # above when `_STATIC_DIR` is absent.
+        if _STATIC_DIR.exists():
+            self._fastapi.mount(
+                "/",
+                StaticFiles(directory=str(_STATIC_DIR), html=True),
+                name="static",
+            )
+
     # ----------------------- run -----------------------
 
     @classmethod
@@ -537,6 +549,14 @@ class App:
 
 
 def main() -> None:
+    """server-main: CLI entry point for the `sidestage` console script.
+
+    Parses `--config` and runs `App.run(config_dir=...)`. Used directly via
+    `uv run sidestage` for development; production deployments go through
+    `sidestage-ctl` (the runner) which spawns this entry as a subprocess.
+
+    .implements: cuj-startup-launch
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/")
     args = parser.parse_args()

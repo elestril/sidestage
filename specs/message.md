@@ -26,9 +26,9 @@ assigned to the message.
    to Scene.messages, and the new array index is used to construct the MessageId
    and returned to the caller.
    - .implemented-by: SimpleScene.dispatch
-3. message-simplescene-respond: asyncronously self.\_npc.response() is
+3. message-simplescene-respond: asyncronously self._npc.respond() is
    generated, it is appended to self.messages, then
-   self.\_user.notify_messages() is called with the latest message id.
+   self._user.notify(event) is called with the latest message id.
    - .implemented-by: SimpleScene.dispatch, Character.respond, Character.notify_messages, StubActor.respond, UserActor.notify_messages
 
 ## message-labels: Label index (defined in pydoc)

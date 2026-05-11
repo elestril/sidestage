@@ -1,7 +1,7 @@
 # frontend: React chat UI
 
 The Sidestage frontend is a React + TypeScript + Tailwind single-page
-application built with Vite. In development, Vite's dev server proxies `/ws`
+application built with Vite. In development, Vite's dev server proxies `/api`
 to FastAPI. In production, FastAPI serves the built static bundle.
 
 ## frontend-project: Project layout
@@ -9,7 +9,7 @@ to FastAPI. In production, FastAPI serves the built static bundle.
 ```
 frontend/
 |- package.json
-|- vite.config.ts      proxy /ws → localhost:8000 in dev
+|- vite.config.ts      proxy /api → localhost:8000 in dev
 |- tailwind.config.ts
 |- index.html
 |- src/
@@ -30,7 +30,7 @@ Build output: `frontend/dist/` copied to `src/sidestage/static/` by the
 production build step.
 
 - frontend-vite-root: `vite.config.ts` sets `root` to `path.resolve(__dirname)` so all paths resolve relative to the config file regardless of invocation directory.
-- frontend-vite-proxy: `vite.config.ts` proxies `/ws` to `ws://localhost:8000` with `ws: true`.
+- frontend-vite-proxy: `vite.config.ts` proxies `/api` to `http://localhost:8000` with `changeOrigin: true`. SSE works through this proxy without special config.
 - frontend-build-output: `vite.config.ts` sets `build.outDir` to `path.resolve(__dirname, '../src/sidestage/static')` — absolute, invocation-independent.
 
 ## frontend-serve: Production static serving
@@ -50,16 +50,20 @@ regenerated whenever the server-side wire format changes.
   `uv run pydantic2ts --module sidestage.server --output frontend/src/types.ts`
   from the repo root. The file is committed to the repository.
 - frontend-types-source: The authoritative source is the Pydantic `BaseModel`
-  subclasses `InitEvent` and `MessageEvent` in `server.py`.
+  subclasses across `sidestage.scene` (`SceneResponse`), `sidestage.campaign`
+  (`CampaignResponse`), `sidestage.actor` (`SceneUpdatedEvent`),
+  `sidestage.message` (`Message.Model`), `sidestage.character`
+  (`Character.Model`), and `sidestage.server` (`MessageRequest`,
+  `MessageAccepted`).
 - frontend-types-entityid: `EntityId` is generated as `string` (Pydantic's
   `NewType` has no TypeScript equivalent). A branded alias
   `type EntityId = string & { readonly _brand: 'EntityId' }` is added
   manually in a thin `frontend/src/types_ext.ts` that re-exports everything
   from `types.ts` and overrides the `EntityId` definition. All application
   code imports from `types_ext.ts`, never directly from `types.ts`.
-- frontend-types-discriminated: `ServerEvent = InitEvent | MessageEvent` is
-  defined in `types_ext.ts`; exhaustive switch on `type` is enforced by
-  TypeScript.
+- frontend-types-discriminated: `ServerEvent = SceneUpdatedEvent` is defined
+  in `types_ext.ts`. Today there is exactly one event variant; the type is
+  a discriminated union scaffold for future variants.
 
 ## frontend-sse-client-dataflow: Client SSE dataflow
 
@@ -117,9 +121,9 @@ Managed in `useSSE` hook; passed down as props.
 
 ### frontend-app: App
 
-Root component. Owns the `useWebSocket` hook and renders `ChatView` once connected.
+Root component. Owns the `useSSE` hook and renders `ChatView` once connected.
 
-- frontend-app-mount: Calls `useWebSocket('/ws')` on mount.
+- frontend-app-mount: Calls `useSSE()` on mount to subscribe to push notifications and bootstrap the campaign + scene state.
 - frontend-app-renders: Renders `ChatView` passing `messages`, `entityCache`, `playerCharacterIds`, `connected`, and `onSend` callback.
 
 ### frontend-chatview: ChatView
@@ -152,16 +156,19 @@ Root component. Owns the `useWebSocket` hook and renders `ChatView` once connect
 - frontend-input-submit-button: Clicking the send button calls `onSend(body)` and clears the input.
 - frontend-input-submit-enter: Pressing Enter (without Shift) also calls `onSend(body)`.
 
-### frontend-usesse: useSSE(eventsUrl, sceneUrl)
+### frontend-usesse: useSSE()
+
+(zero-arg; URLs are derived inside the bootstrap chain)
 
 - frontend-hook-opens: Opens `EventSource(eventsUrl)` on mount; closes on unmount.
 - frontend-hook-scene: Immediately after opening SSE, fetches `sceneUrl` and populates `entityCache`, `playerCharacterIds`, and `sceneId`.
-- frontend-hook-dispatches: Handles `message_created` SSE events per `sse-client-event`.
+- frontend-hook-dispatches: Handles `scene_updated` SSE events per `sse-client-event`.
 - frontend-hook-reconnects: On SSE close, schedules reconnect per `sse-client-reconnect`.
-- frontend-hook-returns: Returns `{ messages, entityCache, playerCharacterIds, sceneId, connected }`.
+- frontend-hook-returns: Returns `{ messages, entityCache, playerCharacterIds, campaignId, sceneId, defaultSceneId, connected }`.
 
 ### frontend-usesendmessage: useSendMessage(campaignId, sceneId)
 
 - frontend-send-hook-posts: POSTs `MessageRequest` to `/api/campaigns/{campaignId}/scenes/{sceneId}/messages`.
-- frontend-send-hook-optimistic: Appends the returned `MessageResponse` to `messages` immediately on success.
-- frontend-send-hook-returns: Returns a `send(body: string) => Promise<void>` callback.
+- frontend-send-hook-returns: Returns a `send(body: string) => Promise<MessageId | null>` callback. The MessageId is the server-assigned id from `MessageAccepted`; null on error.
+
+Note: There is no client-side optimistic append. The SSE `scene_updated` for the user's own POST already triggers a slice fetch, so an optimistic append would cause double rendering.

@@ -95,7 +95,7 @@ Executed for each `DependencyConfig` in order before the server starts.
 
 `run(self) -> None`
 - runner-run-checks: Calls `check_deps()`.
-- runner-run-server: Launches `App.run(self.instance.config_dir, reload=self.instance.reload)`.
+- runner-run-server: Launches `App.run(self.instance.config_dir)`. The `reload` flag is honored only by `Runner.start` via the subprocess `--reload` flag.
 - .implements: cuj-startup-deps, cuj-startup-load, cuj-startup-ready
 
 `start(self) -> None`

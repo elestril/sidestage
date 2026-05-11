@@ -25,12 +25,14 @@ via REST.
 5. sse-dataflow-fetch: On each `scene_updated`, the client issues
    `GET /api/campaigns/{cid}/scenes/{scene_id}/messages?from=…&to=…` to
    fetch the slice it hasn't seen.
+   - .implemented-by: sse-client-event
 6. sse-dataflow-disconnect: On client disconnect, server calls
    `App.get_actor("user").remove_queue(queue)` and discards the queue. The
    `UserActor` singleton stays in place for any other connected clients.
    - .implemented-by: rest-api-get-events
 7. sse-dataflow-reconnect: A new connection re-enters at sse-dataflow-connect.
    Missed events are NOT replayed; the client refetches via `GET /messages`.
+   - .implemented-by: sse-client-reconnect
 
 ## api-dataflow: REST request dataflow
 

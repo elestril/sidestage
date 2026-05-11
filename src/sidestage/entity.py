@@ -16,13 +16,27 @@ EntityId = NewType("EntityId", str)
 
 
 class EntityType(str, Enum):
+    """entity-type: Discriminator enum for serialized Entity subclasses.
+
+    Members:
+    - entity-type-character: `CHARACTER` — selects `Character.Model` deserialization.
+    - entity-type-scene: `SCENE` — selects `Scene.Model` (or subclass) deserialization.
+    - entity-type-entity: `ENTITY` — generic Entity, no subclass.
+
+    .implements: entity-impl
+    """
+
     CHARACTER = "character"
     SCENE = "scene"
     ENTITY = "entity"
 
 
 class UnresolvedEntityError(Exception):
-    pass
+    """unresolved-entity-error: Raised when accessing a non-id field on an
+    unresolved ghost (per `entity-ghost-unresolved`).
+
+    .implements: entity-impl
+    """
 
 
 _GHOST_SAFE = {"id", "_loaded"}

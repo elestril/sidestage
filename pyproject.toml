@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 sidestage = "sidestage.server:main"
+sidestage-ctl = "sidestage.runner:main"
 
 [build-system]
 requires = ["hatchling"]

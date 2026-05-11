@@ -14,8 +14,19 @@ if TYPE_CHECKING:
 
 
 class SceneUpdatedEvent(BaseModel):
+    """scene-updated-event: SSE payload for `event: scene_updated` notifications.
+
+    Carries the latest message index for a scene; clients use it to fetch
+    the new slice via `GET /api/campaigns/{cid}/scenes/{scene_id}/messages?from=…`.
+
+    .implements: rest-api-events-yield, sse-dataflow-event
+    """
+
     scene_id: EntityId
+    """scene-updated-event-scene-id: Id of the scene that changed."""
+
     latest_message_index: int
+    """scene-updated-event-latest-message-index: Latest valid index in `scene.messages`."""
 
 
 class Actor(ABC):

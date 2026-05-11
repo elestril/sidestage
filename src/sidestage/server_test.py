@@ -315,30 +315,48 @@ class TestGetRoot:
             response = client.get("/")
         assert response.status_code == 503
 
-    def test_root_inline_html_fallback(self, tmp_path, monkeypatch):
-        # rest-api-root-fallback: inline HTML if static dir absent.
-        app, *_ = make_loaded_app()
+    def test_root_falls_back_to_inline_when_static_missing(self, tmp_path):
+        # rest-api-root-fallback: inline HTML when static dir is absent.
+        # The static-dir decision is made at App construction time, so the
+        # patch wraps the App() call inside `make_loaded_app`.
         with patch("sidestage.server._STATIC_DIR", tmp_path / "does-not-exist"):
+            app, *_ = make_loaded_app()
             with TestClient(app._fastapi) as client:
                 response = client.get("/")
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "<html" in response.text.lower()
 
-    def test_root_serves_static_when_present(self, tmp_path):
-        # rest-api-root-static: serves static index.html when dir exists.
+    def test_root_serves_static_index_when_static_dir_exists(self, tmp_path):
+        # frontend-serve-mount: StaticFiles mount serves index.html at `/`
+        # when the static dir exists.
         static_dir = tmp_path / "static"
         static_dir.mkdir()
         (static_dir / "index.html").write_text("<!doctype html><h1>STATIC</h1>")
-        app, *_ = make_loaded_app()
         with patch("sidestage.server._STATIC_DIR", static_dir):
+            app, *_ = make_loaded_app()
             with TestClient(app._fastapi) as client:
                 response = client.get("/")
         assert response.status_code == 200
         assert "STATIC" in response.text
 
+    def test_root_serves_static_assets(self, tmp_path):
+        # frontend-serve-mount: StaticFiles mount serves assets alongside
+        # index.html. `/app.js` is reachable through the same mount.
+        static_dir = tmp_path / "static"
+        static_dir.mkdir()
+        (static_dir / "index.html").write_text("<!doctype html><h1>STATIC</h1>")
+        (static_dir / "app.js").write_text("console.log('hi');")
+        with patch("sidestage.server._STATIC_DIR", static_dir):
+            app, *_ = make_loaded_app()
+            with TestClient(app._fastapi) as client:
+                response = client.get("/app.js")
+        assert response.status_code == 200
+        assert "console.log" in response.text
+
     def test_root_returns_200_when_serving(self):
-        # server-route-root: serves root when SERVING.
+        # server-route-root: serves root when SERVING (default: no static dir
+        # in the repo, so the inline HTML fallback handles `/`).
         app, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.get("/")

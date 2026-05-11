@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class SceneResponse(BaseModel):
-    """scene-response: Wire shape for GET /api/scenes/{id} and GET /api/scenes.
+    """scene-response: Wire shape for GET /api/campaigns/{cid}/scenes/{id} and GET /api/campaigns/{cid}/scenes.
 
     Carries the scene's identity, display name, and the two id lists the
     client needs to render and gate input: every character in the scene

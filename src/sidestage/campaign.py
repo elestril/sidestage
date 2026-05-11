@@ -27,7 +27,7 @@ class CampaignConfig(BaseModel):
     .implements: campaign-config-name
     """
 
-    default_scene_id: str | None = None
+    default_scene_id: EntityId | None = None
     """campaign-config-default-scene: Optional `EntityId` of the scene the
     client should load by default if it has no other navigation context.
     Just a hint — there is no singular "active scene", clients navigate freely.
@@ -37,7 +37,7 @@ class CampaignConfig(BaseModel):
 
 
 class CampaignResponse(BaseModel):
-    """campaign-response: Wire shape for GET /api/campaign.
+    """campaign-response: Wire shape for GET /api/campaigns/{cid}.
 
     .implements: rest-api-get-campaign
     """

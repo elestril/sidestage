@@ -59,8 +59,8 @@ class Message:
     class Model(BaseModel):
         """message-model: Canonical wire shape for a Message.
 
-        Inner Pydantic model used both in `GET /api/scenes/{scene_id}/messages`
-        responses and in SSE `message_created` event payloads.
+        Inner Pydantic model used both in `GET /api/campaigns/{cid}/scenes/{scene_id}/messages`
+        responses and in SSE `scene_updated` event payloads.
 
         ```python
         class Model(BaseModel):
