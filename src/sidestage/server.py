@@ -481,7 +481,7 @@ class App:
     # ----------------------- run -----------------------
 
     @classmethod
-    def run(cls, config_dir: str = "configs/", reload: bool = False) -> None:
+    def run(cls, config_dir: str = "configs/") -> None:
         """server-run: CLI entry point — construct the App, load the single
         campaign, and start serving.
 
@@ -501,9 +501,7 @@ class App:
         - server-run-state-serving: Sets `state = SERVING` after the campaign
           is fully loaded; API endpoints become active.
         - server-run-serve: Starts the FastAPI server (uvicorn) on
-          `0.0.0.0:8000`. Honors `reload` per `instance-config-reload` —
-          when True, uvicorn is launched via the import-string form so it
-          can watch and re-import on source changes.
+          `0.0.0.0:8000`.
 
         .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
         """
@@ -533,31 +531,17 @@ class App:
         instance.state = ServerState.SERVING
         # server-run-serve.
         uvicorn.run(instance._fastapi, host="0.0.0.0", port=8000)
-        # NOTE: reload=True is a runner-level concern (see runner-start-daemonizes).
-        # uvicorn's reload requires an import-string app reference; today the
-        # subprocess in `Runner.start` accomplishes the same effect by relaunching
-        # the entire `sidestage` process on file changes via a watcher. The
-        # `reload` flag is accepted here for signature parity but doesn't change
-        # uvicorn's behavior in this in-process call.
-        _ = reload
 
 
 def main() -> None:
     """server-main: CLI entry point for the `sidestage` console script.
 
-    Parses `--config` and `--reload`, then runs `App.run(...)`. Used directly
-    via `uv run sidestage` for development; production deployments go through
-    `sidestage-ctl` (the runner) which spawns this entry as a subprocess and
-    passes `--reload` per `instance-config-reload`.
+    Parses `--config` and runs `App.run(...)`. Typically invoked via
+    `just run` (which also brings up the Vite dev server).
 
     .implements: cuj-startup-launch
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/")
-    parser.add_argument(
-        "--reload",
-        action="store_true",
-        help="Enable uvicorn auto-reload on source changes.",
-    )
     args = parser.parse_args()
-    App.run(args.config, reload=args.reload)
+    App.run(args.config)

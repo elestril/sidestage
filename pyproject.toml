@@ -13,7 +13,6 @@ dependencies = [
 
 [project.scripts]
 sidestage = "sidestage.server:main"
-sidestage-ctl = "sidestage.runner:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -42,5 +41,6 @@ timeout = 2
 timeout_method = "signal"
 markers = [
     "integration: in-process multi-module flows; slower than unit tests",
+    "e2e: real uvicorn + httpx over TCP; exercises the API boundary",
     "eval: behavioral evals; opt-in (require EVAL=1)",
 ]

@@ -4,14 +4,12 @@ The Sidestage server is a CLI process. On startup it loads a campaign from
 the config directory and begins serving the web UI.
 
 - cuj-startup: The user starts the server, which loads the first campaign from the config directory.
-  1. cuj-startup-launch: The user runs `sidestage-ctl`; it reads the instance config
-     - .implemented-by: InstanceConfig, App.run, runner-entrypoint
-  2. cuj-startup-deps: The runner checks, starts, and validates all required dependencies
-     - .implemented-by: runner-dep-health-check, runner-dep-start, runner-dep-wait, runner-dep-cwd-check, runner-dep-version-check, runner-dep-force-restart, Runner.check_deps, Runner.run, Runner.start
-  3. cuj-startup-load: The server loads the first campaign found in the config directory
-     - .implemented-by: fs-dataflow-config, fs-dataflow-walk, fs-dataflow-classify, fs-dataflow-parse, fs-dataflow-resolve-refs, fs-dataflow-deserialize, fs-dataflow-add, fs-dataflow-finalize, App.run, Runner.run, Runner.start
-  4. cuj-startup-ready: The server begins serving the web UI
-     - .implemented-by: frontend-serve, sse-client-scene, sse-client-entities, sse-dataflow-lameduck, sse-dataflow-accept, api-dataflow-subscribe, api-dataflow-scene, api-dataflow-entities, rest-api-get-root, App.run, Runner.run, Runner.start
+  1. cuj-startup-launch: The user runs `sidestage` (typically via `just run`, which also brings up the Vite dev server).
+     - .implemented-by: App.run
+  2. cuj-startup-load: The server loads the first campaign found in the config directory.
+     - .implemented-by: fs-dataflow-config, fs-dataflow-walk, fs-dataflow-classify, fs-dataflow-parse, fs-dataflow-resolve-refs, fs-dataflow-deserialize, fs-dataflow-add, fs-dataflow-finalize, App.run
+  3. cuj-startup-ready: The server begins serving the web UI.
+     - .implemented-by: frontend-serve, sse-client-scene, sse-client-entities, sse-dataflow-lameduck, sse-dataflow-accept, sse-dataflow-connect, rest-api-get-root, App.run
 
 ## server-impl: App
 
