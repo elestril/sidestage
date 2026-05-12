@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 from sidestage.character import Character
-from sidestage.entity import EntityId
+from sidestage.entity import DictEntityFactory, EntityId
 from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import SimpleScene
@@ -25,17 +25,20 @@ pytestmark = pytest.mark.integration
 
 
 async def test_events_dataflow() -> None:
+    factory = DictEntityFactory()
     alice = Character(
         id=EntityId("alice"),
         name="Alice",
         body="A curious traveler.",
         owner="user",
+        factory=factory,
     )
     bob = Character(
         id=EntityId("bob"),
         name="Bob",
         body="*nods quietly*",
         owner="stub",
+        factory=factory,
     )
     scene = SimpleScene(
         id=EntityId("parlor"),

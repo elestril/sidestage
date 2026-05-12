@@ -5,6 +5,7 @@ import contextlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, NewType, Self
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from sidestage.events import EntityChanged, Listener
+    from sidestage.message import Message
 
 
 logger = logging.getLogger("sidestage.entity")
@@ -142,6 +144,31 @@ class Entity:
         object.__setattr__(instance, "_pending_tasks", set())
         return instance
 
+    # ---------------- identity (per entity-hashable-by-id) ---------------
+
+    def __hash__(self) -> int:
+        """entity-hashable-by-id: hash by EntityId so an Entity can key the
+        `MessageContext.annotations` dict. `id` is `_GHOST_SAFE`, so ghost
+        and loaded instances of the same id collapse to one key (per
+        `entity-hashable-by-id-ghost-safe`).
+        """
+        return hash(self.id)
+
+    def __eq__(self, other: object) -> bool:
+        """entity-hashable-by-id: compare by EntityId."""
+        return isinstance(other, Entity) and self.id == other.id
+
+    # ---------------- prompt-context contribution -----------------------
+
+    def annotate_context(self, ctx: MessageContext) -> None:
+        """entity-annotate-context: contribute this entity's prompt-relevant
+        text to the message-context. Default writes `self.body` keyed by
+        `self`. Subclasses override to recurse into related entities.
+
+        .implements: entity-annotate-context
+        """
+        ctx.annotations[self] = self.body
+
     # ---------------- events: pub/sub (per specs/events.md) ---------------
 
     def subscribe(self, listener: Listener) -> None:
@@ -259,6 +286,29 @@ class Entity:
         .implements: events-protocol
         """
         return None
+
+
+@dataclass
+class MessageContext:
+    """entity-message-context: per-call accumulator carried through
+    `Entity.annotate_context` recursion.
+
+    Scoped to the triggering `message` and the `scene` it lives in;
+    entities add their contributions to `annotations` (keyed by entity,
+    so multiple paths to the same entity collapse). Folded into
+    `entity.py` because `Entity` is its only producer.
+
+    Carries `scene` explicitly because the domain `Message` dataclass
+    has no `scene_id` (it derives identity from its position in
+    `scene.messages`); the actor knows the scene at call time and
+    threads it in.
+
+    .implements: entity-message-context
+    """
+
+    message: Message
+    scene: Entity
+    annotations: dict[Entity, str] = field(default_factory=dict)
 
 
 class EntityFactory(ABC):

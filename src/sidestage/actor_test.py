@@ -26,7 +26,7 @@ class TestActorBase:
             def is_human(self) -> bool:
                 return False
 
-            async def respond(self, message, character) -> None:
+            async def respond(self, message, character, scene) -> None:
                 return None
 
         actor = MinimalActor()
@@ -51,10 +51,11 @@ class TestStubActor:
         actor = StubActor()
         character = MagicMock()
         character.body = "canned response"
+        scene = MagicMock()
 
         sender_human = MagicMock()
         msg1 = Message(sender=sender_human, body="anything")
-        result1 = await actor.respond(msg1, character)
+        result1 = await actor.respond(msg1, character, scene)
         assert result1 is not None
         assert result1.sender is character
         assert result1.body == character.body
@@ -63,7 +64,7 @@ class TestStubActor:
         # Different sender — same result, no filtering.
         sender_npc = MagicMock()
         msg2 = Message(sender=sender_npc, body="anything")
-        result2 = await actor.respond(msg2, character)
+        result2 = await actor.respond(msg2, character, scene)
         assert result2 is not None
         assert result2.sender is character
         assert result2.body == character.body
@@ -91,14 +92,17 @@ class TestUserActorBasics:
         # responses arrive via REST.
         actor = UserActor()
         character = MagicMock()
+        scene = MagicMock()
         sender_human = MagicMock()
         sender_npc = MagicMock()
         assert (
-            await actor.respond(Message(sender=sender_human, body="hi"), character)
+            await actor.respond(
+                Message(sender=sender_human, body="hi"), character, scene
+            )
             is None
         )
         assert (
-            await actor.respond(Message(sender=sender_npc, body="hi"), character)
+            await actor.respond(Message(sender=sender_npc, body="hi"), character, scene)
             is None
         )
 

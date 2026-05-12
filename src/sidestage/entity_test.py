@@ -11,6 +11,7 @@ from sidestage.entity import (
     Entity,
     EntityId,
     EntityType,
+    MessageContext,
     UnresolvedEntityError,
 )
 from sidestage.events import EntityChanged
@@ -515,6 +516,135 @@ class TestEventsAsyncTasksSpawn:
         # The done-callback runs in the same loop iteration after task completion.
         await asyncio.sleep(0)
         assert task not in entity._pending_tasks
+
+
+class TestEntityHashableById:
+    """entity-hashable-by-id: __hash__ and __eq__ key off self.id."""
+
+    def test_same_id_hashes_equal(self) -> None:
+        a = make_entity(id="x")
+        b = make_entity(id="x")
+        assert hash(a) == hash(b), (
+            "entity-hashable-by-id: entities with the same id MUST hash "
+            f"equal; got hash(a)={hash(a)} hash(b)={hash(b)}"
+        )
+
+    def test_different_id_hashes_differ(self) -> None:
+        a = make_entity(id="x")
+        b = make_entity(id="y")
+        # Hash collisions are theoretically possible but vanishingly rare for
+        # short distinct strings — sanity check.
+        assert hash(a) != hash(b)
+
+    def test_eq_compares_id(self) -> None:
+        a = make_entity(id="x", name="Alice")
+        b = make_entity(id="x", name="Different name, same id")
+        assert a == b, (
+            "entity-hashable-by-id: entities with the same id MUST compare "
+            f"equal regardless of other fields; got a={a.name!r} b={b.name!r}"
+        )
+
+    def test_eq_distinguishes_different_ids(self) -> None:
+        a = make_entity(id="x")
+        b = make_entity(id="y")
+        assert a != b
+
+    def test_eq_returns_false_for_non_entity(self) -> None:
+        a = make_entity(id="x")
+        assert a != "x"
+        assert a != 42
+
+    def test_ghost_safe(self) -> None:
+        # entity-hashable-by-id-ghost-safe: ghost and loaded with same id
+        # collapse to one key.
+        factory = DictEntityFactory()
+        ghost = factory.ghost("g1", EntityType.ENTITY)
+        loaded = make_entity(id="g1")
+        assert hash(ghost) == hash(loaded)
+        assert ghost == loaded
+
+    def test_keyable_in_dict(self) -> None:
+        # The whole point: an Entity can key a dict (used by MessageContext).
+        a = make_entity(id="x")
+        d: dict[Entity, str] = {a: "hello"}
+        # Lookup with a SECOND instance of the same id finds the entry.
+        b = make_entity(id="x")
+        assert d[b] == "hello"
+
+
+class TestMessageContext:
+    """entity-message-context: dataclass shape and defaults."""
+
+    def test_default_annotations_is_empty_dict(self) -> None:
+        scene = make_entity(id="scene-1")
+        # Use a MagicMock for Message — MessageContext doesn't read it.
+        from unittest.mock import MagicMock
+
+        msg = MagicMock()
+        ctx = MessageContext(message=msg, scene=scene)
+        assert ctx.annotations == {}
+
+    def test_annotations_are_per_instance(self) -> None:
+        # Each MessageContext gets its own dict — no cross-pollination.
+        from unittest.mock import MagicMock
+
+        scene = make_entity(id="scene-1")
+        ctx1 = MessageContext(message=MagicMock(), scene=scene)
+        ctx2 = MessageContext(message=MagicMock(), scene=scene)
+        ctx1.annotations[scene] = "x"
+        assert ctx2.annotations == {}
+
+
+class TestEntityAnnotateContextDefault:
+    """entity-annotate-context: default writes self.body keyed by self."""
+
+    def test_writes_body_keyed_by_self(self) -> None:
+        from unittest.mock import MagicMock
+
+        entity = make_entity(id="e1", body="my body text")
+        scene = make_entity(id="scene-1")
+        ctx = MessageContext(message=MagicMock(), scene=scene)
+
+        entity.annotate_context(ctx)
+
+        assert entity in ctx.annotations, (
+            "entity-annotate-context: default impl MUST write self.body "
+            f"keyed by self; got annotations={ctx.annotations!r}"
+        )
+        assert ctx.annotations[entity] == "my body text"
+
+    def test_multiple_entities_each_contribute(self) -> None:
+        from unittest.mock import MagicMock
+
+        e1 = make_entity(id="e1", body="one")
+        e2 = make_entity(id="e2", body="two")
+        scene = make_entity(id="scene-1")
+        ctx = MessageContext(message=MagicMock(), scene=scene)
+
+        e1.annotate_context(ctx)
+        e2.annotate_context(ctx)
+
+        assert ctx.annotations[e1] == "one"
+        assert ctx.annotations[e2] == "two"
+
+    def test_idempotent_via_id_keying(self) -> None:
+        # entity-annotate-context-idempotent: same id → same dict key →
+        # second annotation overwrites (or is a no-op when value unchanged).
+        from unittest.mock import MagicMock
+
+        e1 = make_entity(id="dup", body="original")
+        e2 = make_entity(id="dup", body="original")  # same id, same body
+        scene = make_entity(id="scene-1")
+        ctx = MessageContext(message=MagicMock(), scene=scene)
+
+        e1.annotate_context(ctx)
+        e2.annotate_context(ctx)
+
+        assert len(ctx.annotations) == 1, (
+            "entity-annotate-context-idempotent: multiple paths to the "
+            "same entity MUST collapse to one annotation entry; "
+            f"got annotations={ctx.annotations!r}"
+        )
 
 
 class TestEventsAsyncTasksIdle:

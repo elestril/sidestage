@@ -17,15 +17,17 @@ just setup
 ## Running
 
 ```bash
-just run             # vite + llama-server (per profile) + sidestage server
+just run             # vite + sidestage server
 just run anthropic   # use a different LLM profile (see sidestage/llm_profiles/)
 ```
 
-Ctrl-C stops sidestage. `just stop` tears down vite + any local llama-server.
+Ctrl-C stops sidestage. `just stop` tears down vite.
 
 **LLM topology** is per-instance config under `sidestage/llm_profiles/*.yaml`.
-The default `localhost.yaml` declares a local llama-server with HuggingFace
-auto-download (multi-GB on first run, cached globally at `~/.cache/llama.cpp/`).
+The default `localhost.yaml` expects an OpenAI-compatible HTTP endpoint
+at `http://127.0.0.1:8080` (llama-server, vllm, ollama, …). Sidestage
+does not spawn or manage that server — start it yourself before
+`just run`.
 
 **Secrets** (`ANTHROPIC_API_KEY`, etc.) live in `.env` at the repo root —
 gitignored, loaded into `os.environ` at sidestage startup via `python-dotenv`.
@@ -44,7 +46,8 @@ the values stay in `.env`.
 just              # list available tasks
 just setup        # one-shot install (deps + hooks); idempotent
 just test         # lint + Python + frontend (parallel, ~3s)
-just test-all     # adds browser e2e — what the pre-commit hook runs
+just test-all     # adds browser e2e
+just precommit    # what the pre-commit hook runs (= test-all)
 just test-browser # Playwright + Chromium against the built SPA
 just lint         # ruff + pyright + tsc, all linters & type checks
 just format       # apply ruff fixes + formatter
@@ -53,7 +56,7 @@ just spec         # regenerate specs/generated/api.md
 just clean        # drop caches and build outputs
 ```
 
-A `pre-commit` hook runs `just test-all` before every commit (installed
+A `pre-commit` hook runs `just precommit` before every commit (installed
 by `just setup`). Skip with `git commit --no-verify` only when you
 genuinely need to.
 

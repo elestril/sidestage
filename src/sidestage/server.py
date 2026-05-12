@@ -35,7 +35,9 @@ from sidestage.instance_config import (
 from sidestage.instance_config import (
     serialize_to_env as _instance_config_serialize_to_env,
 )
+from sidestage.llm_profile import LlmProfile, load_profiles
 from sidestage.message import Message
+from sidestage.npc_actor import NpcActor
 from sidestage.scene import SceneResponse
 
 # rest-api-get-entity: discriminated union returned by GET /entities/{eid}.
@@ -238,6 +240,19 @@ class App:
     .implements: cuj-startup-load
     """
 
+    llm_profile: LlmProfile | None = None
+    """server-app-llm-profile: Class-level slot holding the resolved
+    `LlmProfile` for this instance. Set by `_build_and_load` immediately
+    after `factory`, by reading
+    `load_profiles(sidestage_dir)[config.llm_profile]`. Parallel to
+    `server-app-factory`. `None` until the first load.
+
+    `App.get_actor("npc")` reads `cls.llm_profile.models["default"]` to
+    construct the `NpcActor` (per `server-app-llm-profile-required-for-npc`).
+
+    .implements: server-app-llm-profile
+    """
+
     # server-app: class-level Actor registry. Private (leading underscore) per
     # `spec-link-targets-private`; the public surface is `App.get_actor`.
     _actors: dict[str, Actor] = {}
@@ -277,8 +292,7 @@ class App:
         if cached is not None:
             return cached
 
-        # Build the matching Actor. NpcActor is not yet implemented;
-        # its slot raises KeyError per the spec.
+        # Build the matching Actor (per server-get-actor-* invariants).
         if owner == "user":
             # UserActor takes no constructor args. The Scene wires up
             # broadcast targets via `add_queue` / `remove_queue`; `notify` is
@@ -286,6 +300,25 @@ class App:
             actor: Actor = UserActor()
         elif owner == "stub":
             actor = StubActor()
+        elif owner == "npc":
+            # server-get-actor-npc: requires App.llm_profile to have been
+            # populated by _build_and_load. If not, that's a load-order
+            # bug, not a runtime fallback.
+            if cls.llm_profile is None:
+                raise RuntimeError(
+                    "server-app-llm-profile-required-for-npc: "
+                    "App.llm_profile is None — _build_and_load must "
+                    "populate it before any Character with owner='npc' "
+                    "is constructed."
+                )
+            entry = cls.llm_profile.models.get("default")
+            if entry is None:
+                raise KeyError(
+                    "llm-profile-runtime-default-role: profile must "
+                    "define a 'default' role for NpcActor; "
+                    f"got models={sorted(cls.llm_profile.models)!r}"
+                )
+            actor = NpcActor(entry)
         else:
             # server-get-actor-unknown.
             raise KeyError(f"no Actor registered for owner={owner!r}")
@@ -517,7 +550,9 @@ class App:
     # ----------------------- run -----------------------
 
     @classmethod
-    def _build_and_load(cls, sidestage_dir: str) -> App:
+    def _build_and_load(
+        cls, sidestage_dir: str, llm_profile_name: str = "localhost"
+    ) -> App:
         """server-build-and-load: shared construction + load path.
 
         Both `App.run` (non-reload entry) and `create_app` (uvicorn reload
@@ -525,6 +560,11 @@ class App:
 
         - server-run-state-loading: Sets `state = LOADING` before campaign
           load; while in this state every API route returns 503.
+        - server-app-llm-profile: Loads
+          `<sidestage_dir>/llm_profiles/<llm_profile_name>.yaml` into
+          `cls.llm_profile` BEFORE campaign load so that any Character
+          with `owner="npc"` can construct its NpcActor at deserialize
+          time.
         - server-run-load: Walks `<sidestage_dir>/campaigns/` for
           subdirectories containing `config.yaml` and loads the FIRST one
           found (sorted, deterministic); registers it as
@@ -542,6 +582,20 @@ class App:
         # BEFORE campaign load so deserialize-time code can reach it via
         # App.factory.
         cls.factory = DictEntityFactory()
+
+        # server-app-llm-profile: resolve the active LLM profile from disk.
+        # Missing dir → empty dict per llm-profile-discovery-missing-dir;
+        # missing-named-profile is a config error (we surface a clear
+        # message instead of letting NpcActor instantiation crash later).
+        profiles = load_profiles(sidestage_dir)
+        if profiles and llm_profile_name not in profiles:
+            available = ", ".join(sorted(profiles)) or "(none)"
+            raise RuntimeError(
+                f"server-app-llm-profile: profile {llm_profile_name!r} not "
+                f"found in {sidestage_dir}/llm_profiles/; "
+                f"available: {available}"
+            )
+        cls.llm_profile = profiles.get(llm_profile_name)
 
         # server-run-load: walk `<sidestage_dir>/campaigns/` for subdirs
         # with a `config.yaml`. Today's single-campaign world maps to
@@ -563,7 +617,12 @@ class App:
         return instance
 
     @classmethod
-    def run(cls, sidestage_dir: str = "sidestage/", port: int = 8000) -> None:
+    def run(
+        cls,
+        sidestage_dir: str = "sidestage/",
+        port: int = 8000,
+        llm_profile_name: str = "localhost",
+    ) -> None:
         """server-run: non-reload entry point — build, load, serve.
 
         - server-run-sidestage-dir: The `sidestage_dir` argument sets the
@@ -575,11 +634,15 @@ class App:
         - server-run-serve: Starts the FastAPI server (uvicorn) on
           `0.0.0.0:<port>`.
 
+        `llm_profile_name` selects which YAML under
+        `<sidestage_dir>/llm_profiles/` is loaded into `App.llm_profile`
+        (per `server-app-llm-profile`).
+
         For the reload path see `create_app` and `server-run-reload`.
 
         .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
         """
-        instance = cls._build_and_load(sidestage_dir)
+        instance = cls._build_and_load(sidestage_dir, llm_profile_name)
         # server-run-serve.
         uvicorn.run(instance._fastapi, host="0.0.0.0", port=port)
 
@@ -596,7 +659,7 @@ def create_app() -> FastAPI:
     .implements: server-run-reload, cuj-startup-launch
     """
     config = _instance_config_from_env()
-    instance = App._build_and_load(config.sidestage_dir)
+    instance = App._build_and_load(config.sidestage_dir, config.llm_profile)
     return instance._fastapi
 
 
@@ -649,4 +712,8 @@ def main() -> None:
             reload_dirs=[str(Path(__file__).parent)],
         )
     else:
-        App.run(config.sidestage_dir, port=config.port)
+        App.run(
+            config.sidestage_dir,
+            port=config.port,
+            llm_profile_name=config.llm_profile,
+        )

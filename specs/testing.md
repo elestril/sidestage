@@ -10,8 +10,9 @@ domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
 - testing-categories-unit: One module, mocked cross-deps. Lives next to
   source as `*_test.py`. Fast (whole suite under one second).
 - testing-categories-integration: Real Scene + Character + Actor + App,
-  no API boundary. Asserts on entity-level state via direct method
-  calls. Lives in `tests/integration/`.
+  no API boundary, no live LLM. Integration uses `StubActor` only —
+  deterministic, no network. Asserts on entity-level state via direct
+  method calls. Lives in `tests/integration/`.
 - testing-categories-e2e: Real uvicorn server on an ephemeral port, real
   client over TCP. Two flavors by driver:
   - testing-categories-e2e-http: Python `httpx.AsyncClient` (per
@@ -21,6 +22,13 @@ domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
     HTTP-tier doesn't touch. Lives in `tests/playwright/`. Invoked via
     `just test-browser` (not part of `just test`'s inner loop because
     of the build step + browser launch).
+- testing-categories-e2e-live-llm: Exactly ONE e2e test validates
+  `NpcActor` end-to-end against a real LLM endpoint — same shape as
+  the other e2e tests (real uvicorn, REST POST, SSE read) but with the
+  npc owner actually wired to a real LLM. Carries `pytest.mark.e2e`
+  AND `pytest.mark.live_llm` and auto-skips when the endpoint isn't
+  up (see `testing-markers-live-llm`). Lives in `tests/e2e/`
+  alongside the other e2e tests.
 - testing-categories-eval: Behavioral evals against rubrics. Today every
   actor is deterministic so evals reduce to property checks; once
   LLM-backed actors land, evals slot in as PyHamcrest matchers calling
@@ -59,10 +67,17 @@ Markers are registered in `pyproject.toml` (`[tool.pytest.ini_options]
 markers`) and used both for tier selection (`pytest -m e2e`) and
 skip-by-default (eval).
 
-- testing-markers-default: `uv run pytest` runs unit + integration + e2e;
-  eval skipped.
+- testing-markers-default: `uv run pytest` runs unit + integration + e2e
+  (including live_llm — see below); eval skipped.
 - testing-markers-eval-opt-in: Eval tests carry `@pytest.mark.eval` AND
   `@pytest.mark.skipif(os.environ.get("EVAL") != "1", reason="eval-only")`.
+- testing-markers-live-llm: Tests that hit a real LLM endpoint carry
+  `@pytest.mark.live_llm` AND `@pytest.mark.skipif(not _llm_endpoint_up(), …)`
+  where `_llm_endpoint_up()` pings the configured endpoint's `/health`.
+  No env-var opt-in: if the endpoint is up at collection time the test
+  runs; otherwise it auto-skips. Use `@pytest.mark.timeout(90)` to
+  override the default 2s — first-call weight load on a local server
+  can take dozens of seconds.
 
 ## testing-failure-message
 
@@ -168,9 +183,11 @@ delegation to `entity.subscribe(QueueListener)` is exactly what e2e is
 exercising. Cleanup on disconnect is verified by closing the httpx
 stream and observing that no listeners leak on the entity.
 
-`StubActor` doesn't need mocking — deterministic and stateless. `NpcActor`
-(future) MUST be mocked the same way as `UserActor` — it'll hold an LLM
-client.
+`StubActor` doesn't need mocking — deterministic and stateless.
+`NpcActor` holds a litellm client; unit tests patch `litellm.acompletion`
+directly (per the existing `npc_actor_test.py`). Integration tests do
+not use `NpcActor` at all — the single live-LLM validation is the e2e
+test (`testing-categories-e2e-live-llm`).
 
 ## testing-scenario
 

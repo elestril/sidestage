@@ -4,7 +4,13 @@ from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import BaseModel
 
-from sidestage.entity import Entity, EntityId, EntityType
+from sidestage.entity import (
+    Entity,
+    EntityFactory,
+    EntityId,
+    EntityType,
+    MessageContext,
+)
 
 if TYPE_CHECKING:
     from sidestage.events import EntityChanged
@@ -23,7 +29,7 @@ class CharacterResponse(BaseModel):
     id: EntityId
     name: str
     body: str
-    owner: Literal["user", "stub"]
+    owner: Literal["user", "stub", "npc"]
 
 
 class Character(Entity):
@@ -34,11 +40,10 @@ class Character(Entity):
     .implements: character
     """
 
-    owner: Literal["user", "stub"]
-    """character-owner: Persistent role discriminator — `"user"` or
-    `"stub"`. Serialized to disk; selects the runtime Actor via
-    `App.get_actor(self.owner)`. Future expansion (e.g. `"npc"` once
-    an LLM-backed actor lands) widens this Literal.
+    owner: Literal["user", "stub", "npc"]
+    """character-owner: Persistent role discriminator — `"user"`, `"stub"`,
+    or `"npc"`. Serialized to disk; selects the runtime Actor via
+    `App.get_actor(self.owner)`.
 
     .implements: character
     """
@@ -50,7 +55,7 @@ class Character(Entity):
         .implements: character
         """
 
-        owner: Literal["user", "stub"]
+        owner: Literal["user", "stub", "npc"]
 
     def __init__(
         self,
@@ -58,7 +63,8 @@ class Character(Entity):
         id: EntityId,
         name: str,
         body: str,
-        owner: Literal["user", "stub"],
+        owner: Literal["user", "stub", "npc"],
+        factory: EntityFactory,
     ) -> None:
         """Construct a fully-loaded (non-ghost) Character.
 
@@ -67,8 +73,11 @@ class Character(Entity):
           stores the returned Actor instance as `self._actor`. The Actor is
           a shared singleton managed by App; multiple characters with the
           same `owner` share one Actor.
+        - character-factory-ref: Stores `factory` as `self._factory`. Used
+          by `annotate_context` to resolve scenes (and, in subclasses,
+          related entities / memories) from `EntityId`s.
 
-        .implements: character
+        .implements: character, character-factory-ref
         """
         # Initialise as a fully-loaded (non-ghost) Entity.
         super().__init__(id, _loaded=True)
@@ -77,6 +86,8 @@ class Character(Entity):
         object.__setattr__(self, "body", body)
         # character-init-stores-owner.
         object.__setattr__(self, "owner", owner)
+        # character-factory-ref.
+        object.__setattr__(self, "_factory", factory)
         # character-init-binds-actor: lookup the shared Actor singleton via App.
         # Lazy import — server.py imports character.py, so a top-level import
         # would cycle.
@@ -86,13 +97,17 @@ class Character(Entity):
         object.__setattr__(self, "_actor", actor)
 
     @classmethod
-    def deserialize(cls, model: Character.Model) -> Self:
-        # Construct via __init__ so the actor binding happens consistently.
+    def deserialize(cls, model: Character.Model, factory: EntityFactory) -> Self:
+        """character-factory-ref-deserialize: factory is threaded into
+        `__init__` so the Character can resolve other entities at
+        annotate-context time.
+        """
         return cls(
             id=model.id,
             name=model.name,
             body=model.body,
             owner=model.owner,
+            factory=factory,
         )
 
     def serialize(self) -> Character.Model:
@@ -114,13 +129,31 @@ class Character(Entity):
             owner=self.owner,
         )
 
-    async def respond(self, message: Message) -> Message | None:
+    def annotate_context(self, ctx: MessageContext) -> None:
+        """character-annotate-context: Calls `super().annotate_context(ctx)`
+        (which writes `self.body` keyed by `self`), then recurses into
+        the scene carried on `ctx` via `ctx.scene.annotate_context(ctx)`.
+
+        Future Character subclasses (cheap fighter, scheming villain, DM-meta)
+        override to recurse into more related entities — retrieved memories,
+        relevant items, etc. — by extending this method. Memory retrieval
+        will use `self._factory` to query the graph; today's base override
+        only needs `ctx.scene`.
+
+        .implements: character-annotate-context
+        """
+        super().annotate_context(ctx)
+        ctx.scene.annotate_context(ctx)
+
+    async def respond(self, message: Message, scene: Entity) -> Message | None:
         """character-respond-passthrough: Pure pass-through —
-        `await self._actor.respond(message, self)`.
+        `await self._actor.respond(message, self, scene)`. `scene` is the
+        Scene the message was appended to; threaded so LLM-backed actors
+        can build context relative to it.
 
         .implements: message-simplescene-respond
         """
-        return await self._actor.respond(message, self)
+        return await self._actor.respond(message, self, scene)
 
     async def notify(self, event: EntityChanged) -> None:
         """character-notify-react: React to an `EntityChanged` event from a
@@ -159,7 +192,9 @@ class Character(Entity):
         if latest.sender is self:
             return
         # Generate a response via the bound actor; append back if non-None.
-        response = await self._actor.respond(latest, self)
+        # Pass `event.entity` (the Scene) so LLM-backed actors can build
+        # prompt context relative to it.
+        response = await self._actor.respond(latest, self, event.entity)
         if response is not None:
             event.entity.append(response)
 

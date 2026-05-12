@@ -144,7 +144,7 @@ class Campaign:
                         "owner": post.metadata.get("owner", "stub"),
                     }
                 )
-                character = Character.deserialize(model)
+                character = Character.deserialize(model, factory)
                 factory.add(character)
 
         scenes_dir = path / "scenes"

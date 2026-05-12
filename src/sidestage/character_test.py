@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sidestage.character import Character
-from sidestage.entity import Entity, EntityId, EntityType
+from sidestage.entity import (
+    DictEntityFactory,
+    Entity,
+    EntityFactory,
+    EntityId,
+    EntityType,
+    MessageContext,
+)
 from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import Scene
@@ -33,16 +40,24 @@ def make_character(
     id: str = "c1",
     name: str = "Alice",
     body: str = "a body",
-    owner: Literal["user", "stub"] = "stub",
+    owner: Literal["user", "stub", "npc"] = "stub",
     actor: object | None = None,
+    factory: EntityFactory | None = None,
 ) -> Character:
-    """Construct a Character with App.get_actor patched to return `actor`."""
+    """Construct a Character with App.get_actor patched to return `actor`.
+
+    `factory` defaults to a fresh `DictEntityFactory` — tests that don't
+    exercise `annotate_context` don't need to think about it.
+    """
+    if factory is None:
+        factory = DictEntityFactory()
     with _patch_get_actor(actor):
         return Character(
             id=EntityId(id),
             name=name,
             body=body,
             owner=owner,
+            factory=factory,
         )
 
 
@@ -72,8 +87,8 @@ class TestCharacterInitStoresOwner:
         assert char.owner == "user"
 
     def test_stores_owner_npc(self) -> None:
-        char = make_character(owner="stub")
-        assert char.owner == "stub"
+        char = make_character(owner="npc")
+        assert char.owner == "npc"
 
     def test_stores_owner_stub(self) -> None:
         char = make_character(owner="stub")
@@ -111,6 +126,7 @@ class TestCharacterInitBindsActor:
                 name="Alice",
                 body="body",
                 owner="stub",
+                factory=DictEntityFactory(),
             )
         mock_get_actor.assert_called_once_with("stub")
 
@@ -126,6 +142,7 @@ class TestCharacterInitBindsActor:
                 name="Alice",
                 body="body",
                 owner="user",
+                factory=DictEntityFactory(),
             )
         mock_get_actor.assert_called_once_with("user")
 
@@ -136,6 +153,7 @@ class TestCharacterInitBindsActor:
                 name="Alice",
                 body="body",
                 owner="stub",
+                factory=DictEntityFactory(),
             )
         mock_get_actor.assert_called_once_with("stub")
 
@@ -156,10 +174,11 @@ class TestCharacterRespondPassthrough:
 
         sender = MagicMock()
         msg = Message(sender=sender, body="hi")
+        scene = MagicMock(spec=Scene)
 
-        result = await char.respond(msg)
+        result = await char.respond(msg, scene)
 
-        actor.respond.assert_awaited_once_with(msg, char)
+        actor.respond.assert_awaited_once_with(msg, char, scene)
         assert result is None
 
     async def test_respond_returns_actor_result(self) -> None:
@@ -170,8 +189,9 @@ class TestCharacterRespondPassthrough:
 
         sender = MagicMock()
         msg = Message(sender=sender, body="hi")
+        scene = MagicMock(spec=Scene)
 
-        result = await char.respond(msg)
+        result = await char.respond(msg, scene)
 
         assert result is expected
 
@@ -255,7 +275,7 @@ class TestCharacterNotifyReact:
         scene.append.assert_not_called()
 
     async def test_notify_calls_actor_respond_with_latest(self) -> None:
-        # Happy path: await actor.respond(latest, self) is invoked
+        # Happy path: await actor.respond(latest, self, event.entity) is invoked
         actor = MagicMock()
         actor.respond = AsyncMock(return_value=None)
         char = make_character(actor=actor)
@@ -263,11 +283,11 @@ class TestCharacterNotifyReact:
         other = make_character(id="other", actor=MagicMock())
         older = Message(sender=other, body="older")
         latest = Message(sender=other, body="latest")
-        event, _scene = _make_scene_event(messages=[older, latest])
+        event, scene = _make_scene_event(messages=[older, latest])
 
         await char.notify(event)
 
-        actor.respond.assert_awaited_once_with(latest, char)
+        actor.respond.assert_awaited_once_with(latest, char, scene)
 
     async def test_notify_appends_non_none_response(self) -> None:
         # Actor returns Message → event.entity.append(response) called
@@ -296,7 +316,7 @@ class TestCharacterNotifyReact:
 
         await char.notify(event)
 
-        actor.respond.assert_awaited_once_with(latest, char)
+        actor.respond.assert_awaited_once_with(latest, char, scene)
         scene.append.assert_not_called()
 
 
@@ -314,7 +334,7 @@ class TestCharacterHasHumanActor:
         assert char.has_human_actor() is True
 
     def test_returns_false_when_owner_is_npc(self) -> None:
-        char = make_character(owner="stub")
+        char = make_character(owner="npc")
         assert char.has_human_actor() is False
 
     def test_returns_false_when_owner_is_stub(self) -> None:
@@ -356,9 +376,9 @@ class TestCharacterModel:
             name="Alice",
             type=EntityType.CHARACTER,
             body="body",
-            owner="stub",
+            owner="npc",
         )
-        assert m.owner == "stub"
+        assert m.owner == "npc"
 
     def test_model_accepts_stub(self) -> None:
         m = Character.Model(
@@ -412,7 +432,7 @@ class TestCharacterDeserialize:
             owner="user",
         )
         with _patch_get_actor():
-            char = Character.deserialize(model)
+            char = Character.deserialize(model, DictEntityFactory())
 
         assert char.id == "c2"
         assert char.name == "Bob"
@@ -430,18 +450,20 @@ class TestCharacterDeserialize:
         )
         sentinel = MagicMock(name="actor")
         with _patch_get_actor(sentinel) as mock_get_actor:
-            char = Character.deserialize(model)
+            char = Character.deserialize(model, DictEntityFactory())
 
         mock_get_actor.assert_called_once_with("stub")
         assert char._actor is sentinel
 
     def test_serialize_roundtrip(self) -> None:
+        factory = DictEntityFactory()
         with _patch_get_actor():
             char = Character(
                 id=EntityId("c4"),
                 name="Dave",
                 body="dave body",
                 owner="user",
+                factory=factory,
             )
         model = char.serialize()
         assert model.id == "c4"
@@ -450,8 +472,87 @@ class TestCharacterDeserialize:
         assert model.owner == "user"
 
         with _patch_get_actor():
-            char2 = Character.deserialize(model)
+            char2 = Character.deserialize(model, factory)
         assert char2.id == "c4"
         assert char2.name == "Dave"
         assert char2.body == "dave body"
         assert char2.owner == "user"
+
+
+# ---------------------------------------------------------------------------
+# character-factory-ref + character-annotate-context
+# ---------------------------------------------------------------------------
+
+
+class TestCharacterFactoryRef:
+    """character-factory-ref: Character stores the factory passed at construction."""
+
+    def test_init_stores_factory(self) -> None:
+        factory = DictEntityFactory()
+        char = make_character(factory=factory)
+        assert char._factory is factory, (
+            "character-factory-ref: __init__ MUST store the factory arg as "
+            f"self._factory; got {char._factory!r}"
+        )
+
+    def test_deserialize_threads_factory(self) -> None:
+        # character-factory-ref-deserialize: deserialize takes factory as second
+        # arg and threads it into __init__.
+        factory = DictEntityFactory()
+        model = Character.Model(
+            id=EntityId("c5"),
+            name="Eve",
+            type=EntityType.CHARACTER,
+            body="eve body",
+            owner="npc",
+        )
+        with _patch_get_actor():
+            char = Character.deserialize(model, factory)
+        assert char._factory is factory, (
+            "character-factory-ref-deserialize: factory MUST be threaded "
+            "from deserialize into Character.__init__; "
+            f"got {char._factory!r}"
+        )
+
+
+class TestCharacterAnnotateContext:
+    """character-annotate-context: super (writes self.body) + recurse into
+    `ctx.scene` (which the actor populates from event.entity)."""
+
+    def test_writes_own_body(self) -> None:
+        # character-annotate-context: super().annotate_context(ctx) is called,
+        # which writes self.body keyed by self.
+        scene_mock = MagicMock(spec=Entity)
+        scene_mock.id = EntityId("scene-x")
+        # Mock annotate_context as a no-op so the test isolates Character's
+        # own contribution.
+        scene_mock.annotate_context = MagicMock(return_value=None)
+
+        char = make_character(body="character body")
+        sender = make_character(id="sender", actor=MagicMock())
+        msg = Message(sender=sender, body="trigger")
+        ctx = MessageContext(message=msg, scene=scene_mock)
+
+        char.annotate_context(ctx)
+
+        assert char in ctx.annotations, (
+            "character-annotate-context: super().annotate_context MUST write "
+            f"self.body keyed by self; got annotations={ctx.annotations!r}"
+        )
+        assert ctx.annotations[char] == "character body"
+
+    def test_recurses_into_ctx_scene(self) -> None:
+        # character-annotate-context: after super, recurses with
+        # ctx.scene.annotate_context(ctx).
+        scene_mock = MagicMock(spec=Entity)
+        scene_mock.id = EntityId("scene-x")
+        scene_mock.annotate_context = MagicMock(return_value=None)
+
+        char = make_character()
+        sender = make_character(id="sender", actor=MagicMock())
+        msg = Message(sender=sender, body="trigger")
+        ctx = MessageContext(message=msg, scene=scene_mock)
+
+        char.annotate_context(ctx)
+
+        scene_mock.annotate_context.assert_called_once_with(ctx)

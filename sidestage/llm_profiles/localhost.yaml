@@ -1,18 +1,15 @@
-# Localhost profile — local llama-server with HuggingFace auto-download.
+# Localhost profile — assumes an OpenAI-compatible HTTP endpoint is
+# already running at the URL below. Sidestage does NOT spawn it.
 #
-# `just run` calls `bin/llm_up.py sidestage localhost`, which reads
-# this file and spawns llama-server for each entry whose endpoint is
-# loopback (127.0.0.1, localhost, ::1). First run downloads the GGUF
-# weights from HF; subsequent runs use the global llama.cpp cache
-# (~/.cache/llama.cpp/). External endpoints (anything non-loopback)
-# are consumed as-is — we don't manage their lifecycle.
+# Typical providers:
+#   llama-server --host 127.0.0.1 --port 8080 --hf-repo ... --hf-file ...
+#   vllm serve <model> --port 8080
+#   ollama serve  (then `ollama pull <model>`; default port 11434)
 #
-# Edit ports / models / endpoints freely. Add roles (e.g. `embedding`,
-# `narrator`) by extending `models:`.
+# Edit `endpoint` to point at whatever you run; the `model` string is
+# whatever the server reports / accepts (llama-server ignores the name).
 
 models:
-  smart:
+  default:
     endpoint: http://127.0.0.1:8080
-    hf-repo: bartowski/Llama-3.2-3B-Instruct-GGUF
-    hf-file: Llama-3.2-3B-Instruct-Q5_K_M.gguf
-    ctx-size: 8192
+    model: openai/default

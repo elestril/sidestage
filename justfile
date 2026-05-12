@@ -33,6 +33,11 @@ test: lint test-py test-fe
 # Every tier including browser e2e — pre-commit / CI path.
 test-all: test test-browser
 
+# Pre-commit gate — wired into `.git/hooks/pre-commit` by `just setup`.
+# Alias for `test-all` today; named separately so the hook contract is
+# stable even if the underlying recipe changes.
+precommit: test-all
+
 # All linters and type checks (ruff + pyright + tsc), parallel sub-tasks.
 [parallel]
 lint: _ruff-check _ruff-format-check _pyright _tsc
@@ -54,10 +59,21 @@ _tsc: _gen-types
 # vite build, vite dev) depends on this recipe so the file is always
 # fresh against the current backend. json2ts is the npm binary from
 # json-schema-to-typescript (project-local under frontend/node_modules).
+#
+# Make-style staleness: skip the (slow + log-noisy) pydantic2ts run
+# when types.ts already exists and nothing under src/sidestage/ is
+# newer. `just` has no built-in timestamp tracking, so we do it in
+# bash here.
 _gen-types:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="frontend/src/types.ts"
+    if [ -f "$out" ] && [ -z "$(find src/sidestage -name '*.py' -newer "$out" -print -quit)" ]; then
+        exit 0
+    fi
     uv run pydantic2ts \
         --module sidestage.server \
-        --output frontend/src/types.ts \
+        --output "$out" \
         --json2ts-cmd frontend/node_modules/.bin/json2ts
 
 # Apply ruff fixes + formatter (writes changes).
@@ -81,6 +97,12 @@ test-browser: build
     export SIDESTAGE_TEST_PORT=$(npm run -s pick-port)
     npm run -s test
 
+# Focused run of just the live-LLM e2e test. The same test also runs as
+# part of `just test` when an OpenAI-compatible endpoint is up on :8080
+# (e.g. llama-server, vllm, ollama) — it auto-skips otherwise.
+test-live-llm:
+    uv run pytest -m live_llm tests/e2e/
+
 # -------- build / spec --------
 
 # Build the frontend SPA into src/sidestage/static/.
@@ -93,12 +115,12 @@ spec:
 
 # -------- run --------
 
-# Hammer for orphaned vite / llama-server processes — `just run` owns its own.
+# Hammer for orphaned vite processes — `just run` owns its own.
 stop:
     @pkill -f 'vite' || true
-    @pkill -f 'llama-server' || true
 
-# Dev stack: vite + llama-server (per profile) + sidestage. Owns and tears down what it started.
+# Dev stack: vite + sidestage. The LLM endpoint(s) declared in the active
+# profile must already be reachable — Sidestage does not spawn them.
 run profile="localhost": _gen-types
     #!/usr/bin/env bash
     set -euo pipefail
@@ -142,16 +164,6 @@ run profile="localhost": _gen-types
             exit 1
         fi
     fi
-
-    # LLM — bring up profile-declared servers. Capture STARTED-PID lines
-    # so we own only what bin/llm_up.py actually spawned.
-    while IFS= read -r line; do
-        if [[ "$line" == STARTED-PID:* ]]; then
-            started+=("${line#STARTED-PID:}")
-        else
-            echo "$line"
-        fi
-    done < <(uv run python bin/llm_up.py sidestage {{profile}})
 
     # Sidestage in foreground — Ctrl-C falls into trap → cleanup.
     SIDESTAGE_LLM_PROFILE={{profile}} \

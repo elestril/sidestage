@@ -1,6 +1,5 @@
 """Unit tests for `llm-profile-loader` and the `ModelEntry` / `LlmProfile`
-schema. Covers discovery, validation, alias mapping, and derivation of
-`managed` / `port` from `endpoint`.
+schema. Covers discovery, validation, and the minimal field set.
 """
 
 from __future__ import annotations
@@ -19,73 +18,46 @@ def _write(path: Path, body: str) -> None:
 
 
 class TestModelEntry:
-    def test_managed_loopback_127(self) -> None:
-        # llm-profile-schema-managed: 127.0.0.1 is loopback → managed.
-        m = ModelEntry.model_validate({"endpoint": "http://127.0.0.1:8080"})
-        assert m.managed is True, (
-            "llm-profile-schema-managed: loopback host MUST signal managed; "
-            f"got managed={m.managed!r}"
+    def test_minimal_local_entry(self) -> None:
+        # llm-profile-schema: endpoint + model are required; api_key_env optional.
+        m = ModelEntry.model_validate(
+            {"endpoint": "http://127.0.0.1:8080", "model": "openai/local"}
         )
-        assert m.port == 8080
+        assert m.endpoint == "http://127.0.0.1:8080"
+        assert m.model == "openai/local"
+        assert m.api_key_env is None
 
-    def test_managed_loopback_localhost(self) -> None:
-        # llm-profile-schema-managed: localhost is also loopback.
-        m = ModelEntry.model_validate({"endpoint": "http://localhost:8081"})
-        assert m.managed is True
-        assert m.port == 8081
-
-    def test_managed_loopback_ipv6(self) -> None:
-        m = ModelEntry.model_validate({"endpoint": "http://[::1]:8082"})
-        assert m.managed is True
-        assert m.port == 8082
-
-    def test_external_endpoint(self) -> None:
+    def test_external_entry_with_api_key_env(self) -> None:
         m = ModelEntry.model_validate(
             {
                 "endpoint": "https://api.anthropic.com/v1",
-                "model": "claude-sonnet-4-5",
+                "model": "anthropic/claude-sonnet-4-5",
                 "api_key_env": "ANTHROPIC_API_KEY",
             }
         )
-        assert m.managed is False, (
-            "llm-profile-schema-managed: non-loopback host MUST be external; "
-            f"got managed={m.managed!r}"
+        assert m.api_key_env == "ANTHROPIC_API_KEY", (
+            "llm-profile-schema-api-key-by-env: api_key_env MUST round-trip; "
+            f"got api_key_env={m.api_key_env!r}"
         )
-        assert m.api_key_env == "ANTHROPIC_API_KEY"
-
-    def test_external_lan_endpoint(self) -> None:
-        # A LAN host is NOT loopback — we don't manage it even though it's
-        # "local" in casual usage. That's why we picked `managed` over `local`.
-        m = ModelEntry.model_validate({"endpoint": "http://beefy.lan:8080"})
-        assert m.managed is False
 
     def test_endpoint_required(self) -> None:
         with pytest.raises(ValidationError):
-            ModelEntry.model_validate({})
+            ModelEntry.model_validate({"model": "openai/local"})
 
-    def test_hyphen_aliases_round_trip(self) -> None:
-        # llm-profile-loader-aliases: YAML keys use hyphens; the loader
-        # MUST accept the hyphenated form and surface underscores in Python.
-        m = ModelEntry.model_validate(
-            {
-                "endpoint": "http://127.0.0.1:8080",
-                "hf-repo": "x/y",
-                "hf-file": "z.gguf",
-                "ctx-size": 4096,
-            }
-        )
-        assert m.hf_repo == "x/y", (
-            "llm-profile-loader-aliases: hf-repo MUST map to hf_repo; "
-            f"got hf_repo={m.hf_repo!r}"
-        )
-        assert m.hf_file == "z.gguf"
-        assert m.ctx_size == 4096
+    def test_model_required(self) -> None:
+        # llm-profile-schema-model: every entry MUST declare its litellm model string.
+        with pytest.raises(ValidationError):
+            ModelEntry.model_validate({"endpoint": "http://127.0.0.1:8080"})
 
     def test_unknown_field_is_rejected(self) -> None:
         # extra='forbid': typos surface immediately rather than being silently dropped.
         with pytest.raises(ValidationError):
             ModelEntry.model_validate(
-                {"endpoint": "http://127.0.0.1:8080", "hf-rrepo": "oops"}
+                {
+                    "endpoint": "http://127.0.0.1:8080",
+                    "model": "openai/local",
+                    "hf-repo": "x/y",
+                }
             )
 
 
@@ -99,20 +71,21 @@ class TestLlmProfile:
         p = LlmProfile.model_validate(
             {
                 "models": {
-                    "smart": {"endpoint": "http://127.0.0.1:8080"},
+                    "default": {
+                        "endpoint": "http://127.0.0.1:8080",
+                        "model": "openai/local",
+                    },
                     "embedding": {
                         "endpoint": "http://127.0.0.1:8081",
-                        "embedding": True,
+                        "model": "openai/local-embed",
                     },
                 }
             }
         )
-        assert set(p.models.keys()) == {"smart", "embedding"}, (
+        assert set(p.models.keys()) == {"default", "embedding"}, (
             "llm-profile-schema-models: roles MUST be exposed as the keys "
             f"of `models`; got {set(p.models.keys())!r}"
         )
-        assert p.models["smart"].port == 8080
-        assert p.models["embedding"].embedding is True
 
 
 class TestLoadProfiles:
@@ -129,28 +102,37 @@ class TestLoadProfiles:
         # *.yaml becomes a profile keyed by filename stem.
         _write(
             tmp_path / "llm_profiles" / "localhost.yaml",
-            "models:\n  smart:\n    endpoint: http://127.0.0.1:8080\n",
+            "models:\n"
+            "  default:\n"
+            "    endpoint: http://127.0.0.1:8080\n"
+            "    model: openai/local\n",
         )
         _write(
             tmp_path / "llm_profiles" / "anthropic.yaml",
             "models:\n"
-            "  smart:\n"
+            "  default:\n"
             "    endpoint: https://api.anthropic.com/v1\n"
-            "    model: claude-sonnet-4-5\n",
+            "    model: anthropic/claude-sonnet-4-5\n"
+            "    api_key_env: ANTHROPIC_API_KEY\n",
         )
         result = load_profiles(tmp_path)
         assert set(result.keys()) == {"localhost", "anthropic"}, (
             "llm-profile-discovery-stem: profile name MUST be the YAML "
             f"filename stem; got {set(result.keys())!r}"
         )
-        assert result["localhost"].models["smart"].managed is True
-        assert result["anthropic"].models["smart"].managed is False
+        assert result["localhost"].models["default"].model == "openai/local"
+        assert (
+            result["anthropic"].models["default"].model == "anthropic/claude-sonnet-4-5"
+        )
 
     def test_ignores_non_yaml(self, tmp_path: Path) -> None:
         # Stray non-YAML files in the dir don't trip the loader.
         _write(
             tmp_path / "llm_profiles" / "localhost.yaml",
-            "models:\n  smart:\n    endpoint: http://127.0.0.1:8080\n",
+            "models:\n"
+            "  default:\n"
+            "    endpoint: http://127.0.0.1:8080\n"
+            "    model: openai/local\n",
         )
         _write(tmp_path / "llm_profiles" / "README.md", "notes")
         _write(tmp_path / "llm_profiles" / ".keep", "")
@@ -173,7 +155,10 @@ class TestLoadProfiles:
         # The signature accepts `str | Path`; both must work.
         _write(
             tmp_path / "llm_profiles" / "localhost.yaml",
-            "models:\n  smart:\n    endpoint: http://127.0.0.1:8080\n",
+            "models:\n"
+            "  default:\n"
+            "    endpoint: http://127.0.0.1:8080\n"
+            "    model: openai/local\n",
         )
         result = load_profiles(str(tmp_path))
         assert "localhost" in result

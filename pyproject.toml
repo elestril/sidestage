@@ -48,6 +48,7 @@ markers = [
     "integration: in-process multi-module flows; slower than unit tests",
     "e2e: real uvicorn + httpx over TCP; exercises the API boundary",
     "eval: behavioral evals; opt-in (require EVAL=1)",
+    "live_llm: hits a real LLM endpoint; opt-in (require LIVE_LLM=1)",
 ]
 # Filter third-party deprecation noise from uvicorn[standard]'s legacy
 # websockets path. We don't use websockets directly; uvicorn pulls them

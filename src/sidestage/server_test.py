@@ -36,16 +36,18 @@ def _reset_actor_registry() -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_app_state() -> Iterator[None]:
-    """Each test starts with a clean App class-level registry/factory."""
+    """Each test starts with a clean App class-level registry/factory/profile."""
     _reset_actor_registry()
     if hasattr(App, "factory"):
         with contextlib.suppress(AttributeError):
             del App.factory
+    App.llm_profile = None
     yield
     _reset_actor_registry()
     if hasattr(App, "factory"):
         with contextlib.suppress(AttributeError):
             del App.factory
+    App.llm_profile = None
 
 
 def make_human_character(id: str = "bob") -> MagicMock:
@@ -290,6 +292,145 @@ class TestAppGetActor:
         sentinel = object()
         App.factory = sentinel  # type: ignore[assignment]  # pyright: ignore[reportAttributeAccessIssue]
         assert App.factory is sentinel
+
+
+# ---------------------------------------------------------------------------
+# server-get-actor-npc + server-app-llm-profile
+# ---------------------------------------------------------------------------
+
+
+class TestAppGetActorNpc:
+    """server-get-actor-npc: 'npc' owner constructs NpcActor from
+    App.llm_profile.models['default']."""
+
+    def _set_profile(self, *, with_default: bool = True) -> None:
+        from sidestage.llm_profile import LlmProfile, load_profiles
+
+        if with_default:
+            # Load the canonical test fixture profile rather than inventing
+            # endpoint/model literals — profiles live in YAML, not in code.
+            App.llm_profile = load_profiles("tests/sidestage")["localhost"]
+        else:
+            App.llm_profile = LlmProfile.model_validate({"models": {}})
+
+    def test_returns_npc_actor(self) -> None:
+        from sidestage.npc_actor import NpcActor
+
+        self._set_profile()
+        actor = App.get_actor("npc")
+        assert isinstance(actor, NpcActor), (
+            "server-get-actor-npc: 'npc' owner MUST return NpcActor; "
+            f"got {type(actor).__name__}"
+        )
+
+    def test_caches_per_owner(self) -> None:
+        # server-get-actor-cached: second call returns the same instance.
+        self._set_profile()
+        a1 = App.get_actor("npc")
+        a2 = App.get_actor("npc")
+        assert a1 is a2
+
+    def test_raises_runtime_error_when_profile_unset(self) -> None:
+        # server-app-llm-profile-required-for-npc.
+        App.llm_profile = None
+        with pytest.raises(RuntimeError, match="server-app-llm-profile"):
+            App.get_actor("npc")
+
+    def test_raises_keyerror_when_default_role_missing(self) -> None:
+        # llm-profile-runtime-default-role.
+        self._set_profile(with_default=False)
+        with pytest.raises(KeyError, match="llm-profile-runtime-default-role"):
+            App.get_actor("npc")
+
+    def test_uses_default_entry(self) -> None:
+        # The constructed NpcActor carries the entry from
+        # profile.models["default"].
+        self._set_profile()
+        from sidestage.npc_actor import NpcActor
+
+        actor = App.get_actor("npc")
+        assert isinstance(actor, NpcActor)
+        assert App.llm_profile is not None
+        assert actor._entry is App.llm_profile.models["default"]
+
+
+class TestBuildAndLoadLlmProfile:
+    """server-app-llm-profile: _build_and_load populates App.llm_profile."""
+
+    def test_loads_profile_from_sidestage_dir(self, tmp_path: Any) -> None:
+        # Build a minimal sidestage dir with one profile + one campaign.
+        (tmp_path / "llm_profiles").mkdir()
+        (tmp_path / "llm_profiles" / "localhost.yaml").write_text(
+            "models:\n  default:\n    endpoint: http://127.0.0.1:8080\n    model: openai/local\n"
+        )
+        # Minimal campaign so _build_and_load doesn't bail.
+        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
+            "name: TC\ndefault_scene_id: s1\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
+            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
+        )
+
+        App._build_and_load(str(tmp_path), "localhost")
+
+        assert App.llm_profile is not None, (
+            "server-app-llm-profile: _build_and_load MUST populate "
+            "App.llm_profile from <sidestage_dir>/llm_profiles/<name>.yaml"
+        )
+        assert "default" in App.llm_profile.models
+
+    def test_missing_profile_dir_leaves_llm_profile_none(self, tmp_path: Any) -> None:
+        # llm-profile-discovery-missing-dir: no llm_profiles/ → empty dict
+        # → App.llm_profile remains None (it's only required when a
+        # Character with owner='npc' is constructed).
+        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
+            "name: TC\ndefault_scene_id: s1\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
+            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
+        )
+
+        App._build_and_load(str(tmp_path), "localhost")
+        assert App.llm_profile is None
+
+    def test_unknown_profile_name_raises(self, tmp_path: Any) -> None:
+        (tmp_path / "llm_profiles").mkdir()
+        (tmp_path / "llm_profiles" / "localhost.yaml").write_text(
+            "models:\n  default:\n    endpoint: http://127.0.0.1:8080\n    model: openai/local\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
+            "name: TC\ndefault_scene_id: s1\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: stub\n---\nbody\n"
+        )
+        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
+            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
+        )
+
+        with pytest.raises(RuntimeError, match="server-app-llm-profile"):
+            App._build_and_load(str(tmp_path), "nonexistent")
 
 
 # ---------------------------------------------------------------------------

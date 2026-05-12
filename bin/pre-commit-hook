@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Pre-commit gate — runs `just test-all` (lint + Python + frontend +
+# Pre-commit gate — runs `just precommit` (lint + Python + frontend +
 # browser) before any commit. Skippable with `git commit --no-verify`
 # when you genuinely need to (e.g. WIP commit during pair work).
 #
-# Install via `just install-hooks` after cloning.
+# Installed by `just setup` (the `_git-setup` recipe symlinks this file
+# into `.git/hooks/pre-commit`).
 
 set -euo pipefail
 
-exec just test-all
+exec just precommit

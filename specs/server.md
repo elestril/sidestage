@@ -15,10 +15,40 @@ the config directory and begins serving the web UI.
 
 `App` is the FastAPI process container. Owns `state` (LOADING/SERVING),
 `campaigns: dict[str, Campaign]`, the class-level `_actors` registry
-(via `App.get_actor(owner)`), and the class-level `factory` slot consulted
-by `Scene.deserialize` during load. `App.run(sidestage_dir, port)` walks
-`<sidestage_dir>/campaigns/` for the first campaign subdir, loads it,
-flips state to SERVING, launches uvicorn.
+(via `App.get_actor(owner)`), the class-level `factory` slot consulted
+by `Scene.deserialize` during load, and the class-level `llm_profile`
+slot consulted by `App.get_actor("npc")`. `App.run(sidestage_dir, port)`
+walks `<sidestage_dir>/campaigns/` for the first campaign subdir, loads
+it, flips state to SERVING, launches uvicorn.
+
+## server-app-llm-profile
+
+Class-level slot holding the resolved `LlmProfile` for this instance.
+
+- server-app-llm-profile: `App.llm_profile: LlmProfile | None = None`.
+  Set by `_build_and_load` immediately after `App.factory`, by reading
+  `load_profiles(sidestage_dir)[config.llm_profile]`. Parallel to
+  `server-app-factory`.
+- server-app-llm-profile-required-for-npc: `App.get_actor("npc")` reads
+  `cls.llm_profile.models["default"]` to construct the `NpcActor`.
+  Raises `RuntimeError` if `cls.llm_profile is None` (load order bug).
+- .implemented-by: App._build_and_load, App.get_actor
+
+## server-get-actor: owner → Actor mapping
+
+`App.get_actor(owner)` is the single point of singleton resolution.
+Owners and their actor classes:
+
+- server-get-actor-user: `"user" → UserActor()` — process-wide UserActor
+  singleton (today; per-user instances when multi-user lands).
+- server-get-actor-stub: `"stub" → StubActor()` — deterministic test
+  responder.
+- server-get-actor-npc: `"npc" → NpcActor(cls.llm_profile.models["default"])`.
+  Requires `cls.llm_profile is not None` (per
+  `server-app-llm-profile-required-for-npc`).
+- server-get-actor-cached: First call instantiates, caches in
+  `cls._actors`; subsequent calls return the cached instance.
+- server-get-actor-unknown: Unknown owner raises `KeyError`.
 
 Wire models defined in this module: `SceneResponse`, `MessageRequest`,
 `MessageAccepted`. (`CampaignResponse` lives in `campaign.py`;
