@@ -93,39 +93,69 @@ spec:
 
 # -------- run --------
 
-# Ensure the Vite dev server is up at :5173. Background-launches it if not.
-_vite-up: _gen-types
-    #!/usr/bin/env bash
-    set -e
-    if curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
-        exit 0
-    fi
-    mkdir -p sidestage/logs
-    echo "Starting Vite dev server..."
-    (cd frontend && nohup npm run dev >../sidestage/logs/vite.log 2>&1 &)
-    for _ in $(seq 1 50); do
-        sleep 0.2
-        if curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
-            exit 0
-        fi
-    done
-    echo "Vite failed to come up — check sidestage/logs/vite.log" >&2
-    exit 1
-
-# Ensure the LLM topology declared in a profile is up. Reads
-# sidestage/llm_profiles/{{profile}}.yaml. Idempotent: skips servers
-# already healthy on their declared port.
-_llm-up profile:
-    uv run python bin/llm_up.py sidestage {{profile}}
-
-# Stop everything `just run` started — vite and any local llama-server.
+# Hammer for orphaned vite / llama-server processes — `just run` owns its own.
 stop:
     @pkill -f 'vite' || true
     @pkill -f 'llama-server' || true
 
-# Dev stack: vite + llama-server (per profile) + sidestage (hot-reload). `just stop` to tear down.
-run profile="localhost": _vite-up (_llm-up profile)
-    SIDESTAGE_LLM_PROFILE={{profile}} uv run sidestage --sidestage-dir sidestage/ --reload
+# Dev stack: vite + llama-server (per profile) + sidestage. Owns and tears down what it started.
+run profile="localhost": _gen-types
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # PIDs of processes WE started this invocation. cleanup() kills only
+    # these — pre-existing services we just consume are not touched.
+    started=()
+
+    cleanup() {
+        if [ ${#started[@]} -eq 0 ]; then
+            return
+        fi
+        echo
+        echo "stopping owned processes: ${started[*]}"
+        for pid in "${started[@]}"; do
+            kill "$pid" 2>/dev/null || true
+        done
+    }
+    # EXIT alone — it fires regardless of exit cause (Ctrl-C, error,
+    # normal end). Adding INT/TERM as well would re-run cleanup twice
+    # on Ctrl-C: once from the signal, once from the implicit unwind.
+    trap cleanup EXIT
+
+    mkdir -p sidestage/logs
+
+    # Vite — start if not already up at :5173.
+    if curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
+        echo "vite: already up on :5173 (not owned)"
+    else
+        echo "starting vite..."
+        ( cd frontend && exec npm run dev >../sidestage/logs/vite.log 2>&1 ) &
+        started+=("$!")
+        for _ in $(seq 1 50); do
+            sleep 0.2
+            if curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
+                break
+            fi
+        done
+        if ! curl -fsS http://localhost:5173/__vite_ping >/dev/null 2>&1; then
+            echo "vite failed to come up — check sidestage/logs/vite.log" >&2
+            exit 1
+        fi
+    fi
+
+    # LLM — bring up profile-declared servers. Capture STARTED-PID lines
+    # so we own only what bin/llm_up.py actually spawned.
+    while IFS= read -r line; do
+        if [[ "$line" == STARTED-PID:* ]]; then
+            started+=("${line#STARTED-PID:}")
+        else
+            echo "$line"
+        fi
+    done < <(uv run python bin/llm_up.py sidestage {{profile}})
+
+    # Sidestage in foreground — Ctrl-C falls into trap → cleanup.
+    SIDESTAGE_LLM_PROFILE={{profile}} \
+        uv run sidestage --sidestage-dir sidestage/ --reload
 
 # -------- housekeeping --------
 

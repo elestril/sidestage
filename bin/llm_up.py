@@ -71,25 +71,30 @@ def _build_args(role: str, entry: ModelEntry) -> list[str]:
     return args
 
 
-def _spawn(role: str, entry: ModelEntry, log_dir: Path) -> None:
+def _spawn(role: str, entry: ModelEntry, log_dir: Path) -> int:
     """llm-up-spawn: detach `bin/run-llama-server.sh` for one model entry.
 
     Stdout/stderr go to `<sidestage_dir>/logs/llm-<role>.log`. The
     process detaches via `start_new_session=True` so it survives this
     script exiting.
+
+    Returns the spawned process's PID. Caller is expected to print it
+    in the canonical `STARTED-PID:<pid>` form so the wrapping shell
+    (the `run` recipe) can track ownership and clean up on exit.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"llm-{role}.log"
     cmd = [str(_WRAPPER), *_build_args(role, entry)]
     print(f"  spawning {role}: {' '.join(cmd)}")
     log_fh = log_path.open("ab")
-    subprocess.Popen(  # noqa: S603 — args built from validated config
+    proc = subprocess.Popen(  # noqa: S603 — args built from validated config
         cmd,
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
         start_new_session=True,
     )
+    return proc.pid
 
 
 def _wait_ready(role: str, port: int, log_path: Path) -> None:
@@ -125,7 +130,12 @@ def ensure_profile_up(sidestage_dir: Path, profile_name: str) -> None:
         if _is_up(port):
             print(f"  {role}: already up on :{port}")
             continue
-        _spawn(role, entry, log_dir)
+        pid = _spawn(role, entry, log_dir)
+        # llm-up-started-pid: the `run` recipe parses STARTED-PID lines
+        # to track which processes IT owns; on exit it kills only those.
+        # Pre-existing servers (the "already up" branch above) are NOT
+        # printed because we did not spawn them.
+        print(f"STARTED-PID:{pid}")
         _wait_ready(role, port, log_dir / f"llm-{role}.log")
         print(f"  {role}: ready on :{port}")
 
