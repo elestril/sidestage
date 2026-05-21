@@ -154,6 +154,50 @@ class TestNpcActorRespondLocal:
             "npc-actor-respond-timeout: timeout MUST be 60.0 seconds; "
             f"got timeout={kwargs['timeout']!r}"
         )
+        assert kwargs["max_tokens"] == 512, (
+            "npc-actor-respond-max-tokens: max_tokens MUST be 512 to "
+            "prevent runaway generation; "
+            f"got max_tokens={kwargs['max_tokens']!r}"
+        )
+        assert kwargs["chat_template_kwargs"] == {"enable_thinking": False}, (
+            "npc-actor-model-params: NpcActor MUST merge its model_params "
+            "into the litellm call so the Actor controls request shape; "
+            f"got chat_template_kwargs={kwargs.get('chat_template_kwargs')!r}"
+        )
+
+    async def test_model_params_override_defaults(self) -> None:
+        # npc-actor-model-params: a subclass can extend / override the
+        # request shape. Use a one-off class to avoid mutating the
+        # class-level default (which is shared with the rest of the suite).
+        class TunedNpcActor(NpcActor):
+            model_params = {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "temperature": 0.2,
+            }
+
+        actor = TunedNpcActor(_local_entry())
+        bob = _character_mock(id="bob")
+        scene = _scene_mock(messages=[])
+        sender = _character_mock(id="alice")
+        message = Message(sender=sender, body="hi")
+
+        with patch(
+            "sidestage.npc_actor.litellm.acompletion",
+            new_callable=AsyncMock,
+            return_value=_completion_response("ok"),
+        ) as mock_call:
+            await actor.respond(message, bob, scene)
+
+        assert mock_call.await_args is not None
+        kwargs = mock_call.await_args.kwargs
+        assert kwargs["chat_template_kwargs"] == {"enable_thinking": True}, (
+            "npc-actor-model-params: subclass model_params MUST override the "
+            f"default; got chat_template_kwargs={kwargs.get('chat_template_kwargs')!r}"
+        )
+        assert kwargs["temperature"] == 0.2, (
+            "npc-actor-model-params: subclass model_params MUST add new fields; "
+            f"got temperature={kwargs.get('temperature')!r}"
+        )
 
     async def test_calls_annotate_context_with_message_context(self) -> None:
         # npc-actor-consumes-context: character.annotate_context invoked

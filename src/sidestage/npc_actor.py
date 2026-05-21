@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import litellm
 
@@ -32,6 +32,14 @@ logger = logging.getLogger("sidestage.npc_actor")
 # pytest's 2s default would otherwise fail the test before the call returns.
 _TIMEOUT_S = 60.0
 
+# npc-actor-respond-max-tokens: hard cap on generated tokens per call.
+# Without a cap, a runaway generation (model fails to emit EOS, prompt
+# template glitch, etc.) keeps the server's decode loop hot indefinitely
+# even after the client disconnects — observed in the wild as a stuck
+# llama.cpp slot pegging a CPU core after the test client timed out.
+# 512 tokens is generous for a one-or-two-sentence NPC reply.
+_MAX_TOKENS = 512
+
 
 def _shape_turns(history: list[Message], responding: Character) -> list[dict[str, str]]:
     """npc-actor-consumes-context: map scene history into chat turns.
@@ -45,13 +53,18 @@ def _shape_turns(history: list[Message], responding: Character) -> list[dict[str
     return turns
 
 
-def _litellm_kwargs(entry: ModelEntry) -> dict[str, Any]:
+def _litellm_kwargs(entry: ModelEntry, model_params: dict[str, Any]) -> dict[str, Any]:
     """npc-actor-litellm-kwargs: derive model / api_base / api_key from
-    a ModelEntry. Always passes `api_base=entry.endpoint` and
-    `model=entry.model` (the YAML carries the provider prefix). If
-    `entry.api_key_env` names an env var, its value is sent as the
-    api_key; otherwise a stub is sent (local servers ignore it but
-    litellm requires the param).
+    a ModelEntry and merge in actor-controlled `model_params` (reasoning
+    knobs, temperature, top_p, anything litellm forwards). Always
+    passes `api_base=entry.endpoint` and `model=entry.model` (the YAML
+    carries the provider prefix). If `entry.api_key_env` names an env
+    var, its value is sent as the api_key; otherwise a stub is sent
+    (local servers ignore it but litellm requires the param).
+
+    `model_params` overrides any default field of the same key — gives
+    the Actor full control over the request shape per
+    `npc-actor-model-params`.
 
     Returned `dict[str, Any]` rather than `dict[str, object]` so the
     `**kwargs` unpacking site type-checks against litellm's typed
@@ -59,6 +72,7 @@ def _litellm_kwargs(entry: ModelEntry) -> dict[str, Any]:
     """
     kwargs: dict[str, Any] = {
         "timeout": _TIMEOUT_S,
+        "max_tokens": _MAX_TOKENS,
         "model": entry.model,
         "api_base": entry.endpoint,
     }
@@ -66,6 +80,7 @@ def _litellm_kwargs(entry: ModelEntry) -> dict[str, Any]:
         kwargs["api_key"] = os.environ[entry.api_key_env]
     else:
         kwargs["api_key"] = "sk-no-key"
+    kwargs.update(model_params)
     return kwargs
 
 
@@ -79,6 +94,24 @@ class NpcActor(Actor):
 
     .implements: character-init-binds-actor, server-get-actor
     """
+
+    # npc-actor-model-params: actor-controlled knobs merged into every
+    # `litellm.acompletion` call (after the model / api_base / api_key /
+    # timeout / max_tokens defaults — overrides win). The Actor — not
+    # the profile YAML — is the source of truth for request-shape
+    # tuning; subclasses extend or replace this dict to vary reasoning
+    # effort, temperature, top_p, custom chat_template_kwargs, etc.
+    #
+    # Default disables reasoning preambles via Qwen3's chat-template
+    # flag (forwarded by litellm as part of the request body). NPC
+    # dialogue is in-character speech, not analysis, and reasoning
+    # tokens compete with content tokens for the max_tokens budget —
+    # leaving reasoning on starves `content` to "" on small models.
+    # Endpoints that don't honor this flag ignore it silently; the
+    # field is harmless when irrelevant.
+    model_params: ClassVar[dict[str, Any]] = {
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
 
     def __init__(self, entry: ModelEntry) -> None:
         """npc-actor-init: stores `entry` as `self._entry`. No I/O."""
@@ -119,7 +152,7 @@ class NpcActor(Actor):
         ]
         try:
             response = await litellm.acompletion(
-                messages=msgs, **_litellm_kwargs(self._entry)
+                messages=msgs, **_litellm_kwargs(self._entry, self.model_params)
             )
         except Exception:
             logger.exception(

@@ -1,34 +1,29 @@
-"""E2E live-LLM: bob posts to The Cracked Tankard; Marigold (NpcActor)
-replies via SSE. Same shape as `test_cuj_hello` — real uvicorn, REST
-POST, SSE read, GET history — with the npc owner wired to a real LLM
-endpoint instead of `StubActor`.
+"""E2E live-LLM: NpcActor against a real OpenAI-compatible endpoint.
 
-Per `testing-categories-e2e-live-llm`: the single e2e test that
-validates `NpcActor`. Always part of the default suite; auto-skips when
-the LLM endpoint declared by `sidestage/llm_profiles/localhost.yaml`
-isn't answering `/health`. No env-var opt-in required — if the server
-is up, the test runs; otherwise it skips cleanly.
+Per `testing-categories-e2e-live-llm`. Crosses the process boundary to
+the user's LLM server (llama-server / vllm / ollama). Speaks directly
+to the `NpcActor` class — no Character / Scene / REST / SSE; those are
+covered by `test_cuj_hello` with `StubActor` per
+`testing-categories-e2e-http`.
 
-The fixture loads the production `sidestage/` instance directly so the
-test exercises exactly what `just run` runs — Marigold's character file
-and the tavern scene live in `sidestage/campaigns/dragons_lair/`.
-
-.tests: cuj-hello-respond, npc-actor-respond, events-dataflow-deliver,
-        sse-dataflow-connect, rest-api-post-message, rest-api-get-messages
+Auto-skips when the endpoint declared by `sidestage/llm_profiles/
+localhost.yaml` isn't answering `/health`, so this test runs as part
+of `just test` whenever the LLM is up and skips cleanly otherwise.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-from collections.abc import AsyncIterator, Iterator
-from urllib.parse import quote
+from typing import cast
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
-import uvicorn
 
-from sidestage.server import App
+from sidestage.character import Character
+from sidestage.entity import Entity, EntityId, MessageContext
+from sidestage.llm_profile import ModelEntry, load_profiles
+from sidestage.message import Message
+from sidestage.npc_actor import NpcActor
 
 _LLM_HEALTH_URL = "http://127.0.0.1:8080/health"
 
@@ -60,147 +55,155 @@ pytestmark = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Minimal stubs — NpcActor.respond only reads `character.annotate_context`
+# (per npc-actor-consumes-context) and `scene.messages` (history). We feed
+# both via MagicMock(spec=Entity) so the test doesn't drag in Campaign /
+# factory / Character.__init__ machinery.
+# ---------------------------------------------------------------------------
+
+
+def _character_stub(*, id: str, persona: str) -> MagicMock:
+    """A Character-shaped stub whose `annotate_context` writes a fixed
+    persona line keyed by itself.
+    """
+    char = MagicMock(spec=Entity)
+    char.id = EntityId(id)
+
+    def _annotate(ctx: MessageContext) -> None:
+        ctx.annotations[char] = persona
+
+    char.annotate_context = MagicMock(side_effect=_annotate)
+    return char
+
+
+def _scene_stub(messages: list[Message] | None = None) -> MagicMock:
+    scene = MagicMock(spec=Entity)
+    scene.id = EntityId("tavern")
+    scene.messages = messages or []
+    return scene
+
+
 @pytest.fixture
-def live_app() -> Iterator[App]:
-    """Build a fresh `App` from the production `sidestage/` instance.
-
-    Same path as `just run` — `_build_and_load` loads
-    `sidestage/llm_profiles/localhost.yaml` into `App.llm_profile`
-    before walking `sidestage/campaigns/`. Marigold's
-    `owner: npc` then constructs an `NpcActor` wired to the localhost
-    endpoint at deserialize time.
-
-    Snapshots class-level App state on setup and restores on teardown so
-    this fixture doesn't leak into any subsequent test in the same
-    session.
-    """
-    saved_actors = App._actors.copy()
-    saved_llm_profile = App.llm_profile
-    saved_factory = App.factory
-    App._actors.clear()
-    App.llm_profile = None
-    App.factory = None
-    try:
-        app = App._build_and_load("sidestage", "localhost")
-        yield app
-    finally:
-        App._actors.clear()
-        App._actors.update(saved_actors)
-        App.llm_profile = saved_llm_profile
-        App.factory = saved_factory
+def entry() -> ModelEntry:
+    """ModelEntry from the dev profile — points at whatever endpoint
+    the user runs locally."""
+    return load_profiles("sidestage")["localhost"].models["default"]
 
 
 @pytest.fixture
-async def live_server(live_app: App) -> AsyncIterator[str]:
-    """Per-test uvicorn against `live_app` on an ephemeral port. Mirrors
-    `testing-fixture-test-server` but binds the live (dragons_lair) App
-    instead of the test fixture App.
+def marigold() -> MagicMock:
+    return _character_stub(
+        id="marigold",
+        persona=(
+            "You are Marigold Hearthwell, the warm and gossipy keeper of "
+            "the Cracked Tankard tavern. Reply in one short sentence."
+        ),
+    )
+
+
+@pytest.fixture
+def bob() -> MagicMock:
+    return _character_stub(id="bob", persona="A weary traveler.")
+
+
+@pytest.fixture
+def scene() -> MagicMock:
+    return _scene_stub(messages=[])
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+async def test_responds_with_non_empty_message(
+    entry: ModelEntry,
+    marigold: MagicMock,
+    bob: MagicMock,
+    scene: MagicMock,
+) -> None:
+    """`NpcActor.respond` against the live endpoint returns a non-empty
+    `Message` for a basic prompt — the smoke test for the litellm →
+    real-LLM path.
     """
-    config = uvicorn.Config(
-        live_app._fastapi,
-        host="127.0.0.1",
-        port=0,
-        log_level="error",
-        loop="asyncio",
-        lifespan="off",
+    actor = NpcActor(entry)
+    msg = Message(sender=bob, body="Say hi in one short sentence.")
+    # In production, `Scene.append` puts the triggering message into
+    # `scene.messages` BEFORE the listener kicks the actor. Mirror that
+    # here so `_shape_turns` produces a chat history with a user turn —
+    # otherwise NpcActor sends just the system prompt and provider
+    # chat templates (e.g. Qwen3) raise "no user query found".
+    scene.messages = [msg]
+
+    reply = await actor.respond(msg, cast(Character, marigold), cast(Entity, scene))
+
+    assert reply is not None, (
+        "npc-actor-respond: expected a Message from a live endpoint; "
+        "got None (check server logs for empty completion / non-2xx)"
     )
-    server = uvicorn.Server(config)
-    serve_task = asyncio.create_task(server.serve())
-    try:
-        while not server.started:
-            await asyncio.sleep(0.01)
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(serve_task, timeout=2.0)
+    assert reply.sender is marigold, (
+        "npc-actor-respond: reply sender MUST be the responding character; "
+        f"got sender={reply.sender!r}"
+    )
+    assert reply.body.strip() != "", (
+        f"npc-actor-respond: reply body MUST be non-empty; got body={reply.body!r}"
+    )
 
 
-async def _read_entity_changed_frames(response: httpx.Response, n: int) -> list[dict]:
-    """Read n `event: entity_changed` frames off an SSE stream.
+async def test_handles_reasoning_model(
+    entry: ModelEntry,
+    marigold: MagicMock,
+    bob: MagicMock,
+    scene: MagicMock,
+) -> None:
+    """When the configured endpoint is a reasoning model (one that emits
+    a chain-of-thought preamble alongside `content`), `NpcActor` MUST
+    still surface a non-empty `content`-derived reply within the budget
+    — and MUST NOT leak the chain-of-thought as the NPC's in-character
+    speech.
 
-    SSE frames are 3 lines: `event:`, `data:`, blank. Keepalive comments
-    (`: keepalive`) are skipped. Bounded by the enclosing pytest timeout.
+    Non-reasoning endpoints pass this trivially: no preamble, content
+    arrives quickly, no CoT markers in the body. Reasoning endpoints
+    are the interesting case (Qwen3-Thinking, o1-style, DeepSeek-R1).
     """
-    frames: list[dict] = []
-    pending_event: str | None = None
-    async for raw in response.aiter_lines():
-        line = raw.rstrip("\r")
-        if line.startswith("event: "):
-            pending_event = line[len("event: ") :]
-        elif line.startswith("data: ") and pending_event == "entity_changed":
-            frames.append(json.loads(line[len("data: ") :]))
-            pending_event = None
-            if len(frames) >= n:
-                return frames
-    return frames
-
-
-async def test_marigold_replies_to_bob(live_app: App, live_server: str) -> None:
-    """Bob posts a line in the tavern; Marigold's NpcActor produces a
-    real LLM-backed reply that lands in scene history via the SSE
-    pipeline.
-    """
-    # Campaign id is `campaign.name` ("Dragon's Lair") — URL-encode the
-    # space and apostrophe so the path lands on the FastAPI route.
-    campaign_id = quote(next(iter(live_app.campaigns)), safe="")
-    scene_id = "tavern"
-    events_url = f"/api/campaigns/{campaign_id}/entities/{scene_id}/events"
-    messages_url = f"/api/campaigns/{campaign_id}/scenes/{scene_id}/messages"
-
-    async with httpx.AsyncClient(base_url=live_server, timeout=80.0) as client:
-
-        async def stream_frames() -> list[dict]:
-            async with client.stream("GET", events_url) as resp:
-                return await _read_entity_changed_frames(resp, n=2)
-
-        async def post_after_subscribed() -> httpx.Response:
-            # Brief yield so the SSE handler reaches subscribe_to before
-            # the POST fires the emit (per test_cuj_hello's note).
-            await asyncio.sleep(0.05)
-            return await client.post(
-                messages_url,
-                json={"sender_id": "bob", "body": "What's the gossip tonight?"},
-            )
-
-        frames, post_resp = await asyncio.gather(
-            stream_frames(), post_after_subscribed()
-        )
-
-        assert post_resp.status_code == 201, (
-            "rest-api-post-message: POST /messages MUST return 201 on the "
-            f"happy path; got status={post_resp.status_code} "
-            f"body={post_resp.text!r}"
-        )
-        assert len(frames) == 2, (
-            "events-dataflow-deliver: SSE stream MUST deliver one "
-            "`entity_changed` frame per Scene.append (bob's input plus "
-            f"marigold's reply); got {len(frames)} frames"
-        )
-
-        hist_resp = await client.get(messages_url)
-
-    assert hist_resp.status_code == 200, (
-        "rest-api-get-messages: GET /messages MUST return 200 on the "
-        f"happy path; got status={hist_resp.status_code}"
+    actor = NpcActor(entry)
+    # An open-ended prompt that often triggers a reasoning preamble on
+    # CoT-trained models.
+    msg = Message(
+        sender=bob,
+        body=(
+            "Two travelers ask which local quest is worth their trouble — "
+            "which do you steer them toward?"
+        ),
     )
-    messages = hist_resp.json()
-    assert len(messages) == 2, (
-        "cuj-hello-respond: scene history MUST contain bob's input plus "
-        f"marigold's reply after the listener cycle settles; got "
-        f"{len(messages)} messages: {messages!r}"
+    scene.messages = [msg]  # production seeds the trigger; see test above.
+
+    reply = await actor.respond(msg, cast(Character, marigold), cast(Entity, scene))
+
+    assert reply is not None, (
+        "npc-actor-respond: expected a Message even when the model emits "
+        "a reasoning preamble; got None"
     )
-    assert messages[0]["sender_id"] == "bob" and messages[0]["body"] == (
-        "What's the gossip tonight?"
-    ), (
-        "rest-api-post-message: bob's message MUST land at index 0 with "
-        f"the posted body; got {messages[0]!r}"
+    assert reply.body.strip() != "", (
+        f"npc-actor-respond: reply body MUST be non-empty; got body={reply.body!r}"
     )
-    assert messages[1]["sender_id"] == "marigold", (
-        "npc-actor-respond: marigold MUST reply at index 1; "
-        f"got sender_id={messages[1]['sender_id']!r}"
+    # Reasoning leak guard: chain-of-thought emitted into `content`
+    # (instead of the provider's `reasoning_content` field) reads as a
+    # break in character. Heuristic markers catch the most common shapes.
+    body_lower = reply.body.lower()
+    cot_markers = (
+        "<think>",
+        "thinking process",
+        "let me think",
+        "let's think",
+        "first, i'll",
+        "first, let",
+        "step 1",
     )
-    assert messages[1]["body"].strip() != "", (
-        "npc-actor-respond: marigold's reply body MUST be non-empty; "
-        f"got body={messages[1]['body']!r}"
+    leaked = [m for m in cot_markers if m in body_lower]
+    assert not leaked, (
+        "npc-actor-respond: reply MUST be the content answer, not the "
+        f"chain-of-thought preamble; found markers {leaked!r} in "
+        f"body={reply.body!r}"
     )

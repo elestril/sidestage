@@ -61,6 +61,11 @@ filterwarnings = [
     "error",
     "ignore:websockets.legacy is deprecated.*:DeprecationWarning",
     "ignore:websockets\\.server\\.WebSocketServerProtocol is deprecated.*:DeprecationWarning",
+    # litellm starts a background coroutine (`Logging.async_success_handler`)
+    # for telemetry; when the event loop closes between tests the task gets
+    # garbage-collected while pending, raising an unraisable warning that
+    # has nothing to do with our code. Surgical match on the coroutine name.
+    "ignore:.*Logging\\.async_success_handler.*:pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.ruff]

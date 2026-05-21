@@ -63,12 +63,30 @@ across scenes need no coordination.
   Subsequent calls return in seconds. Unit tests must mock litellm
   because pytest's 2s default would otherwise fail the test before the
   call returns.
-- npc-actor-litellm-kwargs: Every call passes `model=entry.model` and
-  `api_base=entry.endpoint`. If `entry.api_key_env` is set, the api_key
-  is `os.environ[entry.api_key_env]`; otherwise a stub (`"sk-no-key"`)
-  is sent — litellm requires the param even when the server ignores
-  it. The provider prefix in `entry.model` (`openai/...`,
-  `anthropic/...`) routes the call.
+- npc-actor-respond-max-tokens: Hard `max_tokens=512` cap on every
+  litellm call. Without a cap, a runaway generation (no EOS, template
+  glitch) keeps the server's decode loop pegged indefinitely after the
+  client disconnects. 512 is generous for one-or-two-sentence replies
+  and bounds the worst case below the client timeout.
+- npc-actor-litellm-kwargs: Every call passes `model=entry.model`,
+  `api_base=entry.endpoint`, `timeout=60`, `max_tokens=512`. If
+  `entry.api_key_env` is set, the api_key is
+  `os.environ[entry.api_key_env]`; otherwise a stub (`"sk-no-key"`) is
+  sent — litellm requires the param even when the server ignores it.
+  The provider prefix in `entry.model` (`openai/...`, `anthropic/...`)
+  routes the call. Per `npc-actor-model-params`, the actor's
+  `model_params` dict is then merged in and overrides any field above.
+- npc-actor-model-params: NpcActor carries a `model_params: ClassVar[dict]`
+  that is merged into every `litellm.acompletion` call after the
+  defaults — actor-side overrides win. The Actor — NOT the profile
+  YAML — is the source of truth for request-shape tuning (reasoning
+  effort, temperature, top_p, custom chat_template_kwargs, etc.).
+  Subclasses extend or replace `model_params` to vary per role.
+  Default disables reasoning preambles
+  (`{"chat_template_kwargs": {"enable_thinking": False}}`) because NPC
+  dialogue is in-character speech, not analysis, and reasoning tokens
+  compete with content tokens for the `max_tokens` budget; endpoints
+  that don't honor the flag ignore it silently.
 - npc-actor-consumes-context: Calls `character.annotate_context(ctx)`
   exactly once per `respond`. Never reads character internals
   (`character.body`, etc.) directly — the Entity polymorphism

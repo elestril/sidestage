@@ -13,22 +13,26 @@ domain flows, no API), e2e (real uvicorn + httpx over TCP), eval
   no API boundary, no live LLM. Integration uses `StubActor` only —
   deterministic, no network. Asserts on entity-level state via direct
   method calls. Lives in `tests/integration/`.
-- testing-categories-e2e: Real uvicorn server on an ephemeral port, real
-  client over TCP. Two flavors by driver:
-  - testing-categories-e2e-http: Python `httpx.AsyncClient` (per
-    `testing-fixture-test-server`). Lives in `tests/e2e/`.
+- testing-categories-e2e: Crosses a real process boundary. Three
+  flavors by which boundary is exercised:
+  - testing-categories-e2e-http: Sidestage's API surface — real
+    uvicorn server on an ephemeral port driven by Python
+    `httpx.AsyncClient` (per `testing-fixture-test-server`). Lives in
+    `tests/e2e/`. `test_cuj_hello` is the canonical example; it covers
+    the REST/SSE round trip with `StubActor`.
   - testing-categories-e2e-browser: Playwright + Chromium against the
     built SPA. The browser tier owns the SSE → React → DOM path that
     HTTP-tier doesn't touch. Lives in `tests/playwright/`. Invoked via
     `just test-browser` (not part of `just test`'s inner loop because
     of the build step + browser launch).
-- testing-categories-e2e-live-llm: Exactly ONE e2e test validates
-  `NpcActor` end-to-end against a real LLM endpoint — same shape as
-  the other e2e tests (real uvicorn, REST POST, SSE read) but with the
-  npc owner actually wired to a real LLM. Carries `pytest.mark.e2e`
-  AND `pytest.mark.live_llm` and auto-skips when the endpoint isn't
-  up (see `testing-markers-live-llm`). Lives in `tests/e2e/`
-  alongside the other e2e tests.
+  - testing-categories-e2e-live-llm: The LLM provider surface —
+    `NpcActor` calling a real OpenAI-compatible endpoint. Tests speak
+    directly to the `NpcActor` class (no Character / Scene / REST /
+    SSE — those are covered by `e2e-http`); the process boundary
+    being exercised is the TCP hop to llama-server / vllm / ollama.
+    Carries `pytest.mark.e2e` AND `pytest.mark.live_llm` and auto-skips
+    when the endpoint isn't up (see `testing-markers-live-llm`). Lives
+    in `tests/e2e/` alongside the other e2e tests.
 - testing-categories-eval: Behavioral evals against rubrics. Today every
   actor is deterministic so evals reduce to property checks; once
   LLM-backed actors land, evals slot in as PyHamcrest matchers calling
