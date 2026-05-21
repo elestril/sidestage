@@ -1722,7 +1722,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "docspec-python" },
     { name = "httpx" },
+    { name = "markdown-it-py" },
     { name = "pydantic-to-typescript" },
     { name = "pydoc-markdown" },
     { name = "pyright" },
@@ -1746,7 +1748,9 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "docspec-python" },
     { name = "httpx" },
+    { name = "markdown-it-py" },
     { name = "pydantic-to-typescript" },
     { name = "pydoc-markdown" },
     { name = "pyright" },

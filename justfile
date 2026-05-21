@@ -113,6 +113,13 @@ build: _gen-types
 spec:
     uv run pydoc-markdown
 
+# Spec linter — parses specs/ + src/sidestage/ docstrings, enforces
+# format + link consistency (Groups A + B of spec-format rules). V1 is
+# opt-in: not wired into `just lint` while the corpus still has known
+# drift. Forward args for local iteration, e.g. `just speclint --show-ignored`.
+speclint *ARGS:
+    uv run speclint {{ARGS}}
+
 # -------- run --------
 
 # Hammer for orphaned vite processes — `just run` owns its own.
