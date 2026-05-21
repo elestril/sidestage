@@ -1,43 +1,30 @@
-import type { ChatMessage } from '../hooks/useEntity';
-import { useSendMessage } from '../hooks/useSendMessage';
-import type { CharacterResponse, EntityId, SceneResponse } from '../types_ext';
-import { MessageInput } from './MessageInput';
-import { MessageList } from './MessageList';
+// frontend-sceneentitypanel: ScenePanel widget (entity panel for `scene`).
+//
+// Reads its own data via the EntityRegistry. Does NOT receive
+// `entityCache` / `playerCharacterIds` / `messages` / `connected` as
+// props — those come from the cached entity and from `useConnected()`.
 
-export interface SceneEntityPanelProps {
-  campaignId: string;
-  entity: SceneResponse;
-  entityCache: Map<EntityId, CharacterResponse>;
-  playerCharacterIds: EntityId[];
-  messages: ChatMessage[];
-  connected: boolean;
+import { useConnected, useEntityRegistry } from '../hooks/useEntity';
+import { useSendMessage } from '../hooks/useSendMessage';
+import type { CachedScene } from '../entityRegistry';
+import { MessageInput } from '../components/MessageInput';
+import { MessageList } from '../components/MessageList';
+
+export interface ScenePanelProps {
+  entity: CachedScene;
 }
 
-/**
- * frontend-sceneentitypanel: scene header + chat below.
- *
- * - frontend-sceneentitypanel-header: name + connection indicator;
- *   body (when present) beneath the header.
- * - frontend-sceneentitypanel-list: MessageList with `messages` +
- *   `playerCharacterIds`.
- * - frontend-sceneentitypanel-input: MessageInput wired via
- *   useSendMessage(campaignId, entity.id, playerCharacterIds[0]).
- */
-export function SceneEntityPanel({
-  campaignId,
-  entity,
-  playerCharacterIds,
-  messages,
-  connected,
-}: SceneEntityPanelProps) {
-  const senderId = playerCharacterIds[0] ?? null;
+export function ScenePanel({ entity }: ScenePanelProps) {
+  const registry = useEntityRegistry();
+  const connected = useConnected();
+  const senderId = entity.player_character_ids[0] ?? null;
   const { send } = useSendMessage({
-    campaignId,
+    campaignId: registry.campaignId,
     sceneId: entity.id,
     senderId,
   });
 
-  const onSend = async (body: string) => {
+  const onSend = async (body: string): Promise<void> => {
     try {
       await send(body);
     } catch (err) {
@@ -68,7 +55,10 @@ export function SceneEntityPanel({
         ) : null}
       </header>
       <main className="flex-1 overflow-hidden">
-        <MessageList messages={messages} playerCharacterIds={playerCharacterIds} />
+        <MessageList
+          messages={entity.messages}
+          playerCharacterIds={entity.player_character_ids}
+        />
       </main>
       <footer className="border-t border-slate-200 bg-white p-2">
         <MessageInput connected={connected} onSend={onSend} />

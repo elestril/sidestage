@@ -1,6 +1,6 @@
 """llm-profile: typed loader for `<sidestage_dir>/llm_profiles/*.yaml`.
 
-Per `specs/llm-profiles.md`. Each YAML file in the directory IS a
+Per `specs/actors.md`. Each YAML file in the directory IS a
 profile; the filename stem is the profile name. The loader returns a
 `dict[str, LlmProfile]` keyed by stem.
 

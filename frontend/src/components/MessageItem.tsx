@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../hooks/useEntity';
+import type { ChatMessage } from '../types_ext';
 
 export interface MessageItemProps {
   message: ChatMessage;

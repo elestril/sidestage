@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { asEntityId, type EntityId, type SceneResponse } from '../types_ext';
-import { SceneBubble } from './SceneBubble';
+import { SceneBubble } from '../widgets/SceneBubble';
 
 export interface EntitySelectorProps {
   campaignId: string | null;

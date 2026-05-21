@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
 import logging
-from collections.abc import AsyncGenerator
 from enum import Enum
 from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,7 +22,6 @@ from sidestage.entity import (
     EntityType,
     UnresolvedEntityError,
 )
-from sidestage.events import EntityChanged
 from sidestage.instance_config import (
     from_env as _instance_config_from_env,
 )
@@ -39,6 +35,7 @@ from sidestage.llm_profile import LlmProfile, load_profiles
 from sidestage.message import Message
 from sidestage.npc_actor import NpcActor
 from sidestage.scene import SceneResponse
+from sidestage.ws import WsConnection
 
 # rest-api-get-entity: discriminated union returned by GET /entities/{eid}.
 EntityResponse = SceneResponse | CharacterResponse
@@ -129,51 +126,6 @@ _INLINE_HTML = """<!DOCTYPE html>
 </html>
 """
 
-_KEEPALIVE_INTERVAL_S = 15.0
-
-
-async def _sse_event_stream(
-    queue: asyncio.Queue,
-    request: Request | None = None,
-    on_close=None,
-    keepalive_interval_s: float = _KEEPALIVE_INTERVAL_S,
-) -> AsyncGenerator[bytes, None]:
-    """Yield SSE bytes from a queue of `EntityChanged` events.
-
-    rest-api-events-yield + sse-dataflow-event: emits each dequeued event as
-    `event: entity_changed\\ndata: <json>\\n\\n`.
-    rest-api-events-keepalive: emits `: keepalive` after `keepalive_interval_s`
-    of inactivity.
-    rest-api-events-cleanup: invokes `on_close` in the finally block.
-    """
-    try:
-        while True:
-            if request is not None and await request.is_disconnected():
-                break
-            try:
-                event = await asyncio.wait_for(
-                    queue.get(),
-                    timeout=keepalive_interval_s,
-                )
-            except TimeoutError:
-                yield b": keepalive\n\n"
-                continue
-            if isinstance(event, EntityChanged):
-                # events-subscription: serialize the in-process @dataclass
-                # event to the wire shape — entity reference becomes id,
-                # attributes pass through.
-                payload = {
-                    "entity_id": event.entity.id,
-                    "attributes": list(event.attributes),
-                }
-                data = json.dumps(payload)
-            else:
-                data = json.dumps(event)
-            yield f"event: entity_changed\ndata: {data}\n\n".encode()
-    finally:
-        if on_close is not None:
-            on_close()
-
 
 # ---------------------------------------------------------------------------
 # App
@@ -191,8 +143,8 @@ class App:
     through call signatures.
 
     HTTP route handlers are registered by `_setup_routes`; their per-route
-    invariants live in `specs/server.md` and `specs/rest-api.md`. Routes are
-    deliberately thin: they call domain methods and return the result.
+    invariants live in `specs/backend.md`. Routes are deliberately thin:
+    they call domain methods and return the result.
 
     .implements: cuj-startup-launch, cuj-startup-load, cuj-startup-ready
     .implemented-by: App.run, App.get_actor
@@ -492,48 +444,29 @@ class App:
             # rest-api-post-returns: 201 + MessageAccepted{scene_id, index}.
             return MessageAccepted(scene_id=scene.id, index=index)
 
-        # rest-api-get-entity-events: GET /api/campaigns/{cid}/entities/{eid}/events
-        @app.get("/api/campaigns/{cid}/entities/{entity_id}/events")
-        async def get_entity_events(
-            cid: str, entity_id: str, request: Request
-        ) -> Response:
-            """Per-entity SSE stream (per events.md). Resolves the campaign
-            and entity, routes the queue subscription through the
-            current-user's UserActor (per sse-dataflow-accept), yields each
-            EntityChanged as `event: entity_changed\\ndata: …\\n\\n`, calls
-            unsubscribe in finally on disconnect.
+        # ws-route-connection: WS /api/campaigns/{cid}/ws — multiplexed
+        # subscription endpoint per `specs/events.md#events-subscription`.
+        @app.websocket("/api/campaigns/{cid}/ws")
+        async def get_entity_ws(websocket: WebSocket, cid: str) -> None:
+            """Multiplexed WS for entity subscriptions and (Phase 2) mutations.
+
+            Frame schema lives in `specs/events.md`. This handler is a thin
+            wrapper around `WsConnection.run()`; per-frame invariants live
+            in `sidestage.ws`.
             """
-            # rest-api-events-503.
-            self._require_serving()
-            # rest-api-events-404: campaign or entity unknown.
+            # ws-dataflow-lameduck: close with 1013 (Try Again Later) while
+            # the server is still loading. Accept first so the client sees
+            # a proper close frame rather than a TCP reset.
+            if self.state == ServerState.LOADING:
+                await websocket.accept()
+                await websocket.close(code=1013)
+                return
             campaign = self.campaigns.get(cid)
             if campaign is None:
-                raise HTTPException(status_code=404, detail="campaign not found")
-            entity = campaign.factory.get(entity_id)
-            if entity is None:
-                raise HTTPException(status_code=404, detail="entity not found")
-            # rest-api-events-accept: route the queue through the user's actor.
-            queue: asyncio.Queue = asyncio.Queue()
-            user_id = App._current_user()
-            user_actor = App.get_actor(user_id)
-            # The current-user actor is always a UserActor (per
-            # `server-get-actor` mapping). The assertion both narrows the
-            # type for the .subscribe_to / .unsubscribe_from calls below
-            # AND surfaces a clear error if a misconfigured Actor class
-            # ever ends up on the "user" slot.
-            assert isinstance(user_actor, UserActor), (
-                f"current-user actor must be UserActor; got {type(user_actor).__name__}"
-            )
-            user_actor.subscribe_to(entity, queue)
-
-            # rest-api-events-cleanup: on disconnect, unsubscribe.
-            def _on_close() -> None:
-                user_actor.unsubscribe_from(entity, queue)
-
-            return StreamingResponse(
-                _sse_event_stream(queue, request, _on_close),
-                media_type="text/event-stream",
-            )
+                await websocket.accept()
+                await websocket.close(code=1008)  # policy violation: unknown cid
+                return
+            await WsConnection(campaign, websocket).run()
 
         # frontend-serve-mount + frontend-serve-spa: mount StaticFiles at `/`
         # AFTER all `/api/*` routes are registered. `html=True` provides SPA

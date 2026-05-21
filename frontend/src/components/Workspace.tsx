@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { EntityRegistry } from '../entityRegistry';
+import { EntityRegistryProvider } from '../hooks/useEntity';
 import { asEntityId, type CampaignResponse, type EntityId } from '../types_ext';
 import { EntityPanel } from './EntityPanel';
 import { EntitySelector } from './EntitySelector';
@@ -7,6 +9,10 @@ import { EntitySelector } from './EntitySelector';
 // callers pass nothing; defaults route to the real globals.
 export interface WorkspaceDeps {
   fetcher?: typeof fetch;
+  registryFactory?: (
+    campaignId: string,
+    deps: { fetcher?: typeof fetch },
+  ) => EntityRegistry;
 }
 
 export interface WorkspaceProps {
@@ -29,11 +35,16 @@ function brandCampaignResponse(raw: unknown): CampaignResponse {
  *
  * - frontend-workspace-component-bootstrap: fetches campaigns → campaign
  *   on mount and stores `campaignId`, `defaultSceneId`, initial `mainEntityId`.
+ * - frontend-workspace-component-registry: constructs the EntityRegistry
+ *   once `campaignId` is known and wraps children in the provider.
  * - frontend-workspace-component-layout: renders the static two-slot grid
  *   (selector left, main right).
  */
 export function Workspace({ deps = {} }: WorkspaceProps = {}) {
   const doFetch = deps.fetcher ?? fetch;
+  const registryFactory =
+    deps.registryFactory ??
+    ((cid, d) => new EntityRegistry(cid, { fetcher: d.fetcher }));
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [, setDefaultSceneId] = useState<EntityId | null>(null);
@@ -45,14 +56,12 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const bootstrap = async () => {
-      // frontend-workspace-bootstrap, step 1: list campaigns.
       const campaignsRes = await doFetch('/api/campaigns');
       if (!campaignsRes.ok) throw new Error(`GET /api/campaigns → ${campaignsRes.status}`);
       const campaignsRaw = (await campaignsRes.json()) as Array<{ name: string }>;
       if (campaignsRaw.length === 0) throw new Error('No campaigns loaded');
       const cid = campaignsRaw[0].name;
 
-      // step 2: read the campaign to find default_scene_id.
       const campaignRes = await doFetch(`/api/campaigns/${encodeURIComponent(cid)}`);
       if (!campaignRes.ok) throw new Error(`GET /api/campaigns/${cid} → ${campaignRes.status}`);
       const campaign = brandCampaignResponse(await campaignRes.json());
@@ -89,17 +98,28 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // frontend-workspace-component-registry: one EntityRegistry per
+  // campaignId; reconstructed if the id ever changes (today: never).
+  const registry = useMemo(() => {
+    if (!campaignId) return null;
+    return registryFactory(campaignId, { fetcher: doFetch });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId]);
+
+  // Tear down the WS on unmount or campaign switch so we don't leak.
+  useEffect(() => {
+    return () => {
+      registry?.close();
+    };
+  }, [registry]);
+
   const onOpenEntity = (id: EntityId) => {
-    // frontend-workspace-open-entity: idempotent on same id.
     if (id === mainEntityId) return;
     setMainEntityId(id);
   };
 
   return (
-    <div
-      data-testid="workspace"
-      className="flex h-full w-full bg-slate-50"
-    >
+    <div data-testid="workspace" className="flex h-full w-full bg-slate-50">
       <aside className="w-64 shrink-0 border-r border-slate-200 bg-white">
         <EntitySelector
           campaignId={campaignId}
@@ -108,12 +128,10 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
         />
       </aside>
       <main data-testid="main-slot" className="flex-1 overflow-hidden">
-        {campaignId && mainEntityId ? (
-          <EntityPanel
-            key={mainEntityId}
-            campaignId={campaignId}
-            entityId={mainEntityId}
-          />
+        {registry && mainEntityId ? (
+          <EntityRegistryProvider value={registry}>
+            <EntityPanel key={mainEntityId} entityId={mainEntityId} />
+          </EntityRegistryProvider>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-500">
             Select a scene from the left.

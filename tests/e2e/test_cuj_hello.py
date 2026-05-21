@@ -1,44 +1,45 @@
-"""E2E: alice posts via REST; bob's reply arrives via SSE; history check.
+"""E2E: alice POSTs via REST; bob's reply arrives via WS; history check.
 
-Same domain scenario as `test_events_dataflow` but driven through the REST
+Same domain scenario as `test_events_dataflow` but driven through the API
 boundary against a real uvicorn (per `testing-fixture-test-server`).
-Asserts the SSE wire delivery step (`events-dataflow-deliver`) plus the
+Asserts the WS wire delivery step (`events-dataflow-deliver`) plus the
 two CUJ steps (`cuj-hello-send`, `cuj-hello-respond`).
 
 .tests: cuj-hello-send, cuj-hello-respond, events-dataflow-deliver,
-        sse-dataflow-connect, rest-api-post-message, rest-api-get-entity-events
+        ws-dataflow-connect, ws-dataflow-subscribe, ws-dataflow-event,
+        rest-api-post-message
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from urllib.parse import quote, urlparse
 
 import httpx
 import pytest
+import websockets
 
 from sidestage.server import App
 
 pytestmark = pytest.mark.e2e
 
 
-async def _read_entity_changed_frames(response: httpx.Response, n: int) -> list[dict]:
-    """Read n `event: entity_changed` frames off an SSE stream.
+def _ws_url(base_url: str, path: str) -> str:
+    """Convert an http(s) test_server base URL to a ws(s) URL with `path`."""
+    p = urlparse(base_url)
+    scheme = "wss" if p.scheme == "https" else "ws"
+    return f"{scheme}://{p.netloc}{path}"
 
-    SSE frames are 3 lines: `event:`, `data:`, blank. Keepalive comments
-    (`: keepalive`) are skipped. Bounded by the enclosing pytest timeout.
-    """
+
+async def _read_entity_changed_frames(ws, n: int) -> list[dict]:
+    """Read n `entity_changed` frames off a WS, ignoring others."""
     frames: list[dict] = []
-    pending_event: str | None = None
-    async for raw in response.aiter_lines():
-        line = raw.rstrip("\r")
-        if line.startswith("event: "):
-            pending_event = line[len("event: ") :]
-        elif line.startswith("data: ") and pending_event == "entity_changed":
-            frames.append(json.loads(line[len("data: ") :]))
-            pending_event = None
-            if len(frames) >= n:
-                return frames
+    while len(frames) < n:
+        raw = await ws.recv()
+        payload = json.loads(raw)
+        if payload.get("op") == "entity_changed":
+            frames.append(payload)
     return frames
 
 
@@ -47,40 +48,29 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
     # `App.campaigns` keyed by `campaign.name`. Pull the id from the
     # iteration order rather than threading the Campaign object through.
     campaign_id = next(iter(test_app.campaigns))
+    cid_enc = quote(campaign_id, safe="")
     scene_id = "parlor"
-    events_url = f"/api/campaigns/{campaign_id}/entities/{scene_id}/events"
-    post_url = f"/api/campaigns/{campaign_id}/scenes/{scene_id}/messages"
-    messages_url = f"/api/campaigns/{campaign_id}/scenes/{scene_id}/messages"
+    ws_path = f"/api/campaigns/{cid_enc}/ws"
+    post_url = f"/api/campaigns/{cid_enc}/scenes/{scene_id}/messages"
+    messages_url = f"/api/campaigns/{cid_enc}/scenes/{scene_id}/messages"
 
     async with httpx.AsyncClient(base_url=test_server) as client:
+        async with websockets.connect(_ws_url(test_server, ws_path)) as ws:
+            # ws-dataflow-subscribe: register interest in the scene
+            # entity before the POST so we don't miss the emit.
+            await ws.send(json.dumps({"op": "subscribe", "entity_id": scene_id}))
 
-        async def stream_frames() -> tuple[int, str, list[dict]]:
-            async with client.stream("GET", events_url) as resp:
-                status = resp.status_code
-                ctype = resp.headers.get("content-type", "")
-                frames = await _read_entity_changed_frames(resp, n=2)
-                return status, ctype, frames
-
-        async def post_after_subscribed() -> httpx.Response:
-            # Brief yield so the SSE handler reaches subscribe_to before
-            # the POST fires the emit. Without this, the POST can race
-            # the subscription and the QueueListener misses event #1.
+            # Brief yield so the subscribe frame is processed before the
+            # POST fires the emit. Without this, the POST can race the
+            # subscription and the listener misses event #1.
             await asyncio.sleep(0.05)
-            return await client.post(
+
+            post_resp = await client.post(
                 post_url, json={"sender_id": "alice", "body": "Hi"}
             )
 
-        (status, ctype, frames), post_resp = await asyncio.gather(
-            stream_frames(), post_after_subscribed()
-        )
+            frames = await _read_entity_changed_frames(ws, n=2)
 
-        assert status == 200, (
-            f"sse-dataflow-connect: SSE subscribe MUST return 200; got status={status}"
-        )
-        assert "text/event-stream" in ctype, (
-            "sse-dataflow-connect: response content-type must be "
-            f"text/event-stream; got {ctype!r}"
-        )
         assert post_resp.status_code == 201, (
             "rest-api-post-message: POST /messages MUST return 201 on the "
             f"happy path; got status={post_resp.status_code} "
@@ -92,17 +82,19 @@ async def test_cuj_hello(test_app: App, test_server: str) -> None:
             f"the appended message; got {accepted!r}"
         )
         assert len(frames) == 2, (
-            "events-dataflow-deliver: SSE stream must deliver one "
+            "events-dataflow-deliver: WS stream must deliver one "
             "`entity_changed` frame per `Scene.append` (alice's input "
             f"plus bob's reply); got {len(frames)} frames"
         )
         for i, frame in enumerate(frames):
             assert frame == {
+                "op": "entity_changed",
                 "entity_id": "parlor",
                 "attributes": ["messages"],
             }, (
-                "events-dataflow-deliver: SSE frame payload for a Scene "
-                "message append MUST be `{entity_id, attributes}` with "
+                "events-dataflow-deliver: WS frame payload for a Scene "
+                "message append MUST be "
+                "`{op:'entity_changed', entity_id, attributes}` with "
                 f"`attributes=['messages']`; got frame[{i}]={frame!r}"
             )
 

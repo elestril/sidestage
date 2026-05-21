@@ -82,6 +82,16 @@ export interface EntityChangedEvent {
 // system enforces the brand throughout the app.
 export const asEntityId = (s: string): EntityId => s as EntityId;
 
-// frontend-types-discriminated: ServerEvent union for SSE event payloads.
+// frontend-types-discriminated: ServerEvent union for WS event payloads.
 // Today only one variant exists; the union is exhaustive on `type`.
 export type ServerEvent = EntityChangedEvent & { type: 'entity_changed' };
+
+// frontend-state-chatmessage: rendered message with the sender resolved
+// against the registry cache. Produced by the Scene widget's per-message
+// sender-resolution step; consumed by MessageList / MessageItem.
+export interface ChatMessage {
+  scene_id: EntityId;
+  index: number;
+  sender: CharacterResponse;
+  body: string;
+}

@@ -1,6 +1,6 @@
 """instance-config: typed config for a sidestage instance.
 
-Per `specs/instance-config.md`. Resolution precedence:
+Per `specs/backend.md`. Resolution precedence:
 CLI overrides > env vars (`SIDESTAGE_*`) > `<sidestage_dir>/sidestage.yaml` > defaults.
 
 The YAML path depends on `sidestage_dir`, which is itself a config field —
@@ -53,7 +53,7 @@ class InstanceConfig(BaseSettings):
     """instance-config-llm-profile: Selects which YAML under
     `<sidestage_dir>/llm_profiles/` defines this instance's LLM
     topology. Loaded by `sidestage.llm_profile.load_profiles` at
-    runtime (per `specs/llm-profiles.md`)."""
+    runtime (per `specs/actors.md`)."""
 
 
 def _load_yaml(sidestage_dir: str) -> dict[str, Any]:

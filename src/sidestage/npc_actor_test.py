@@ -1,4 +1,4 @@
-"""Unit tests for NpcActor (per `specs/actor.md` npc-actor section).
+"""Unit tests for NpcActor (per `specs/actors.md` npc-actor section).
 
 litellm is patched per-test — real network calls would blow the 2s
 timeout. The integration tier covers the live LLM path (gated by

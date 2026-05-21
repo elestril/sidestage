@@ -61,6 +61,7 @@ filterwarnings = [
     "error",
     "ignore:websockets.legacy is deprecated.*:DeprecationWarning",
     "ignore:websockets\\.server\\.WebSocketServerProtocol is deprecated.*:DeprecationWarning",
+    "ignore:remove second argument of ws_handler:DeprecationWarning",
     # litellm starts a background coroutine (`Logging.async_success_handler`)
     # for telemetry; when the event loop closes between tests the task gets
     # garbage-collected while pending, raising an unraisable warning that

@@ -1,6 +1,6 @@
 """npc-actor: LLM-backed Actor.
 
-Per `specs/actor.md` (npc-actor section). Singleton owned by App; one
+Per `specs/actors.md` (npc-actor section). Singleton owned by App; one
 ModelEntry resolved from the active profile's `default` role at
 construction. `respond()` is one-shot — full completion, one Message
 back, no streaming.

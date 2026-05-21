@@ -1,6 +1,6 @@
 """actor: Edge-state holder for a Character.
 
-Per `specs/actor.md`. Actor is a runtime singleton owned by `App` and
+Per `specs/actors.md`. Actor is a runtime singleton owned by `App` and
 holds external-state — LLM connections, SSE subscriptions, future auth.
 Character carries world-data; Actor carries the I/O.
 """

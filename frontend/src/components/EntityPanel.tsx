@@ -1,9 +1,13 @@
+// frontend-entitypanel: dispatcher over the widget registry.
+//
+// Reads the entity from the registry via `useEntity` and renders the
+// matching entity-typed panel from `widgets/registry`.
+
 import { useEntity } from '../hooks/useEntity';
 import type { EntityId } from '../types_ext';
-import { SceneEntityPanel } from './SceneEntityPanel';
+import { widgets } from '../widgets/registry';
 
 export interface EntityPanelProps {
-  campaignId: string;
   entityId: EntityId;
 }
 
@@ -22,21 +26,8 @@ function UnknownEntityPanel({ type }: UnknownEntityPanelProps) {
   );
 }
 
-/**
- * frontend-entitypanel: dispatcher for entity-typed panels.
- *
- * - frontend-entitypanel-uses-useentity: per-panel bootstrap + SSE.
- * - frontend-entitypanel-dispatch: render SceneEntityPanel for
- *   `entity.type === 'scene'`; UnknownEntityPanel otherwise.
- * - frontend-entitypanel-fallback: explicit placeholder names the missing
- *   panel type.
- */
-export function EntityPanel({ campaignId, entityId }: EntityPanelProps) {
-  const { entity, entityCache, playerCharacterIds, messages, connected } = useEntity({
-    campaignId,
-    entityId,
-  });
-
+export function EntityPanel({ entityId }: EntityPanelProps) {
+  const { entity } = useEntity(entityId);
   if (!entity) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -45,17 +36,13 @@ export function EntityPanel({ campaignId, entityId }: EntityPanelProps) {
     );
   }
 
+  // frontend-entitypanel-dispatch: look up the widget for entity.type.
   if (entity.type === 'scene') {
-    return (
-      <SceneEntityPanel
-        campaignId={campaignId}
-        entity={entity}
-        entityCache={entityCache}
-        playerCharacterIds={playerCharacterIds}
-        messages={messages}
-        connected={connected}
-      />
-    );
+    const entry = widgets.scene;
+    if (entry) return <entry.Panel entity={entity} />;
+  } else if (entity.type === 'character') {
+    const entry = widgets.character;
+    if (entry) return <entry.Panel entity={entity} />;
   }
 
   return <UnknownEntityPanel type={entity.type} />;

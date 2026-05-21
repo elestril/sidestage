@@ -1,11 +1,40 @@
 import { useEffect, useRef } from 'react';
-import type { ChatMessage } from '../hooks/useEntity';
-import type { EntityId } from '../types_ext';
+import { useEntity } from '../hooks/useEntity';
+import type { EntityId, MessageModel } from '../types_ext';
 import { MessageItem } from './MessageItem';
 
 export interface MessageListProps {
-  messages: ChatMessage[];
+  messages: MessageModel[];
   playerCharacterIds: EntityId[];
+}
+
+interface MessageRowProps {
+  message: MessageModel;
+  isOwn: boolean;
+}
+
+/**
+ * frontend-messagelist-row: per-message container.
+ *
+ * Resolves the sender via `useEntity(message.sender_id)`; refcount lives
+ * with this component's lifetime in the registry. When the sender hasn't
+ * been hydrated yet the row renders null (skeleton); the next render
+ * after hydration fills the slot.
+ */
+function MessageRow({ message, isOwn }: MessageRowProps) {
+  const { entity: sender } = useEntity(message.sender_id);
+  if (!sender || sender.type !== 'character') return null;
+  return (
+    <MessageItem
+      message={{
+        scene_id: message.scene_id,
+        index: message.index,
+        sender,
+        body: message.body,
+      }}
+      isOwn={isOwn}
+    />
+  );
 }
 
 /**
@@ -35,10 +64,10 @@ export function MessageList({ messages, playerCharacterIds }: MessageListProps) 
     <div ref={scrollRef} className="h-full overflow-y-auto px-4 py-3">
       <ul data-testid="message-list" className="flex flex-col gap-2">
         {messages.map((m) => (
-          <MessageItem
+          <MessageRow
             key={`${m.scene_id}:${m.index}`}
             message={m}
-            isOwn={ownIds.has(m.sender.id as unknown as string)}
+            isOwn={ownIds.has(m.sender_id as unknown as string)}
           />
         ))}
       </ul>

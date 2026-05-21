@@ -1,6 +1,6 @@
 """scene: The active game scene.
 
-Per `specs/scene.md`. Scene is **pure data + event source** — `append`
+Per `specs/entity-model.md`. Scene is **pure data + event source** — `append`
 records a message and emits `EntityChanged`; reactions are listener-driven
 (per `events.md`). No `dispatch`, no `_respond` orchestration on Scene.
 """

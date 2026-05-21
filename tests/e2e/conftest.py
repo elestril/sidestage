@@ -37,6 +37,13 @@ async def test_server(test_app: App):
         log_level="error",
         loop="asyncio",
         lifespan="off",
+        # Multiplexed WS lives at /api/campaigns/{cid}/ws per
+        # `specs/events.md`. Use h11 + websockets explicitly — httptools
+        # (the default with uvicorn[standard]) rejects some WS handshakes
+        # with HTTP 400; the pure-Python h11 parser is lenient and works
+        # cleanly alongside the websockets WS implementation.
+        http="h11",
+        ws="websockets",
     )
     server = uvicorn.Server(config)
     serve_task = asyncio.create_task(server.serve())

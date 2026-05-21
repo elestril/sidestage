@@ -6,10 +6,9 @@ import react from '@vitejs/plugin-react';
 // resolve consistently regardless of invocation cwd.
 // frontend-build-output: outDir is absolute, pointing at the FastAPI static
 // mount in src/sidestage/static.
-// frontend-vite-proxy: dev server proxies /api (REST + SSE) to FastAPI on :8000.
-//   NOTE: spec line 12/33 mentions a /ws proxy, but the current architecture
-//   is REST + SSE — there is no WebSocket. Proxying /api covers both REST and
-//   the SSE stream at /api/events.
+// frontend-vite-proxy: dev server proxies /api (REST + WebSocket) to FastAPI
+//   on :8000. The multiplexed WS at /api/campaigns/{cid}/ws goes through this
+//   same proxy with ws: true.
 export default defineConfig({
   plugins: [react()],
   root: path.resolve(__dirname),
@@ -22,18 +21,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        // SSE: keep the connection open and stream as-is.
-        ws: false,
-        configure: (proxy) => {
-          proxy.on('proxyRes', (proxyRes) => {
-            // Disable response buffering for text/event-stream so SSE frames
-            // reach the browser without delay.
-            const ct = proxyRes.headers['content-type'] ?? '';
-            if (ct.includes('text/event-stream')) {
-              proxyRes.headers['cache-control'] = 'no-cache';
-            }
-          });
-        },
+        // WebSocket proxy: forwards Upgrade requests to FastAPI's WS route.
+        ws: true,
       },
     },
   },
