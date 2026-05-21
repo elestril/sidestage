@@ -1,11 +1,11 @@
-# events: EntityChanged pub/sub
+# events: EntityChanged pub/sub + WS frame schema
 
 Entities emit `EntityChanged` events. A `Listener` — anything implementing
-`notify(event)` — subscribes to receive them. Every Entity is a Listener
-(default no-op `notify`); non-Entity protocol-satisfiers (e.g. an SSE
-handler's queue bridge) work too.
+`notify(event)` — subscribes to receive them. Every Entity is itself a
+Listener (default no-op `notify`); non-Entity protocol-satisfiers (e.g.
+a WS handler's queue bridge) work too.
 
-System state (server lifecycle, dep health, SSE handshake) is plumbing —
+System state (server lifecycle, dep health, WS handshake) is plumbing —
 logged, not events.
 
 ## events-event-changed: EntityChanged
@@ -13,18 +13,72 @@ logged, not events.
 ```python
 @dataclass
 class EntityChanged:
-    entity: Entity         # the entity that mutated; the listener's source of truth
-    attributes: list[str]  # names of attributes that changed
+    entity: Entity                                    # listener's source of truth
+    attributes: list[str]                             # names of attributes that changed
+    deltas: dict[str, AttributeDelta] = field(default_factory=dict)
 ```
 
 In-process the event carries the entity reference directly — listeners
 read fresh state via `event.entity.<attr>`. The `attributes` list tells
-the listener WHICH attributes changed so it can decide whether to react.
-Today's only emit point: `Scene.append` fires
-`EntityChanged(entity=self, attributes=["messages"])`.
+the listener WHICH attributes changed. The optional `deltas` map
+carries the per-attribute payload itself (new scalar value, appended
+collection items, etc.) so projections can apply the change directly
+without re-reading the entity over REST (per
+`events-attribute-deltas`). Today's only emit point is `Scene.append`:
+`EntityChanged(entity=self, attributes=["messages"],
+deltas={"messages": AppendDelta(items=[msg])})`. Plain `@dataclass`,
+NOT a Pydantic model — wire serialisation happens at the WS boundary
+(per `events-subscription`).
 
-`EntityChanged` is a plain `@dataclass`, NOT a Pydantic model. Wire
-serialization happens at the SSE boundary (per `events-subscription`).
+## events-attribute-deltas: Per-attribute delta payloads
+
+Notifications carry the data, not a fetch hint. Each entry in
+`deltas` is a typed payload that a projection can apply directly to
+its cached entity state.
+
+```python
+@dataclass
+class ScalarDelta:
+    value: Any                       # new value of a scalar attribute
+
+@dataclass
+class AppendDelta:
+    items: list                      # items appended at the tail
+
+@dataclass
+class InsertDelta:
+    items: list[tuple[int, Any]]     # (index, item) pairs at insert positions
+
+@dataclass
+class RemoveDelta:
+    indices: list[int]               # pre-removal positions of removed items
+
+AttributeDelta = ScalarDelta | AppendDelta | InsertDelta | RemoveDelta
+```
+
+- events-attribute-deltas-self-contained: A delta carries everything
+  the projection needs to apply the change. There is no follow-up
+  fetch on the steady-state path. Initial state arrives in the
+  `subscribed` reply; on reconnect, the client re-issues subscribe
+  to get a fresh snapshot (per [[frontend]]
+  `frontend-campaign-reconnect`).
+- events-attribute-deltas-optional: The `deltas` map is optional —
+  emitters MAY omit it for an attribute, in which case a projection
+  treating its cache as authoritative falls back to "re-read the
+  entity over REST." Producers SHOULD emit a delta; the no-delta
+  fallback is for emit points that don't yet know how to describe
+  their change (or for which a full re-read is cheaper than
+  describing the diff).
+- events-attribute-deltas-append-today: `Scene.append` is the only
+  emit point today and produces `AppendDelta(items=[msg.Model()])`.
+  Future collection mutators (`scene.edit_message`,
+  `scene.redact_message`) emit `InsertDelta` / `RemoveDelta` /
+  `ReplaceDelta` as their semantics demand.
+- events-attribute-deltas-references: For attributes that hold
+  `EntityId` references (e.g. `Scene.character_ids`), the delta
+  carries the id itself; the projection separately fetches or
+  subscribes to the referenced entity. Cross-entity hydration is
+  not the delta's job.
 
 ## events-protocol: Listener
 
@@ -33,23 +87,23 @@ class Listener(Protocol):
     def notify(self, event: EntityChanged) -> None | Awaitable[None]: ...
 ```
 
-- events-protocol-sync-or-async: `notify` may be either sync or async.
-  The bus wraps each listener invocation in a task (per
-  `events-async-tasks`); a slow or blocking listener cannot stall other
-  listeners or the emitter.
-- events-protocol-event-self-contained: The event carries everything the
-  listener needs — `event.entity` for fresh state, `event.attributes` for
-  the changed-attribute list.
+- events-protocol-sync-or-async: `notify` may be sync or async. The bus
+  wraps each invocation in a task; a slow listener cannot stall others
+  or the emitter.
+- events-protocol-event-self-contained: The event carries everything
+  the listener needs — `event.entity` for fresh state,
+  `event.attributes` for the changed-attribute list.
 
-## events-async-tasks: Per-listener tasks and idle
+## events-async-tasks: Per-listener tasks
 
 `Entity._emit` does NOT call `listener.notify` directly. It wraps each
-listener invocation in a tracked task on the emitting entity:
+listener invocation in a tracked task so per-listener isolation holds
+and the cascade can be awaited from tests:
 
 ```python
 def _emit(self, event):
     for listener in self._listeners:
-        self.spawn_task(self._invoke_listener(listener, event))
+        self._spawn_task(self._invoke_listener(listener, event))
 
 async def _invoke_listener(self, listener, event):
     try:
@@ -60,121 +114,158 @@ async def _invoke_listener(self, listener, event):
         logger.exception("listener %r raised", listener)
 ```
 
-The wrapping gives per-listener isolation, lets listeners be sync or
-async transparently, and tracks every reaction's task lifetime on the
-emitting entity for `idle()`.
-
-```python
-def spawn_task(self, coro) -> asyncio.Task:
-    """Track a task on this entity. The done-callback removes it from
-    `_pending_tasks` and logs `task.exception()` if non-None."""
-
-async def idle(self) -> None:
-    """Loop until `_pending_tasks` is empty. Each iteration awaits
-    `gather(*pending, return_exceptions=True)`. Bounded by a small
-    timeout to fail fast on wedges. Used by tests (per `testing-runner`)
-    to wait for cascading reactions to settle."""
-```
-
-- events-async-tasks-spawn: `Entity.spawn_task(coro)` registers and
-  returns the task; done-callback handles cleanup and exception logging.
-- events-async-tasks-idle: `Entity.idle()` is a test-only primitive;
-  production never calls it. Awaits cascading reactions.
+- events-async-tasks-private: `_spawn_task` is a private implementation
+  detail of `_emit`. Production listeners that need additional fan-out
+  use `asyncio.create_task` like any other async Python code.
+- events-async-tasks-idle: `Scene.idle()` is the test-only primitive
+  (lives on Scene because Scene is where the cascade depth actually
+  matters; Entity has no `idle`). Awaits pending tasks via
+  `gather(..., return_exceptions=True)` and re-raises unexpected
+  exceptions so failures surface.
   - .tested-by: test_events_dataflow
-- events-async-tasks-listener-spawn: Listeners can call
-  `event.entity.spawn_task(coro)` for additional fan-out work beyond
-  their own `notify` (rare but useful). No back-references required.
 
 ## events-patterns: Subscription and direct push
 
 - events-pattern-subscription: `entity.subscribe(listener)` registers;
-  `entity._emit(event)` fans out by calling `listener.notify(event)` on
-  each subscriber.
+  `entity._emit(event)` fans out by calling each subscriber's `notify`.
   - .tested-by: test_events_dataflow
 - events-pattern-subscription-lifecycle: The caller of `subscribe` owns
   the listener's lifetime. Subscriptions whose lifetime matches the
   entity (e.g. Scene subscribing its characters in `__init__`) need no
-  explicit cleanup; they die when the entity's `_listeners` list is GC'd.
-  Subscriptions that should end before the entity (e.g. SSE handlers
-  whose request ends) MUST `unsubscribe` explicitly. For SSE specifically,
-  the per-user `UserActor` owns the QueueListener's lifecycle — the SSE
-  handler calls `user_actor.subscribe_to(entity, queue)` and
-  `user_actor.unsubscribe_from(entity, queue)` (in `try/finally`). Notify
-  still flows direct entity → QueueListener; UserActor is bookkeeping only.
-- events-pattern-direct-push: `target.notify(event)` invoked directly —
-  no subscription. Used for character-to-character whispers and other
-  targeted notifications. (Future event types beyond `EntityChanged` may
-  use this pattern.)
+  explicit cleanup. Subscriptions that end before the entity (e.g. WS
+  connections) MUST `unsubscribe` explicitly — the per-socket
+  `WsConnection` does this on `unsubscribe` frames and on socket close.
+- events-pattern-direct-push: `target.notify(event)` invoked directly,
+  no subscription. Used for targeted notifications (e.g. character-to
+  -character whispers, future event types beyond `EntityChanged`).
 
-## events-subscription: SSE wire surface
+## events-subscription: WS frame schema
+
+The WebSocket is the **only** sync protocol. One connection per
+browser tab at `WS /api/campaigns/{cid}/ws`, multiplexed for every
+entity the client is observing. The handler is `WsConnection` (per
+[[backend]] `backend-ws`). REST endpoints exist as a read-only
+debug/ops mirror (per [[backend]] `backend-rest-debug`) but the FE
+never reads from them.
+
+**Client → server:**
 
 ```
-GET /api/campaigns/{cid}/entities/{eid}/events
+{ "op": "subscribe",     "entity_ids": [...], "request_id": "..." }
+{ "op": "unsubscribe",   "entity_ids": [...] }
+{ "op": "entity_action", "entity_id": "...", "action": "speak",
+                         "kwargs": { "body": "Hi" },
+                         "request_id": "..." }
 ```
 
-Frame: `event: entity_changed\ndata: {"entity_id": "...", "attributes": [...]}\n\n`.
+**Server → client:**
 
-The SSE handler serializes the in-process event by reading `event.entity.id`
-and `event.attributes` — JSON-shaping happens at the wire boundary, not
-in the event class. One connection per entity; no global firehose today.
+```
+{ "op": "subscribed",     "request_id": "...",
+                          "states": [{ "entity_id": "...", "model": {...} }, ...] }
+{ "op": "entity_changed", "entity_id": "...", "attributes": [...],
+                          "deltas": { "messages": { "kind": "append", "items": [...] } } }
+{ "op": "ack",            "request_id": "..." }
+{ "op": "error",          "request_id": "...", "code": "...", "message": "..." }
+```
+
+The `subscribed` reply carries the **current state** of each
+requested entity (its `Entity.Model` payload) plus opens the
+subscription. No separate "get" op exists; subscribe is the read
+operation.
+
+The `deltas` field on `entity_changed` is optional. Each value is a
+tagged record (`kind` plus kind-specific fields) per
+`events-attribute-deltas`:
+
+```
+{ "kind": "scalar", "value": <any> }
+{ "kind": "append", "items": [...] }
+{ "kind": "insert", "items": [[<int>, <any>], ...] }
+{ "kind": "remove", "indices": [<int>, ...] }
+```
+
+- events-subscription-fanout: Fan-out on the server stays per-entity
+  (each `QueueListener` is registered on a single entity); the socket
+  multiplexes by `entity_id` in the frame envelope.
+- events-subscription-initial-state: `subscribe` returns the initial
+  state of every requested entity in its `subscribed` reply, then
+  streams `entity_changed` frames for subsequent mutations. Clients
+  apply the initial state, then apply each delta as it arrives.
+  Unsubscribe is fire-and-forget — no ack.
+- events-subscription-entity-action: `entity_action` is the single
+  wire frame for invoking any RPC-callable method on any Entity. The
+  server resolves the entity, validates the action against the
+  subclass's `@action` registry (per [[backend]]
+  `backend-action-decorator`), awaits
+  `getattr(entity, action)(**kwargs)`, then sends a matching `ack`
+  (no payload) or `error` frame keyed by `request_id`. `request_id`
+  is an opaque client-generated string (uuid recommended).
+- events-subscription-serialization: The handler serialises the
+  in-process `EntityChanged` by reading `event.entity.id`,
+  `event.attributes`, and `event.deltas` into the `entity_changed`
+  frame. JSON shaping lives at the wire boundary, not in the event
+  class.
 
 ## events-multi-window: Worked example — DM in two scenes
 
-The "DM" character is a member of scene A and scene B. The DM player opens
-two browser windows, one watching each scene.
+The "DM" character is a member of scene A and scene B. The DM player
+opens two browser tabs, one per scene.
 
-Subscriptions formed at runtime:
 - `scene_a.subscribe(dm)` and `scene_b.subscribe(dm)` — wired by each
   scene's constructor.
-- Window 1 → `GET .../entities/{scene_a_id}/events` → handler resolves
-  `App.get_actor(current_user)`, calls `user_actor.subscribe_to(scene_a, queue_1)`.
-  UserActor creates `QueueListener(queue_1)`, calls `scene_a.subscribe(listener)`,
-  tracks the listener.
-- Window 2 → `GET .../entities/{scene_b_id}/events` → same dance with
-  `scene_b` and `queue_2`.
+- Tab 1 opens its WS, sends `subscribe(scene_a_id)`. WsConnection_1
+  constructs `QueueListener(queue_1)` and calls
+  `scene_a.subscribe(listener)`.
+- Tab 2 opens its own WS, subscribes to `scene_b_id`. Different socket,
+  different queue.
 
 Scene A emits an `EntityChanged`:
-- DM character's `notify` runs (UserActor.respond is None — no auto-response).
-- QueueListener 1 enqueues; window 1's stream yields the event.
-- Window 2 is not subscribed to scene A → receives nothing.
+- DM character's `notify` runs.
+- QueueListener_1 enqueues; tab 1's socket sends the `entity_changed`
+  frame.
+- Tab 2's socket is not subscribed to scene A → receives nothing, even
+  though the DM is a member of both scenes.
 
 No client-side filtering, no cross-scene leakage.
 
 ## events-errors: Exception handling
 
 - events-errors-listener-isolation: Each listener runs inside its own
-  task (per `events-async-tasks`); the per-listener wrapper catches
-  `Exception` and logs. One bad listener cannot abort the fanout. Emit
-  never propagates to the emitter — state mutation has already committed.
-- events-errors-spawned-task: All tasks created via `Entity.spawn_task`
-  carry a done-callback that logs `task.exception()` if non-None. This
-  covers both the bus-spawned per-listener tasks AND any tasks listeners
-  spawn explicitly (rare). Failed tasks never die silently.
-- events-errors-slow-consumer: A QueueListener that hits `QueueFull` (slow
-  client) drops the event for that consumer and logs. (Future: disconnect
-  on repeated drops.)
-- events-errors-test-visibility: `Scene.idle()` awaits pending tasks via
-  `gather(*tasks, return_exceptions=True)` and re-raises unexpected
-  exceptions so test failures observe the underlying error.
-- events-errors-no-policy: The event bus does NOT auto-unsubscribe and
-  does NOT retry. Both are policy decisions — they live in the listener
-  (which can call `entity.unsubscribe(self)` from inside its `notify`) or
-  in the listener's owner (the SSE handler's request loop calls
-  `unsubscribe_from` on disconnect). The bus stays dumb so it doesn't
-  grow brittle exception-type pattern matching.
+  task; the per-listener wrapper catches `Exception` and logs. One bad
+  listener cannot abort the fanout. Emit never propagates to the
+  emitter — state mutation has already committed.
+- events-errors-spawned-task: Tasks created via `_spawn_task` carry a
+  done-callback that logs `task.exception()` if non-None. Failed tasks
+  never die silently.
+- events-errors-slow-consumer: A `QueueListener` that hits `QueueFull`
+  drops the event for that consumer and logs. (Future: disconnect on
+  repeated drops.)
+- events-errors-action-failure: An `entity_action` whose method raises
+  is caught by the WS dispatcher and surfaces as an `error` frame
+  carrying `request_id` + a code/message. The exception is logged;
+  Campaign state is unaffected (the method either committed before
+  raising or didn't commit at all — same in-process semantics).
+- events-errors-no-policy: The bus does NOT auto-unsubscribe and does
+  NOT retry. Both are policy decisions — they live in the listener
+  (it can call `entity.unsubscribe(self)` from inside `notify`) or in
+  the listener's owner (the `WsConnection` unsubscribes on socket
+  close).
 
 ## events-dataflow
 
-1. events-dataflow-mutate: Entity state mutates.
+1. events-dataflow-mutate: Entity state mutates (typically inside an
+   `@action`-decorated method).
    - .tested-by: test_events_dataflow
-2. events-dataflow-emit: Entity calls `self._emit(EntityChanged(entity=self, attributes=[...]))`.
+2. events-dataflow-emit: Entity calls
+   `self._emit(EntityChanged(entity=self, attributes=[...]))`.
    - .tested-by: test_events_dataflow
-3. events-dataflow-fan-out: `_emit` wraps each listener call in a tracked
-   task via `self.spawn_task(self._invoke_listener(listener, event))`.
-   The task catches per-listener exceptions and awaits async listeners.
+3. events-dataflow-fan-out: `_emit` wraps each listener call in a
+   tracked task via `self._spawn_task(self._invoke_listener(...))`.
    - .tested-by: test_events_dataflow
-4. events-dataflow-deliver: SSE-handler `QueueListener.notify` does
-   `queue.put_nowait(event)`; the response generator yields
-   `event: entity_changed\ndata: {"entity_id": ..., "attributes": [...]}\n\n`.
-   - .implemented-by: rest-api-get-entity-events
+4. events-dataflow-deliver: A `QueueListener` registered by a
+   `WsConnection` does `queue.put_nowait(event)`; the connection's
+   send loop drains the queue and emits an
+   `{op:'entity_changed', entity_id, attributes}` frame on the socket.
+   - .implemented-by: backend-ws
    - .tested-by: cuj-hello-browser

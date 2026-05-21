@@ -1,464 +1,230 @@
-# frontend: React workspace UI
+# frontend: React data layer (Campaign, proxies, hooks)
 
-The Sidestage frontend is a React + TypeScript + Tailwind single-page
-application built with Vite. In development, Vite's dev server proxies `/api`
-to FastAPI. In production, FastAPI serves the built static bundle.
+React + TypeScript + Tailwind SPA built with Vite. This file specs the
+**data layer**: a single `Campaign` singleton per browser tab mirrors
+the backend Campaign, owning the lone multiplexed WebSocket and the
+shared cache of hydrated entities. Components ask the FE Campaign for
+an entity and receive a promise; FE entity proxies expose
+`@action`-decorated methods that serialise as `EntityAction` frames.
 
-The SPA is organised as a **workspace** that hosts **panels**. A panel is
-either bound to a single Entity (an *entity panel*, live-subscribed to that
-entity's `entity_changed` stream) or carries no entity binding (a *workspace
-panel*, e.g. the selector). Every Entity additionally has a compact
-**bubble** renderer used by selectors and lists.
+- frontend-no-rest: The FE issues **no HTTP requests to `/api/*`** —
+  only the static SPA bundle at `/`. Every Campaign operation
+  (resolve, subscribe, mutate) flows through the single WebSocket.
+  The REST endpoints documented in [[backend]] `backend-rest-debug`
+  exist for human/ops inspection only; a `grep` guard on
+  `frontend/src/` enforces zero `/api/` fetches.
+
+The **UI layer** — workspace shell and entity-typed widgets — is
+specced separately in [[frontend-layout]].
 
 ## frontend-project: Project layout
 
 ```
 frontend/
-|- package.json
-|- vite.config.ts      proxy /api → localhost:8000 in dev
-|- tailwind.config.ts
-|- index.html
-|- src/
-   |- main.tsx
-   |- types.ts                wire format types + EntityId brand
-   |- types_ext.ts            branded EntityId + EntityResponse union
-   |- hooks/
-   |  |- useEntity.ts         per-panel bootstrap + SSE
-   |  |- useSendMessage.ts
-   |- components/
-      |- App.tsx              renders Workspace
-      |- Workspace.tsx        campaign bootstrap + two-slot layout
-      |- EntitySelector.tsx   workspace panel: filtered bubble list
-      |- SceneBubble.tsx      compact Scene snapshot
-      |- EntityPanel.tsx      dispatcher on entity.type
-      |- SceneEntityPanel.tsx scene header + chat
-      |- MessageList.tsx      Scene panel internal
-      |- MessageItem.tsx      Scene panel internal
-      |- MessageInput.tsx     Scene panel internal
+├── package.json
+├── vite.config.ts              # /api proxy → :8000 (REST + WS)
+├── index.html
+└── src/
+    ├── main.tsx
+    ├── types.ts                # generated from Entity.Model subclasses; gitignored
+    ├── types_ext.ts            # branded EntityId; discriminated unions
+    ├── campaign.ts             # Campaign singleton + WS client
+    ├── entities/
+    │   ├── Entity.ts           # base proxy class
+    │   ├── Character.ts        # Character proxy with @action speak
+    │   └── Scene.ts            # Scene proxy
+    ├── hooks/
+    │   └── useEntity.ts        # registry-backed reactive hook
+    ├── widgets/
+    │   ├── registry.tsx        # per-type widget table
+    │   ├── ScenePanel.tsx
+    │   └── SceneBubble.tsx
+    └── components/
+        ├── App.tsx
+        ├── Workspace.tsx       # campaign bootstrap + Campaign provider
+        ├── EntitySelector.tsx
+        ├── EntityPanel.tsx
+        ├── MessageList.tsx
+        ├── MessageItem.tsx
+        └── MessageInput.tsx
 ```
 
-Build output: `frontend/dist/` copied to `src/sidestage/static/` by the
-production build step.
-
-- frontend-vite-root: `vite.config.ts` sets `root` to `path.resolve(__dirname)` so all paths resolve relative to the config file regardless of invocation directory.
-- frontend-vite-proxy: `vite.config.ts` proxies `/api` to `http://localhost:8000` with `changeOrigin: true`. SSE works through this proxy without special config.
-- frontend-build-output: `vite.config.ts` sets `build.outDir` to `path.resolve(__dirname, '../src/sidestage/static')` — absolute, invocation-independent.
-
-## frontend-serve: Production static serving
-
-- frontend-serve-mount: `App._setup_routes()` mounts `StaticFiles` at `/` serving
-  `src/sidestage/static/` when that directory exists, replacing the inline HTML fallback.
-- frontend-serve-spa: The mount uses `html=True` so all non-API paths return `index.html`
-  (standard SPA routing support).
-- .implements: cuj-startup-ready
-
-## frontend-types: TypeScript wire types
-
-`frontend/src/types.ts` is **auto-generated** and **gitignored** — it is
-recreated from the Pydantic models on every consumer invocation (typecheck,
-test, build, dev-server). It is never hand-edited.
-
-- frontend-types-generated: `frontend/src/types.ts` is produced by
-  `just _gen-types`, which runs
-  `uv run pydantic2ts --module sidestage.server --output frontend/src/types.ts
-  --json2ts-cmd frontend/node_modules/.bin/json2ts`. Every consumer
-  recipe (`_tsc`, `test-fe`, `build`, `_vite-up`) declares `_gen-types`
-  as a dependency, so the file is always fresh against the current
-  backend wire shape.
-- frontend-types-gitignored: `frontend/src/types.ts` is listed in
-  `.gitignore`. It does NOT live in version control; the source of
-  truth is the Pydantic models. A fresh clone gets a working file on
-  the first `just <consumer>` invocation.
-- frontend-types-source: The authoritative source is the Pydantic
-  `BaseModel` subclasses reachable from `sidestage.server`:
-  `CampaignResponse`, `CharacterResponse`, `SceneResponse`,
-  `MessageRequest`, `MessageAccepted`. Two wire types pydantic2ts
-  cannot surface (`MessageModel` — a nested `Message.Model`;
-  `EntityChangedEvent` — a `@dataclass`, not Pydantic) are hand-rolled
-  in `types_ext.ts` and must be kept in sync with the backend manually.
-- frontend-types-entityid: `EntityId` is generated as `string` (Pydantic's
-  `NewType` has no TypeScript equivalent). A branded alias
-  `type EntityId = string & { readonly _brand: 'EntityId' }` is added
-  manually in a thin `frontend/src/types_ext.ts` that re-exports everything
-  from `types.ts` with id-bearing fields rebranded. All application
-  code imports from `types_ext.ts`, never directly from `types.ts`.
-- frontend-types-discriminated: `ServerEvent = EntityChangedEvent` is
-  defined in `types_ext.ts`. Today there is exactly one event variant;
-  the type is a discriminated union scaffold for future variants.
-- frontend-types-entity-response: `types_ext.ts` defines
-  `EntityResponse = SceneResponse | CharacterResponse` as a discriminated
-  union over `type`. This shape is the wire result of
-  `GET /api/campaigns/{cid}/entities/{eid}`; the FE panel dispatcher
-  narrows on `response.type`.
-
-## frontend-workspace: Workspace shell
-
-The Workspace is the SPA's top-level shell. It is **campaign-scoped**:
-one campaign is active at a time; there is no campaign-switcher UI today.
-Its layout is a **static two-slot grid** — a selector slot on the left,
-a single main slot on the right. The user-arrangeable, multi-panel UI
-is future work; today's static layout MUST be implementable on a panel
-model that survives that evolution without rework.
-
-- frontend-workspace-state: Workspace state is
-  `{ campaignId: string | null, defaultSceneId: EntityId | null, mainEntityId: EntityId | null }`.
-  Each per-panel data stream (entity, dependents, messages, connected)
-  lives inside the panel's own `useEntity` hook — NOT at the workspace
-  level. The workspace owns only what the slots themselves need.
-- frontend-workspace-layout: Static two-slot CSS layout. Left slot
-  renders `<EntitySelector campaignId={campaignId} />`. Right slot
-  renders `<EntityPanel entityId={mainEntityId} campaignId={campaignId} />`
-  when both ids are set, otherwise a "select a scene from the left"
-  placeholder.
-- frontend-workspace-bootstrap: On mount the Workspace fetches
-  `GET /api/campaigns` → picks the first entry's `name` as `campaignId`
-  (today's single-campaign assumption) → fetches `GET /api/campaigns/{cid}`
-  → stores `default_scene_id` as `defaultSceneId`. The Workspace's
-  bootstrap is the only thing in the SPA that runs before any panel
-  mounts.
-  - .implements: cuj-startup-ready
-- frontend-workspace-initial-main: After bootstrap, `mainEntityId` is set
-  to the URL fragment (if present) else `defaultSceneId`. If both are
-  null, `mainEntityId` stays null and the main slot shows the empty
-  placeholder.
-- frontend-workspace-open-entity: The selector emits `onOpenEntity(id)`
-  on double-click; the workspace sets `mainEntityId = id`. If the
-  emitted id equals the current `mainEntityId`, the call is a no-op
-  (idempotent). Single-click is currently unbound.
-- frontend-workspace-remount-on-change: When `mainEntityId` changes the
-  right-slot `EntityPanel` unmounts and the new one mounts. Per-panel
-  state (half-typed input, scroll position, message history) does not
-  bleed across entity switches.
-
-## frontend-panel-taxonomy: Panel taxonomy
-
-Three kinds of renderer; each entity type defines its first two; the
-third is the workspace's own.
-
-- frontend-panel-entity: An **entity panel** is bound to one entity by id,
-  fetches that entity (and any dependents it needs), and subscribes to
-  `/api/campaigns/{cid}/entities/{eid}/events`. Dispatched by `entity.type`.
-- frontend-panel-bubble: An **entity bubble** is a compact snapshot
-  renderer for an entity, used inside selectors and lists. Bubbles do
-  NOT subscribe to events today — they render whatever snapshot the
-  parent passed them, and refresh only when the parent re-fetches.
-  Live-subscribing bubbles is deferred to a later iteration.
-- frontend-panel-workspace: A **workspace panel** carries no entity
-  binding. It may fetch and render entity data (the selector renders a
-  list of bubbles) but is itself a property of the workspace, not of
-  an entity.
-
-## frontend-panel-registry: Today's registered types
-
-Only the Scene entity has a registered panel and bubble. Other entity
-types (Character, generic Entity, …) appear in the data model but have
-no registered renderers — see `frontend-entitypanel-fallback`.
-
-- frontend-panel-registry-scene: `entity.type === 'scene'` →
-  `SceneEntityPanel` (entity panel) and `SceneBubble` (bubble).
-- frontend-panel-registry-fallback: Any other `entity.type` →
-  `UnknownEntityPanel` placeholder; bubble dispatch returns a generic
-  text fallback. Adding a new entity type's panel is a pure additive
-  spec change (extend `frontend-panel-registry-*`, add the dispatch
-  case in `EntityPanel.tsx`).
-
-## frontend-workspace-be-consistency: Per-panel SPA/backend consistency
-
-The consistency rule from the previous architecture (SPA state equals
-the backend's authoritative state, modulo at most one in-flight
-`entity_changed` event) survives intact — it now applies **per panel**.
-Each entity panel's `useEntity` hook independently re-fetches the full
-state of its entity (and dependents) on any disconnect/reconnect window.
-
-- frontend-be-consistency-event-loss: Per panel, any disconnect window
-  (SSE close, reconnect backoff, panel mount) is an event-loss window.
-  The panel cannot rely on incremental catch-up — the backend's history
-  may have shrunk (a dev reload that wiped runtime state) or diverged.
-  The reconnect path re-fetches the FULL history (no `from=` query) for
-  the panel's scene and overwrites local `messages` outright; that's the
-  only approach that converges correctly across all transitions.
-- frontend-be-consistency-bootstrap-first: Within a panel, SSE opens
-  AFTER its bootstrap completes. Opening SSE first and bootstrapping in
-  parallel would create a race where an `entity_changed` event arrives
-  before `lastFetchedIndex` is set, with no defined ordering.
-- frontend-be-consistency-messages-overwritten: A panel's `messages`
-  state is preserved across the clear-and-bootstrap cycle for UX
-  continuity (no empty-flicker during transient reconnects), but the
-  history re-fetch REPLACES `messages` with the freshly-fetched history.
-  The state can only be stale during the in-flight reconnect window,
-  never after a successful bootstrap.
-- .tested-by: test_frontend_be_consistency_on_reconnect
-- .implemented-by: useEntity
-
-## frontend-sse-client-dataflow: Per-panel SSE dataflow
-
-Per **entity panel** instance. The workspace's own bootstrap (campaign
-list + campaign read) is separate; see `frontend-workspace-bootstrap`.
-
-1. sse-client-entity: Fetch `GET /api/campaigns/{cid}/entities/{eid}` →
-   the typed `EntityResponse` (see `frontend-be-dep-entity-typed`).
-   Dispatch the panel renderer on `response.type`.
-   - .implements: cuj-startup-ready
-2. sse-client-dependents: For Scene panels, fetch each
-   `character_id` in parallel via `GET /api/campaigns/{cid}/entities/{eid}`
-   → populate the panel's local `entityCache` (resolves message senders).
-   - .implements: cuj-startup-ready
-3. sse-client-history: For Scene panels, fetch
-   `GET /api/campaigns/{cid}/scenes/{eid}/messages` → resolve senders from
-   the panel's `entityCache` → replace `messages`. Track
-   `lastFetchedIndex` from the last entry.
-   - .implements: cuj-startup-ready
-4. sse-client-connect: Open
-   `EventSource('/api/campaigns/{cid}/entities/{eid}/events')` —
-   per-entity stream per `events-subscription`. Opens AFTER bootstrap so
-   the URL is well-defined.
-   - .implements: cuj-hello-respond
-5. sse-client-event: Receive `entity_changed` SSE event with payload
-   `{entity_id, attributes}` → if `entity_id` equals the panel's entity
-   AND `attributes` contains `"messages"`, fetch the new slice via
-   `GET /scenes/{eid}/messages?from={lastFetchedIndex+1}` → resolve
-   senders → append to `messages` → update `lastFetchedIndex`.
-   - .implements: cuj-hello-respond
-   - sse-client-event-serialized: Concurrent `entity_changed` events
-     MUST NOT trigger overlapping slice fetches. Two fetches reading
-     `lastFetchedIndex` before either's append completes would both
-     compute the same `from` and double-append. Slice fetches are
-     serialized via a per-panel promise chain so each fetch
-     observes the prior fetch's `setMessages` effect.
-     - .tested-by: test_sse_client_event_serialized
-6. sse-client-disconnect: On SSE close, the panel sets `connected = false`;
-   reconnects with exponential backoff (initial 1 s, max 30 s).
-7. sse-client-reconnect: On reconnect, the panel clears its local
-   `entityCache`, dependents, and `lastFetchedIndex`; retains `messages`.
-   Re-enters at `sse-client-entity`.
-
-## frontend-handles-api-503: SPA tolerates LOADING state
-
-While `App.state == LOADING` every API endpoint returns 503 (per
-`rest-api-*-503`). The SPA shell itself is just static assets — it loads
-regardless of backend state. The SPA treats 503 from any endpoint as a
-transient "backend loading" signal, not an error.
-
-- frontend-handles-api-503-no-crash: A 503 response from any endpoint
-  (`/api/campaigns`, `/api/campaigns/{cid}`, `/entities/{eid}`,
-  `/scenes/{eid}/messages`, …) does NOT propagate as an uncaught error.
-  The workspace's bootstrap and each `useEntity` instance catch the
-  failure and route it through their respective reconnect paths.
-- frontend-handles-api-503-retry: Workspace bootstrap retries on the
-  same exponential backoff as SSE reconnect (1 s → 30 s) until the
-  backend flips to SERVING. Per-panel `useEntity` does the same for its
-  panel-scoped bootstrap.
-- frontend-handles-api-503-indicator: While retrying, the affected
-  panel's `connected` stays `false` so its header surface reflects the
-  not-ready state. No modal/error UI appears.
-- .implemented-by: useEntity, Workspace
-- .tested-by: test_frontend_handles_api_503
-
-## frontend-api-client-dataflow: Client REST dataflow (send)
-
-1. api-client-send: User submits input → POST
-   `MessageRequest { sender_id, body }` to
-   `/api/campaigns/{campaignId}/scenes/{sceneId}/messages`. The Scene
-   panel does NOT optimistically append the result; the server's
-   resulting `entity_changed` triggers a slice fetch that appends.
-   - .implements: cuj-hello-send
-
-## frontend-state: Client state
-
-State is split between the workspace shell and per-panel hooks. Nothing
-is global; in particular, `connected`, `messages`, `entityCache`, and
-`playerCharacterIds` are NO LONGER workspace-level — each entity panel
-owns its own.
-
-- frontend-state-campaign-id: Workspace state. `campaignId: string | null`
-  — set from the first entry of `GET /api/campaigns` (today there is
-  exactly one); used as `{cid}` path param on every campaign-scoped
-  route. Cleared on workspace re-bootstrap.
-- frontend-state-default-scene-id: Workspace state.
-  `defaultSceneId: EntityId | null` — populated from
-  `CampaignResponse.default_scene_id`; used only to initialise
-  `mainEntityId` when no URL fragment is present.
-- frontend-state-main-entity-id: Workspace state.
-  `mainEntityId: EntityId | null` — the entity bound to the right slot.
-  Initialised per `frontend-workspace-initial-main`; mutated by
-  `frontend-workspace-open-entity`.
-- frontend-state-panel-entity: Per-panel state owned by `useEntity`.
-  `entity: EntityResponse | null` — the fetched typed entity. Dispatch
-  source for the panel renderer.
-- frontend-state-panel-dependents: Per-panel state.
-  `entityCache: Map<EntityId, CharacterModel>` for Scene panels —
-  populated from `sse-client-dependents`. Used to resolve message
-  senders. Cleared on reconnect.
-- frontend-state-panel-player-ids: Per-panel state.
-  `playerCharacterIds: EntityId[]` — populated from
-  `SceneResponse.player_character_ids`. Used by the panel's
-  `MessageInput` to address messages.
-- frontend-state-panel-messages: Per-panel state.
-  `messages: ChatMessage[]` where
-  `ChatMessage = { scene_id: EntityId; index: number; sender: CharacterModel; body: string }` —
-  append-only; retained across reconnects. `(scene_id, index)` is the
-  composite wire identity and the pagination cursor.
-- frontend-state-panel-connected: Per-panel state.
-  `connected: boolean` — reflects the panel's own SSE state; disables
-  its input when false.
-
-## frontend-components: Component specs
-
-### frontend-app: App
-
-Root component. Renders `Workspace`.
-
-- frontend-app-renders: Renders `<Workspace />` and nothing else.
-
-### frontend-workspace-component: Workspace
-
-Owns campaign bootstrap and the two-slot layout described in
-`frontend-workspace`.
-
-- frontend-workspace-component-bootstrap: On mount, runs
-  `frontend-workspace-bootstrap`. Stores `campaignId`,
-  `defaultSceneId`, and the initial `mainEntityId`.
-- frontend-workspace-component-layout: Renders `<EntitySelector
-  campaignId={campaignId} onOpenEntity={handler} />` in the left slot
-  and `<EntityPanel campaignId={campaignId} entityId={mainEntityId} />`
-  in the right slot (or a placeholder if `mainEntityId` is null).
-- frontend-workspace-component-testid: The shell carries
-  `data-testid="workspace"`; the right slot carries
-  `data-testid="main-slot"`.
-
-### frontend-entityselector: EntitySelector
-
-`campaignId: string | null` `onOpenEntity: (id: EntityId) => void`
-
-A workspace panel listing Scene entities (default filter today; the
-filter is hardcoded — generalised filtering is future work).
-
-- frontend-entityselector-fetch: On mount (and when `campaignId`
-  changes), fetches
-  `GET /api/campaigns/{campaignId}/scenes` → renders one `SceneBubble`
-  per entry. Snapshot-only: no live subscription.
-- frontend-entityselector-double-click: Double-clicking a bubble calls
-  `onOpenEntity(bubble.id)`.
-- frontend-entityselector-testid: The list container carries
-  `data-testid="entity-selector"`.
-
-### frontend-scenebubble: SceneBubble
-
-`scene: SceneResponse` `onOpen: () => void`
-
-- frontend-scenebubble-renders: Renders `scene.name` (today; later may
-  include compact metadata like character count).
-- frontend-scenebubble-double-click: Double-click fires `onOpen()`. The
-  bubble is the gesture surface; it does not know about the workspace.
-- frontend-scenebubble-data: Carries `data-testid="scene-bubble"` and
-  `data-entity-id={scene.id}`.
-
-### frontend-entitypanel: EntityPanel
-
-`campaignId: string | null` `entityId: EntityId | null`
-
-Dispatcher. Fetches the entity via `useEntity` and renders the matching
-entity-typed panel.
-
-- frontend-entitypanel-uses-useentity: Calls `useEntity({ campaignId,
-  entityId })` to bootstrap and subscribe.
-- frontend-entitypanel-dispatch: When the fetched `entity.type === 'scene'`,
-  renders `<SceneEntityPanel … />`. Other types render
-  `<UnknownEntityPanel type={entity.type} />`.
-- frontend-entitypanel-fallback: `UnknownEntityPanel` shows a
-  "no panel registered for type <type>" placeholder. Bubbles for the
-  unregistered type are allowed; the placeholder explicitly names which
-  type lacks a renderer.
-
-### frontend-sceneentitypanel: SceneEntityPanel
-
-`campaignId: string` `entity: SceneResponse` `entityCache: Map<EntityId,
-CharacterModel>` `playerCharacterIds: EntityId[]` `messages: ChatMessage[]`
-`connected: boolean`
-
-Renders the Scene panel: scene header on top, chat (messages + input)
-beneath. `SceneEntityPanel` is the only place ChatMessage / MessageList /
-MessageInput compose; the previous standalone `ChatView` is absorbed.
-
-- frontend-sceneentitypanel-header: Renders an in-panel header with
-  `entity.name` and a connection indicator (green/red dot reflecting
-  `connected`). `entity.body` (the scene description) renders beneath
-  the header when non-empty.
-- frontend-sceneentitypanel-list: Renders `<MessageList messages={messages}
-  playerCharacterIds={playerCharacterIds} />`.
-- frontend-sceneentitypanel-input: Renders `<MessageInput connected=…
-  onSend=… />`. `onSend` is bound via `useSendMessage(campaignId, entity.id,
-  playerCharacterIds[0] ?? null)`.
-- frontend-sceneentitypanel-testid: The shell carries
-  `data-testid="scene-panel"` and `data-entity-id={entity.id}` for stable
-  selectors.
-
-### frontend-messagelist: MessageList
-
-`messages` `playerCharacterIds`
-
-(Internal to Scene panels.)
-
-- frontend-messagelist-scroll: Scrolls to the bottom whenever `messages` grows.
-- frontend-messagelist-items: Renders one `MessageItem` per message; keyed
-  by `(message.scene_id, message.index)` so React reconciliation stays
-  stable when slices arrive out of order.
-  - .tested-by: cuj-hello-browser
-- frontend-messagelist-testid: The `<ul>` carries `data-testid="message-list"`.
-  - .tested-by: cuj-hello-browser
-
-### frontend-messageitem: MessageItem
-
-`message: ChatMessage` `isOwn: boolean`
-
-(Internal to Scene panels.)
-
-- frontend-messageitem-own: `isOwn` is true when `message.sender.id ∈ playerCharacterIds`; right-aligned with distinct Tailwind classes.
-- frontend-messageitem-other: Non-own messages are left-aligned.
-- frontend-messageitem-sender: Displays `message.sender.name` above the message body.
-- frontend-messageitem-data: Carries `data-testid="message-item"`,
-  `data-scene-id={message.scene_id}`, `data-index={message.index}`, and
-  `data-sender-id={message.sender.id}` for stable selectors.
-  - .tested-by: cuj-hello-browser
-
-### frontend-messageinput: MessageInput
-
-`connected: boolean` `onSend: (body: string) => void`
-
-(Internal to Scene panels.)
-
-- frontend-input-disabled: Input and button are disabled when `connected` is false.
-- frontend-input-submit-button: Clicking the send button calls `onSend(body)` and clears the input.
-  - .tested-by: cuj-hello-browser
-- frontend-input-submit-enter: Pressing Enter (without Shift) also calls `onSend(body)`.
-- frontend-input-testid: Textarea carries `data-testid="message-input"`;
-  Send button carries `data-testid="send-button"`.
-  - .tested-by: cuj-hello-browser
-
-### frontend-useentity: useEntity({ campaignId, entityId, deps })
-
-Per-panel bootstrap-and-subscribe hook. Replaces the previous monolithic
-`useSSE`. Each entity panel instance calls `useEntity` exactly once.
-
-- frontend-useentity-bootstraps: On mount (and when `entityId` changes),
-  runs `sse-client-entity`, `sse-client-dependents`, and
-  `sse-client-history` in order.
-- frontend-useentity-subscribes: After bootstrap, opens
-  `EventSource('/api/campaigns/{campaignId}/entities/{entityId}/events')`.
-- frontend-useentity-dispatches: Handles `entity_changed` events per
-  `sse-client-event`. Slice fetches are serialized per
-  `sse-client-event-serialized`.
-- frontend-useentity-reconnects: On SSE close, schedules reconnect per
-  `sse-client-reconnect` and re-bootstraps from `sse-client-entity`.
-- frontend-useentity-returns: Returns `{ entity, entityCache,
-  playerCharacterIds, messages, connected }`.
-- frontend-useentity-deps: Accepts `{ fetcher?, eventSourceFactory? }` as
-  an injection seam for unit tests (mirrors `frontend-usesse-deps` in
-  the previous architecture).
-
-### frontend-usesendmessage: useSendMessage(campaignId, sceneId, senderId)
-
-- frontend-send-hook-posts: POSTs `MessageRequest` to `/api/campaigns/{campaignId}/scenes/{sceneId}/messages`.
-- frontend-send-hook-returns: Returns a `send(body: string) => Promise<MessageAccepted | null>` callback. The `MessageAccepted` carries `{scene_id, index}` — the composite identity assigned by the server; null on error.
-
-Note: There is no client-side optimistic append. The SSE `entity_changed` for the user's own POST already triggers a slice fetch, so an optimistic append would cause double rendering.
+- frontend-vite-proxy: `vite.config.ts` proxies `/api` to
+  `http://localhost:8000` with `changeOrigin: true` AND `ws: true` so
+  the WS at `/api/campaigns/{cid}/ws` passes through the same proxy as
+  the REST routes.
+- frontend-build-output: `build.outDir` is `../src/sidestage/static/`.
+  FastAPI serves the bundle in production single-process deploys.
+- frontend-types-generated: `frontend/src/types.ts` is auto-generated
+  by `just _gen-types` from the `Entity.Model` (and `Campaign.Model`)
+  Pydantic classes on every consumer invocation. Branded `EntityId`
+  and the wire-event shape (`EntityChangedEvent`) live in
+  `types_ext.ts`. All app code imports from `types_ext.ts`, never
+  from `types.ts` directly. **No `*Response` types** — the FE
+  consumes `Entity.Model` subclasses directly (per [[entity-model]]
+  `entity-model-canonical`).
+
+## frontend-campaign: Campaign
+
+```ts
+class Campaign {
+  readonly campaignId: string;
+
+  constructor(campaignId: string, deps?: {
+    wsFactory?: (url: string) => WebSocket;
+  });
+
+  // Architectural surface (mirrors BE Campaign). All mutating ops
+  // are strict relays — they emit a wire frame to BE and await ack.
+  // Local proxy state changes ONLY in response to EntityChanged
+  // (per frontend-entities).
+  get(entity_id: EntityId): Promise<Entity>;
+  add(entity: Entity): Promise<void>;          // FE-issued creates relay to BE
+  delete(entity_id: EntityId): Promise<void>;
+  subscribe(entity_ids: EntityId[]): void;
+
+  // React-binding helpers (used by useEntity).
+  peek(entity_id: EntityId): Entity | null;
+  observe(entity_id: EntityId, listener: () => void): () => void;
+
+  // Global connection state.
+  isConnected(): boolean;
+  subscribeConnected(listener: () => void): () => void;
+
+  close(): void;
+}
+```
+
+One instance per browser tab, constructed by `Workspace` once
+`campaignId` is known and provided via React context. Owns the lone
+WebSocket, a `Map<EntityId, Entity>` cache of FE proxy instances,
+per-id refcounts, per-id listener sets, per-id slice-fetch chains,
+eviction timers, and a `Map<request_id, Promise>` of in-flight
+EntityAction acks.
+
+- frontend-campaign-get: Returns a promise that resolves to the FE
+  proxy for the entity. First call for an id sends a WS `subscribe`
+  frame with that id; the promise resolves when the matching
+  `subscribed` reply arrives carrying the entity's initial state.
+  Later calls reuse the in-flight hydration promise. The proxy is
+  the discriminated union narrowed on `Entity.Model.type` (Scene
+  proxy for `'scene'`, Character proxy for `'character'`).
+- frontend-campaign-observe: Register a listener as an observer of an
+  entity. Returns a single function that both unregisters the
+  listener AND decrements the refcount. Matching
+  `useSyncExternalStore`'s one-subscribe-↔-one-unsubscribe contract
+  keeps the refcount in lockstep with the live observer set under
+  React StrictMode's mount→cleanup→mount cycle. On 0→1 transition
+  the registry sends a WS `subscribe` frame; on 1→0 it sends
+  `unsubscribe` and schedules cache eviction after a short grace
+  period.
+- frontend-campaign-peek: Synchronous read of the cached proxy (no
+  observer side effects). `useSyncExternalStore` calls this every
+  render.
+- frontend-campaign-subscribed-initial-state: The WS `subscribed`
+  reply carries each requested entity's `Entity.Model` payload. The
+  Campaign hydrates its proxy cache from this payload — no follow-up
+  fetch. For a `Scene.Model` this includes `messages` (the initial
+  history). Subsequent `entity_changed` frames carry deltas that the
+  Campaign applies in place.
+- frontend-campaign-collection-delta: On `entity_changed` with a
+  collection-attribute delta (per [[events]] `events-attribute-deltas`),
+  the Campaign applies the delta items directly to the cached
+  proxy's attribute. For `AppendDelta(items=[…])` on `Scene.messages`,
+  the items are appended to the cached Scene's `messages` list.
+  Attribute updates are serialised per-entity via a promise chain so
+  concurrent events never reorder. Attributes without a delta fall
+  back to "re-subscribe" to fetch fresh state.
+- frontend-campaign-reconnect: On WS close, sets `connected = false`,
+  schedules exponential-backoff reconnect (1 s → 30 s). On open, the
+  registry re-issues subscribe frames for every observed id; the
+  fresh `subscribed` replies carry the authoritative current state,
+  overwriting any stale proxy data. Any event lost during the
+  disconnect window is reflected in the post-reconnect snapshot.
+- frontend-campaign-action-dispatch: When a proxy's `@action` method
+  is called, the Campaign assigns a `request_id`, sends an
+  `entity_action` frame, and returns a Promise that resolves on the
+  matching `ack` (or rejects on `error`). The Promise resolution is
+  the only completion signal — projection state only updates when
+  the BE-emitted `EntityChanged` arrives.
+- .implemented-by: Campaign
+
+## frontend-entities: FE entity proxies (read-only views + RPC actions)
+
+**Strict relay, no local mutation.** Every FE entity proxy is a
+read-only view of the BE-authoritative Entity. Action methods on a
+proxy do NOT mutate local state — they serialise an `EntityAction`
+frame, await the BE ack, and let the resulting `EntityChanged`
+propagate the new state through the normal subscribe path. The proxy's
+backing data only changes when the Campaign re-reads it in response
+to `EntityChanged`. Holding the line keeps the FE from becoming a
+competing source of truth alongside Campaign (per [[architecture]]
+`architecture-rejected`).
+
+Each Entity subclass has a matching FE proxy class with the same
+`@action` method names as the BE subclass.
+
+```ts
+class Entity {                       // base proxy
+  readonly id: EntityId;
+  readonly type: EntityType;
+  readonly name: string;
+  readonly body: string;
+}
+
+class Character extends Entity {
+  readonly owner: 'user' | 'stub' | 'npc';
+  speak(body: string): Promise<void>;   // RPC: serialises EntityAction, awaits ack
+}
+
+class Scene extends Entity {
+  readonly character_ids: EntityId[];
+  readonly player_character_ids: EntityId[];
+  readonly messages: MessageModel[];    // hydrated from /messages + slice-fetch
+}
+```
+
+- frontend-entity-proxy-mirrors-be: Every BE Entity subclass has a
+  matching FE proxy class with the same `@action` method names.
+  Calling e.g. `character.speak(body)` is encoded as
+  `EntityAction(entity_id=character.id, action="speak", kwargs={body})`.
+  The Promise resolves on the matching `ack`; its resolution carries
+  no payload (the action's effect is observed via `EntityChanged`).
+- frontend-entity-proxy-readonly: All proxy fields are read-only.
+  Action methods take no shortcut — they always round-trip. The
+  Campaign updates the proxy's backing Model in place ONLY when an
+  `entity_changed` frame triggers a re-read.
+- frontend-entity-proxy-local-echo-future: A future "local echo"
+  optimisation could optimistically apply an action's expected
+  effect to the local proxy before the ack lands and reconcile on
+  `EntityChanged` (or roll back on `error`). This would soften the
+  invariant from "projection state mirrors authoritative state
+  modulo disconnect windows" to "...modulo disconnect windows AND
+  in-flight action windows," but it does NOT change the public
+  surface — `character.speak(body)` and `useEntity(id)` keep their
+  current signatures. Opt-in per action if/when latency tolerance
+  becomes a UX concern.
+
+## frontend-hooks: React hook surface
+
+```ts
+function useCampaign(): Campaign;             // from context
+function useEntity(id: EntityId | null): {
+  entity: Entity | null;
+  status: 'loading' | 'ready' | 'error';
+};
+function useConnected(): boolean;
+```
+
+- frontend-useentity: Calls `useSyncExternalStore` with
+  `subscribe = (l) => campaign.observe(id, l)` and
+  `getSnapshot = () => campaign.peek(id)`. React owns the
+  observation lifecycle: mount → subscribe (one observer registered),
+  unmount → unsubscribe.
+- frontend-useconnected: Subscribes to the Campaign's global
+  connection state. Widgets use this for connection indicators and
+  to disable input while offline.
+- .implemented-by: hooks/useEntity.ts
+
+There is **no `useSendMessage`** — write paths go through the FE
+proxy's `@action` methods.
