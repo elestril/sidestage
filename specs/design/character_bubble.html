@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>character_bubble — design spec (planned)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="min-height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto flex max-w-md flex-col gap-6">
+
+        <!-- PLANNED. Mirrors SceneBubble shape (same hover, padding,
+             rounded-md, text-sm text-slate-700) and appends an owner badge.
+
+             Owner color map (matches character_panel.html):
+               user  → emerald
+               stub  → slate
+               npc   → indigo -->
+
+        <section>
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">default (npc)</h2>
+          <div class="w-64 rounded-md border border-slate-200 bg-white p-2 shadow">
+            <ul class="flex flex-col">
+              <li id="design-root" data-testid="character-bubble" data-entity-id="elara"
+                  class="flex cursor-pointer select-none items-center justify-between gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                <span class="truncate">Elara Moonwhisper</span>
+                <span data-owner="npc" class="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">npc</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">in context — character roster (all three owner variants)</h2>
+          <div class="w-64 rounded-md border border-slate-200 bg-white shadow">
+            <div class="border-b border-slate-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">Characters</div>
+            <ul class="flex flex-col p-2">
+              <li data-testid="character-bubble" data-entity-id="alice"
+                  class="flex cursor-pointer select-none items-center justify-between gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                <span class="truncate">Alice</span>
+                <span data-owner="user" class="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">user</span>
+              </li>
+              <li data-testid="character-bubble" data-entity-id="bob"
+                  class="flex cursor-pointer select-none items-center justify-between gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                <span class="truncate">Bob</span>
+                <span data-owner="stub" class="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">stub</span>
+              </li>
+              <li data-testid="character-bubble" data-entity-id="elara"
+                  class="flex cursor-pointer select-none items-center justify-between gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                <span class="truncate">Elara Moonwhisper</span>
+                <span data-owner="npc" class="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">npc</span>
+              </li>
+              <li data-testid="character-bubble" data-entity-id="thrain"
+                  class="flex cursor-pointer select-none items-center justify-between gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                <span class="truncate">Thrain Ironfoot</span>
+                <span data-owner="npc" class="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">npc</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="text-sm text-slate-700">
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">notes</h2>
+          <ul class="list-disc space-y-1 pl-5">
+            <li><strong>user</strong> — bg <code class="rounded bg-slate-200 px-1">emerald-100</code>, text <code class="rounded bg-slate-200 px-1">emerald-700</code>.</li>
+            <li><strong>stub</strong> — bg <code class="rounded bg-slate-200 px-1">slate-200</code>, text <code class="rounded bg-slate-200 px-1">slate-600</code>.</li>
+            <li><strong>npc</strong> — bg <code class="rounded bg-slate-200 px-1">indigo-100</code>, text <code class="rounded bg-slate-200 px-1">indigo-700</code>.</li>
+            <li>Truncates long names; badge never shrinks (<code class="rounded bg-slate-200 px-1">shrink-0</code>).</li>
+          </ul>
+        </section>
+
+      </div>
+    </main>
+  </body>
+</html>

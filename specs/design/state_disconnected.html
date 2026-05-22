@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>state_disconnected — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto h-full max-w-4xl shadow-lg ring-1 ring-slate-300">
+        <!-- ScenePanel rendered while useConnected() returns false:
+             - dot flips bg-green-500 → bg-red-500
+             - aria-label flips "connected" → "disconnected"
+             - MessageInput textarea + button both `disabled`, placeholder
+               switches from "Type a message…" to "Disconnected" -->
+        <div id="design-root" data-testid="scene-panel" data-entity-id="tavern" class="flex h-full flex-col bg-slate-50">
+          <header class="border-b border-slate-200 bg-white px-4 py-2">
+            <div class="flex items-center text-sm font-medium text-slate-700">
+              The Cracked Tankard
+              <span
+                class="ml-2 inline-block h-2 w-2 rounded-full bg-red-500"
+                aria-label="disconnected"
+              ></span>
+            </div>
+            <p class="mt-1 whitespace-pre-wrap text-xs text-slate-500">
+              Lamplight pools on scarred oak tables and the air hums with low conversation. Behind the long bar, kegs of dark ale sweat in the warmth of the hearth.
+            </p>
+          </header>
+          <main class="flex-1 overflow-hidden">
+            <div class="h-full overflow-y-auto px-4 py-3">
+              <ul data-testid="message-list" class="flex flex-col gap-2">
+                <li class="flex justify-start">
+                  <div class="flex max-w-[75%] flex-col items-start">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">*shoulders against the bar, eyeing the room* You sure about this place, sage?</div>
+                  </div>
+                </li>
+                <li class="flex justify-end">
+                  <div class="flex max-w-[75%] flex-col items-end">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Elara Moonwhisper</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">The runes carved into the doorpost suggest the proprietor knows old wards.</div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </main>
+          <footer class="border-t border-slate-200 bg-white p-2">
+            <div class="flex items-end gap-2">
+              <textarea
+                data-testid="message-input"
+                rows="1"
+                placeholder="Disconnected"
+                disabled
+                class="min-h-[2.5rem] flex-1 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              ></textarea>
+              <button
+                type="button"
+                data-testid="send-button"
+                disabled
+                class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >Send</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

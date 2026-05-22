@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>character_panel — design spec (planned)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto h-full max-w-4xl shadow-lg ring-1 ring-slate-300">
+
+        <!-- PLANNED. Mirrors ScenePanel's shell (border / header / scrollable
+             body) but renders Character.Model: name + owner badge + the
+             long-form `body` description. No MessageList/MessageInput —
+             those belong to scenes.
+
+             Owner color map:
+               user  → emerald (player-controlled)
+               stub  → slate   (placeholder actor)
+               npc   → indigo  (LLM-backed) -->
+
+        <div id="design-root" data-testid="character-panel" data-entity-id="elara" class="flex h-full flex-col bg-slate-50"><!-- design-root IS the widget root -->
+          <header class="border-b border-slate-200 bg-white px-4 py-3">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-slate-700">Elara Moonwhisper</span>
+              <span
+                data-testid="owner-badge"
+                data-owner="npc"
+                class="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700"
+              >npc</span>
+            </div>
+            <p class="mt-1 text-xs text-slate-500">character · id: elara</p>
+          </header>
+
+          <main class="flex-1 overflow-hidden">
+            <div class="h-full overflow-y-auto px-6 py-5">
+              <section class="mx-auto max-w-prose">
+                <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">description</h2>
+                <div class="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">You are Elara Moonwhisper, an elven sage with centuries of arcane knowledge. You speak in measured, poetic tones and always consider the magical implications of events.
+
+You hold a quiet contempt for needless violence and a deep affection for the small kindnesses you've witnessed across the long ages. When pressed, you defer to wisdom over strength — though you have proven, more than once, that the two are not strangers.</div>
+
+                <h2 class="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">appears in</h2>
+                <ul class="flex flex-col gap-1">
+                  <li>
+                    <a href="#" class="block rounded-md px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100">The Cracked Tankard</a>
+                  </li>
+                  <li>
+                    <a href="#" class="block rounded-md px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100">Dungeon Entrance</a>
+                  </li>
+                </ul>
+              </section>
+            </div>
+          </main>
+
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

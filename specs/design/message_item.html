@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>message_item — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="min-height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto max-w-2xl">
+
+        <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">message_item — own vs other</h2>
+        <div class="rounded-md bg-slate-50 p-4 shadow ring-1 ring-slate-200">
+
+          <!-- design-root holds the <ul> + a pair of variants so the
+               agent can lift the full pattern in one shot. -->
+          <ul id="design-root" data-testid="message-list" class="flex flex-col gap-2">
+
+            <!-- frontend-messageitem-other: not isOwn → left-aligned white -->
+            <li
+              data-testid="message-item"
+              data-scene-id="tavern"
+              data-index="0"
+              data-sender-id="thrain"
+              class="flex justify-start"
+            >
+              <div class="flex max-w-[75%] flex-col items-start">
+                <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">*shoulders against the bar, eyeing the room* You sure about this place, sage?</div>
+              </div>
+            </li>
+
+            <!-- frontend-messageitem-own: isOwn → right-aligned blue -->
+            <li
+              data-testid="message-item"
+              data-scene-id="tavern"
+              data-index="1"
+              data-sender-id="elara"
+              class="flex justify-end"
+            >
+              <div class="flex max-w-[75%] flex-col items-end">
+                <span class="mb-0.5 text-xs font-medium text-slate-500">Elara Moonwhisper</span>
+                <div class="whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">The runes carved into the doorpost suggest the proprietor knows old wards. We're safer here than in the streets.</div>
+              </div>
+            </li>
+
+            <!-- Long body, wraps at max-w-[75%] -->
+            <li
+              data-testid="message-item"
+              data-scene-id="tavern"
+              data-index="2"
+              data-sender-id="elara"
+              class="flex justify-end"
+            >
+              <div class="flex max-w-[75%] flex-col items-end">
+                <span class="mb-0.5 text-xs font-medium text-slate-500">Elara Moonwhisper</span>
+                <div class="whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">And yet you've kept that axe sharp because of a vision I shared with you in Velhern. Trust comes in many forms — sometimes it arrives as steel, sometimes as the careful reading of a stranger's silences.</div>
+              </div>
+            </li>
+
+            <!-- Short body, well below max-width -->
+            <li
+              data-testid="message-item"
+              data-scene-id="tavern"
+              data-index="3"
+              data-sender-id="thrain"
+              class="flex justify-start"
+            >
+              <div class="flex max-w-[75%] flex-col items-start">
+                <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">Aye.</div>
+              </div>
+            </li>
+
+          </ul>
+        </div>
+
+        <h2 class="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-slate-600">notes</h2>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li><code class="rounded bg-slate-200 px-1">isOwn</code> selects <code class="rounded bg-slate-200 px-1">justify-end</code> + <code class="rounded bg-slate-200 px-1">bg-blue-600 text-white</code>; otherwise <code class="rounded bg-slate-200 px-1">justify-start</code> + <code class="rounded bg-slate-200 px-1">bg-white text-slate-900 ring-1 ring-slate-200</code>.</li>
+          <li>Sender name above the bubble in <code class="rounded bg-slate-200 px-1">text-xs text-slate-500</code>.</li>
+          <li>Bubble width capped at <code class="rounded bg-slate-200 px-1">max-w-[75%]</code>; body uses <code class="rounded bg-slate-200 px-1">whitespace-pre-wrap</code> so newlines render.</li>
+        </ul>
+
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>state_unknown_entity — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto h-full max-w-4xl shadow-lg ring-1 ring-slate-300">
+        <!-- frontend-widget-dispatch fallback: EntityPanel renders this when
+             widgets[entity.type] has no registered entry. -->
+        <div
+          id="design-root"
+          data-testid="unknown-entity-panel"
+          class="flex h-full items-center justify-center bg-slate-50 p-4 text-sm text-slate-500"
+        >
+          No panel registered for entity type<code class="ml-1">location</code>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

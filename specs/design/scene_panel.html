@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>scene_panel — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto h-full max-w-4xl shadow-lg ring-1 ring-slate-300">
+        <!-- ScenePanel — frontend/src/widgets/ScenePanel.tsx
+             Copy the markup below verbatim into JSX, swap literals for {entity.x}. -->
+        <div id="design-root" data-testid="scene-panel" data-entity-id="tavern" class="flex h-full flex-col bg-slate-50">
+          <header class="border-b border-slate-200 bg-white px-4 py-2">
+            <div class="flex items-center text-sm font-medium text-slate-700">
+              The Cracked Tankard
+              <span
+                class="ml-2 inline-block h-2 w-2 rounded-full bg-green-500"
+                aria-label="connected"
+              ></span>
+            </div>
+            <p class="mt-1 whitespace-pre-wrap text-xs text-slate-500">
+              Lamplight pools on scarred oak tables and the air hums with low conversation. Behind the long bar, kegs of dark ale sweat in the warmth of the hearth. A perfect place to listen for rumors — or to be overheard sharing them.
+            </p>
+          </header>
+          <main class="flex-1 overflow-hidden">
+            <div class="h-full overflow-y-auto px-4 py-3">
+              <ul data-testid="message-list" class="flex flex-col gap-2">
+
+                <!-- Other (NPC) message: left-aligned white bubble -->
+                <li
+                  data-testid="message-item"
+                  data-scene-id="tavern"
+                  data-index="0"
+                  data-sender-id="thrain"
+                  class="flex justify-start"
+                >
+                  <div class="flex max-w-[75%] flex-col items-start">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">*shoulders against the bar, eyeing the room* You sure about this place, sage?</div>
+                  </div>
+                </li>
+
+                <!-- Own (player) message: right-aligned blue bubble -->
+                <li
+                  data-testid="message-item"
+                  data-scene-id="tavern"
+                  data-index="1"
+                  data-sender-id="elara"
+                  class="flex justify-end"
+                >
+                  <div class="flex max-w-[75%] flex-col items-end">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Elara Moonwhisper</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">The runes carved into the doorpost suggest the proprietor knows old wards. We're safer here than in the streets.</div>
+                  </div>
+                </li>
+
+                <li
+                  data-testid="message-item"
+                  data-scene-id="tavern"
+                  data-index="2"
+                  data-sender-id="thrain"
+                  class="flex justify-start"
+                >
+                  <div class="flex max-w-[75%] flex-col items-start">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">Wards. Hmph. I'll trust the weight of my axe over scratches in wood any day.</div>
+                  </div>
+                </li>
+
+                <li
+                  data-testid="message-item"
+                  data-scene-id="tavern"
+                  data-index="3"
+                  data-sender-id="elara"
+                  class="flex justify-end"
+                >
+                  <div class="flex max-w-[75%] flex-col items-end">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Elara Moonwhisper</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">And yet you've kept that axe sharp because of a vision I shared with you in Velhern. Trust comes in many forms.</div>
+                  </div>
+                </li>
+
+                <li
+                  data-testid="message-item"
+                  data-scene-id="tavern"
+                  data-index="4"
+                  data-sender-id="thrain"
+                  class="flex justify-start"
+                >
+                  <div class="flex max-w-[75%] flex-col items-start">
+                    <span class="mb-0.5 text-xs font-medium text-slate-500">Thrain Ironfoot</span>
+                    <div class="whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200">*long pause, then a reluctant grin* Aye. Order me an ale, then. Let's see what rumors the tankard floats up.</div>
+                  </div>
+                </li>
+
+              </ul>
+            </div>
+          </main>
+          <footer class="border-t border-slate-200 bg-white p-2">
+            <div class="flex items-end gap-2">
+              <textarea
+                data-testid="message-input"
+                rows="1"
+                placeholder="Type a message…"
+                class="min-h-[2.5rem] flex-1 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              ></textarea>
+              <button
+                type="button"
+                data-testid="send-button"
+                class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >Send</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

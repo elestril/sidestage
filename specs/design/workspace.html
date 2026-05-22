@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>workspace — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-50">
+    <!-- nav.js suppresses its banner when this page is loaded in an iframe
+         (which is how main.html embeds it). When opened directly, the
+         banner appears at top and --nav-h covers it. -->
+
+    <!-- Workspace shell — frontend/src/components/Workspace.tsx -->
+    <div
+      id="design-root"
+      data-testid="workspace"
+      class="flex w-full bg-slate-50"
+      style="height: calc(100vh - var(--nav-h, 0px));"
+    >
+      <aside class="w-64 shrink-0 border-r border-slate-200 bg-white">
+        <div class="flex h-full flex-col">
+          <div class="border-b border-slate-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Scenes
+          </div>
+          <ul data-testid="entity-selector" class="flex-1 overflow-y-auto p-2">
+            <li
+              data-testid="scene-bubble"
+              data-entity-id="parlor"
+              class="cursor-pointer select-none rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+            >The Parlor</li>
+            <li
+              data-testid="scene-bubble"
+              data-entity-id="tavern"
+              class="cursor-pointer select-none rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+            >The Cracked Tankard</li>
+            <li
+              data-testid="scene-bubble"
+              data-entity-id="dungeon_entrance"
+              class="cursor-pointer select-none rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+            >Dungeon Entrance</li>
+          </ul>
+        </div>
+      </aside>
+
+      <main id="main-slot" data-testid="main-slot" class="flex-1 overflow-hidden">
+        <div class="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+      </main>
+    </div>
+
+    <script>
+      // Composition: fetch the chosen widget page, extract its #design-root,
+      // apply the connected state, drop it into the main slot.
+
+      const SLOT_TO_FILE = {
+        scene_panel: 'scene_panel.html',
+        character_panel: 'character_panel.html',
+        state_loading: 'state_loading.html',
+        state_unknown_entity: 'state_unknown_entity.html',
+      };
+
+      const params = new URLSearchParams(location.search);
+      const slot = SLOT_TO_FILE[params.get('slot')] ? params.get('slot') : 'scene_panel';
+      const connected = params.get('connected') !== 'false';
+      const file = SLOT_TO_FILE[slot];
+
+      async function loadFragment(file) {
+        const res = await fetch('./' + file);
+        if (!res.ok) throw new Error(`fetch ${file} → ${res.status}`);
+        const text = await res.text();
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        const root = doc.getElementById('design-root');
+        if (!root) throw new Error(`no #design-root in ${file}`);
+        root.removeAttribute('id');
+        return root;
+      }
+
+      function applyConnected(root, connected) {
+        root.querySelectorAll('span.rounded-full.h-2.w-2, span.h-2.w-2.rounded-full').forEach((dot) => {
+          if (dot.classList.contains('bg-green-500') || dot.classList.contains('bg-red-500')) {
+            dot.classList.remove('bg-green-500', 'bg-red-500');
+            dot.classList.add(connected ? 'bg-green-500' : 'bg-red-500');
+            dot.setAttribute('aria-label', connected ? 'connected' : 'disconnected');
+          }
+        });
+        root.querySelectorAll('textarea[data-testid="message-input"]').forEach((ta) => {
+          ta.disabled = !connected;
+          ta.placeholder = connected ? 'Type a message…' : 'Disconnected';
+        });
+        root.querySelectorAll('button[data-testid="send-button"]').forEach((btn) => {
+          btn.disabled = !connected;
+        });
+      }
+
+      (async () => {
+        const mainSlot = document.getElementById('main-slot');
+        try {
+          const root = await loadFragment(file);
+          applyConnected(root, connected);
+          mainSlot.innerHTML = '';
+          mainSlot.appendChild(root);
+        } catch (err) {
+          mainSlot.innerHTML = '';
+          const hint = document.createElement('div');
+          hint.className = 'flex h-full items-center justify-center p-4 text-sm text-slate-500';
+          hint.innerHTML = `Couldn't load <code class="ml-1 mr-1">${file}</code> — try <code class="ml-1">python -m http.server</code> from this folder. (${String(err.message || err)})`;
+          mainSlot.appendChild(hint);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>state_loading — design spec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./nav.js" defer></script>
+  </head>
+  <body class="bg-slate-300">
+    <main style="height: calc(100vh - var(--nav-h, 26px)); padding: 24px;">
+      <div class="mx-auto h-full max-w-4xl shadow-lg ring-1 ring-slate-300">
+        <!-- EntityPanel loading state — from frontend/src/components/EntityPanel.tsx
+             Rendered while useEntity(id) is still resolving the proxy. -->
+        <div id="design-root" class="flex h-full items-center justify-center bg-slate-50 text-sm text-slate-500">
+          Loading…
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

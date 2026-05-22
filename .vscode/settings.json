@@ -1,0 +1,10 @@
+{
+  "livePreview.serverRoot": "specs/design",
+  "livePreview.defaultPreviewPath": "/main.html",
+  "livePreview.openPreviewTarget": "Embedded Preview",
+  "livePreview.portNumber": 3000,
+
+  "liveServer.settings.root": "/specs/design",
+  "liveServer.settings.file": "main.html",
+  "liveServer.settings.NoBrowser": false
+}

@@ -37,7 +37,9 @@ tests/playwright/playwright-report/
 
 # IDE / OS
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 .DS_Store
 *.swp
 
