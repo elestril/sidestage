@@ -20,10 +20,12 @@ sidestage/logs/
 
 # Per-campaign FalkorDBLite runtime files (graph DB + AOF dir + redislite
 # settings). Source-of-truth state is the markdown; the DB is regenerated
-# on first launch via Campaign.import_from_disk.
-sidestage/campaigns/*/falkor.db
-sidestage/campaigns/*/falkor.db.settings
-sidestage/campaigns/*/appendonlydir/
+# on first launch via Campaign.import_from_disk. Pattern covers both
+# the real sidestage/campaigns/ and the test fixture campaigns under
+# tests/sidestage/campaigns/ (touched by browser e2e via App.run).
+**/campaigns/*/falkor.db
+**/campaigns/*/falkor.db.settings
+**/campaigns/*/appendonlydir/
 
 # Node — covers frontend/ and tests/playwright/ trees
 node_modules/
