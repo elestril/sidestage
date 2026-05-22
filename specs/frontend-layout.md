@@ -59,11 +59,11 @@ components.
 ```
 
 Static two-slot layout: left selector, right entity panel.
-Campaign-scoped — one campaign active at a time; no switcher UI today.
+Campaign-scoped — one campaign active per page (URL path picks which);
+no in-app switcher UI today.
 
-- frontend-workspace-bootstrap: On mount, opens the lone WS and (in
-  the single-campaign world) connects to the only loaded campaign;
-  no campaign-discovery REST call is needed. Constructs a single
+- frontend-workspace-bootstrap: On mount, opens the lone WS and
+  connects to the campaign named by the URL path. Constructs a single
   `Campaign(campaignId)` via `useMemo([campaignId])` and wraps the
   slots in `<CampaignProvider value={campaign}>`. The Campaign's
   initial subscribe targets the campaign-meta entity (or equivalent

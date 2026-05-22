@@ -137,6 +137,9 @@ def make_campaign(scene, name: str = "Test Campaign") -> MagicMock:
         return None
 
     campaign.get = MagicMock(side_effect=_get)
+    # FastAPI lifespan shutdown calls `campaign.close()`; the mock needs
+    # the attribute explicitly because we use `spec=[]`.
+    campaign.close = MagicMock()
     return campaign
 
 
@@ -605,9 +608,13 @@ class TestGetScenes:
     def test_scenes_delegates_to_campaign_scenes(self) -> None:
         # Server iterates `campaign.scenes()`, not factory internals.
         app, *_ = make_loaded_app()
+        # The TestClient context's exit fires FastAPI shutdown, which
+        # calls `App.close_campaigns` and clears the campaigns dict —
+        # so capture the campaign reference before the context exits.
+        campaign = app.campaigns[CAMPAIGN_ID]
         with TestClient(app._fastapi) as client:
             client.get(f"/api/campaigns/{CAMPAIGN_ID}/scenes")
-        app.campaigns[CAMPAIGN_ID].scenes.assert_called_once()  # type: ignore[attr-defined]
+        campaign.scenes.assert_called_once()  # type: ignore[attr-defined]
 
     def test_scenes_empty_campaign_returns_empty_list(self) -> None:
         app, *_ = make_loaded_app()
@@ -1354,8 +1361,9 @@ class TestAppRun:
             (sub / "config.yaml").write_text("name: " + n + "\n")
         return str(root) + "/"
 
-    def test_run_loads_first_subdir_with_config_yaml(self, tmp_path) -> None:
-        # server-run-load: first subdir (sorted) with config.yaml is loaded.
+    def test_run_loads_all_subdirs_with_config_yaml(self, tmp_path) -> None:
+        # server-run-load: EVERY subdir with config.yaml is loaded into
+        # App.campaigns, in sorted order.
         sidestage_dir = self._make_sidestage_tree(tmp_path, ["b_camp", "a_camp"])
         loaded_paths: list = []
 
@@ -1363,22 +1371,21 @@ class TestAppRun:
             loaded_paths.append(path)
             c = MagicMock()
             c.name = path.name
+            c.close = MagicMock()
             return c
 
         with (
             patch("sidestage.server.uvicorn.run") as run_mock,
             patch(
-                "sidestage.server.open_falkor",
-                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+                "sidestage.server.FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
             ),
-            patch("sidestage.server.FalkorEntityFactory"),
             patch("sidestage.server.Campaign.import_from_disk", side_effect=fake_load),
         ):
             App.run(sidestage_dir=sidestage_dir)
 
-        # Sorted order: a_camp comes first.
-        assert len(loaded_paths) == 1
-        assert loaded_paths[0].name == "a_camp"
+        # Sorted order: a_camp before b_camp.
+        assert [p.name for p in loaded_paths] == ["a_camp", "b_camp"]
         run_mock.assert_called_once()
 
     def test_run_skips_subdirs_without_config_yaml(self, tmp_path) -> None:
@@ -1401,10 +1408,9 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch(
-                "sidestage.server.open_falkor",
-                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+                "sidestage.server.FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
             ),
-            patch("sidestage.server.FalkorEntityFactory"),
             patch("sidestage.server.Campaign.import_from_disk", side_effect=fake_load),
         ):
             App.run(sidestage_dir=str(root.parent) + "/")
@@ -1420,10 +1426,9 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch(
-                "sidestage.server.open_falkor",
-                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+                "sidestage.server.FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
             ),
-            patch("sidestage.server.FalkorEntityFactory"),
             patch("sidestage.server.Campaign.import_from_disk") as load_mock,
             pytest.raises(RuntimeError),
         ):
@@ -1438,10 +1443,9 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch(
-                "sidestage.server.open_falkor",
-                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+                "sidestage.server.FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
             ),
-            patch("sidestage.server.FalkorEntityFactory"),
             patch("sidestage.server.Campaign.import_from_disk") as load_mock,
             pytest.raises(RuntimeError),
         ):
@@ -1623,10 +1627,9 @@ class TestServerMainLoadsDotenv:
             patch.object(server_mod.uvicorn, "run"),
             patch.object(
                 server_mod,
-                "open_falkor",
-                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+                "FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
             ),
-            patch.object(server_mod, "FalkorEntityFactory"),
             patch.object(
                 server_mod.Campaign, "import_from_disk", return_value=fake_campaign
             ),

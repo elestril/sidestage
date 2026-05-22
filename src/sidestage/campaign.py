@@ -98,6 +98,7 @@ class Campaign:
         self.name = name
         self.default_scene_id = default_scene_id
         self._store = store if store is not None else DictEntityFactory()
+        self._closed: bool = False
         # FalkorEntityFactory needs a backreference to this Campaign to
         # construct Entity wrappers on rehydration. In-memory factories
         # don't — so we duck-type instead of putting the hook on the
@@ -106,16 +107,62 @@ class Campaign:
         if callable(set_campaign):
             set_campaign(self)
 
+    # ----------------------------------------------------------------
+    # Closed-state fencing
+    # ----------------------------------------------------------------
+
+    def _ensure_open(self) -> None:
+        """Raise if any public surface is used after `close()`.
+
+        .implements: persistence-engine-shutdown
+        """
+        if self._closed:
+            raise RuntimeError(f"Campaign {self.name!r} is closed")
+
     @property
     def db_handle(self):
         """campaign-db-handle: Public seam for entities that need DB
         access (e.g. Scene's message stream). Returns the store's
         underlying FalkorDB handle, or `None` when the campaign runs
-        in-memory.
+        in-memory (DictEntityFactory has no `db_handle` attribute).
+
+        Raises if the campaign has been closed.
 
         .implements: persistence-campaign-db-handle
         """
+        self._ensure_open()
         return getattr(self._store, "db_handle", None)
+
+    # ----------------------------------------------------------------
+    # Lifecycle — Campaign owns its factory, which owns any engine.
+    # ----------------------------------------------------------------
+
+    def close(self) -> None:
+        """campaign-close: Release resources held by this Campaign.
+
+        Idempotent — short-circuits on the second call. Delegates to
+        `self._store.close()` if the factory has one
+        (`FalkorEntityFactory` shuts the embedded redis subprocess
+        down here; `DictEntityFactory` has no `close` attribute so
+        the duck-typed call is skipped).
+
+        After `close()`, every public method raises `RuntimeError` via
+        `_ensure_open` — closed is a real state, not a half-state.
+
+        .implements: persistence-engine-shutdown
+        """
+        if self._closed:
+            return
+        self._closed = True
+        close = getattr(self._store, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> Campaign:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     # ----------------------------------------------------------------
     # Architectural surface: get / add / delete
@@ -126,6 +173,7 @@ class Campaign:
 
         .implements: entity-campaign
         """
+        self._ensure_open()
         return self._store.get(entity_id)
 
     def add(self, entity: Entity) -> None:
@@ -133,6 +181,7 @@ class Campaign:
 
         .implements: entity-campaign
         """
+        self._ensure_open()
         self._store.add(entity)
 
     def delete(self, entity_id: str) -> None:
@@ -140,6 +189,7 @@ class Campaign:
 
         .implements: entity-campaign
         """
+        self._ensure_open()
         self._store.delete(entity_id)
 
     # ----------------------------------------------------------------
@@ -151,6 +201,7 @@ class Campaign:
 
         .implements: rest-api-get-scenes
         """
+        self._ensure_open()
         return [e for e in self._store.entities() if isinstance(e, Scene)]
 
     def scene(self, scene_id: EntityId) -> Scene | None:
@@ -159,6 +210,7 @@ class Campaign:
 
         .implements: rest-api-get-scene
         """
+        # _ensure_open via self.get below; no duplicate check needed.
         entity = self.get(scene_id)
         if entity is None or not isinstance(entity, Scene):
             return None
@@ -169,6 +221,7 @@ class Campaign:
 
         .implements: campaign-model
         """
+        self._ensure_open()
         return Campaign.Model(
             name=self.name,
             default_scene_id=self.default_scene_id,

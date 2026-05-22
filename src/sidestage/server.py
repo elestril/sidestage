@@ -15,8 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from sidestage.actor import Actor, StubActor, UserActor
 from sidestage.campaign import Campaign
 from sidestage.entity import Entity, EntityId
-from sidestage.falkor_client import close_falkor, open_falkor
-from sidestage.falkor_factory import GRAPH_NAME, FalkorEntityFactory
+from sidestage.falkor_factory import FalkorEntityFactory
 from sidestage.instance_config import (
     from_env as _instance_config_from_env,
 )
@@ -112,10 +111,11 @@ class App:
     """
 
     campaigns: dict[str, Campaign]
-    """server-app-campaigns: Loaded campaigns keyed by `campaign.name`. Today
-    contains at most one entry (per `App.run` loading the first subdir found
-    in `<sidestage_dir>/campaigns/`). The dict shape is the scaffold for
-    future multi-campaign support.
+    """server-app-campaigns: Loaded campaigns keyed by `campaign.name`.
+    `App._build_and_load` walks every subdir under
+    `<sidestage_dir>/campaigns/` with a `config.yaml` and registers each
+    one. Each Campaign owns its backing FalkorDBLite engine; closing
+    a Campaign closes its engine (per `persistence-engine-shutdown`).
 
     .implements: cuj-startup-load
     """
@@ -151,9 +151,6 @@ class App:
         self.campaigns = {}
         # server-state-loading: initial state is LOADING.
         self.state = ServerState.LOADING
-        # FalkorDBLite engines opened by `_build_and_load` — closed on
-        # FastAPI shutdown (per `persistence-engine-shutdown`).
-        self._falkor_engines: list = []
         from contextlib import asynccontextmanager
 
         @asynccontextmanager
@@ -161,7 +158,7 @@ class App:
             try:
                 yield
             finally:
-                self.close_engines()
+                self.close_campaigns()
 
         self._fastapi: FastAPI = FastAPI(lifespan=_lifespan)
         self._setup_routes()
@@ -250,10 +247,12 @@ class App:
     def _setup_routes(self) -> None:
         app = self._fastapi
 
-        # rest-api-get-root: GET / redirects to /<cid> for the loaded
-        # campaign. Single-campaign today; future multi-campaign will
-        # have a real selector page here. Registered BEFORE the static
-        # mount so it always takes precedence over the SPA fallback.
+        # rest-api-get-root: GET / 302-redirects to /<cid> for the
+        # first campaign in `App.campaigns` (dict insertion order
+        # follows `sorted(campaign_dirs)`). Registered BEFORE the
+        # static mount so it always takes precedence over the SPA
+        # fallback. A future multi-campaign selector page would live
+        # here.
         @app.get("/")
         async def get_root() -> Response:
             self._require_serving()
@@ -422,13 +421,15 @@ class App:
           `cls.llm_profile` BEFORE campaign load so that any Character
           with `owner="npc"` can construct its NpcActor at deserialize
           time.
-        - server-run-load: Walks `<sidestage_dir>/campaigns/` for
-          subdirectories containing `config.yaml` and loads the FIRST one
-          found (sorted, deterministic); registers it as
-          `App.campaigns[campaign.name] = campaign`. Raises `RuntimeError`
-          if `<sidestage_dir>/campaigns/` is missing or empty.
-        - server-run-state-serving: Sets `state = SERVING` after the campaign
-          is fully loaded; API endpoints become active.
+        - server-run-load: Walks `<sidestage_dir>/campaigns/` for every
+          subdirectory containing a `config.yaml` (sorted, deterministic)
+          and registers each as `App.campaigns[campaign.name] = campaign`.
+          Acquire is atomic: if any campaign fails to load, every
+          previously-opened engine is closed before the exception
+          propagates. Raises `RuntimeError` if the directory is missing
+          or empty, or if two campaign dirs declare the same name.
+        - server-run-state-serving: Sets `state = SERVING` after every
+          campaign is fully loaded; API endpoints become active.
         """
         # server-run-sidestage-dir.
         instance = cls(sidestage_dir=sidestage_dir)
@@ -449,9 +450,11 @@ class App:
             )
         cls.llm_profile = profiles.get(llm_profile_name)
 
-        # server-run-load: walk `<sidestage_dir>/campaigns/` for subdirs
-        # with a `config.yaml`. Today's single-campaign world maps to
-        # dict[name] -> Campaign.
+        # server-run-load: walk `<sidestage_dir>/campaigns/` for every
+        # subdir with a `config.yaml`; load each one into
+        # `App.campaigns` keyed by campaign name. Engine lifetime is
+        # tied to each Campaign — closing the Campaign closes its
+        # engine (per `persistence-engine-shutdown`).
         campaigns_root = Path(sidestage_dir) / "campaigns"
         if not campaigns_root.is_dir():
             raise RuntimeError(f"No campaigns/ directory under {sidestage_dir}")
@@ -462,34 +465,64 @@ class App:
         )
         if not campaign_dirs:
             raise RuntimeError(f"No campaign with config.yaml in {campaigns_root}")
-        campaign_dir = campaign_dirs[0]
 
-        # persistence-startup-import-on-empty: open the per-campaign
-        # FalkorDBLite engine; if its world graph is empty, import from
-        # markdown — otherwise just open from the existing graph.
-        falkor = open_falkor(campaign_dir / "falkor.db")
-        instance._falkor_engines.append(falkor)
-        factory = FalkorEntityFactory(falkor)
-        if GRAPH_NAME in falkor.list_graphs():
-            campaign = Campaign.open(campaign_dir, factory)
-        else:
-            campaign = Campaign.import_from_disk(campaign_dir, factory)
-        instance.campaigns[campaign.name] = campaign
+        # Atomic acquire: build all Campaigns into a local list. If
+        # any iteration fails, close every campaign opened so far
+        # (in reverse) before re-raising, so partial loads don't leak
+        # subprocesses.
+        loaded: list[Campaign] = []
+        try:
+            for campaign_dir in campaign_dirs:
+                # persistence-startup-import-on-empty: open the engine;
+                # if its world graph is empty, import from markdown —
+                # otherwise just open from the existing graph.
+                factory = FalkorEntityFactory(campaign_dir / "falkor.db")
+                if factory.is_populated():
+                    campaign = Campaign.open(campaign_dir, factory)
+                else:
+                    campaign = Campaign.import_from_disk(campaign_dir, factory)
+                # Name collisions silently overwrite in a dict and orphan
+                # the displaced engine; detect explicitly.
+                if any(c.name == campaign.name for c in loaded):
+                    campaign.close()
+                    raise RuntimeError(
+                        f"two campaign directories declare name {campaign.name!r}"
+                    )
+                loaded.append(campaign)
+        except BaseException:
+            for c in reversed(loaded):
+                try:
+                    c.close()
+                except Exception:
+                    logger.exception(
+                        "_build_and_load rollback: close failed for %r", c.name
+                    )
+            raise
+
+        for campaign in loaded:
+            instance.campaigns[campaign.name] = campaign
+
         # server-run-state-serving.
         instance.state = ServerState.SERVING
         return instance
 
-    def close_engines(self) -> None:
-        """Stop every FalkorDBLite engine opened by this App.
+    def close_campaigns(self) -> None:
+        """Close every Campaign held by this App, with per-campaign
+        exception isolation so one bad close doesn't strand the rest.
+        Always clears `self.campaigns` at the end.
 
-        Wired into FastAPI's `shutdown` event so `--reload` worker
+        Wired into FastAPI's `shutdown` lifespan so `--reload` worker
         tear-down doesn't leave a stale socket (per
         `persistence-engine-shutdown`).
 
         .implements: persistence-engine-shutdown
         """
-        while self._falkor_engines:
-            close_falkor(self._falkor_engines.pop())
+        for campaign in list(self.campaigns.values()):
+            try:
+                campaign.close()
+            except Exception:
+                logger.exception("close_campaigns: close failed for %r", campaign.name)
+        self.campaigns.clear()
 
     @classmethod
     def run(

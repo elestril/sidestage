@@ -16,12 +16,15 @@ an entity and receive a promise; FE entity proxies expose
   human/ops inspection surface. A Playwright guard asserts zero
   non-GET `/api/*` requests in the cuj-hello browser test.
 - frontend-workspace-cid-from-url: The campaign id is the first path
-  segment of `window.location.pathname`, URL-decoded. The FE does NOT
-  call `GET /api/campaigns` to discover the campaign. `GET /` on the
-  backend redirects to `/<cid>` for the single loaded campaign.
-  Multi-campaign deployments later route via real HTML navigation
-  (`/dragons_lair`, `/another_campaign`); the FE never enumerates
-  campaigns at runtime.
+  segment of `window.location.pathname`, URL-decoded. `GET /` on the
+  backend 302-redirects to `/<cid>` for the first loaded campaign
+  (per [[backend]] `backend-route-root`). The vite dev server does
+  NOT proxy `/`, so the SPA also self-redirects on empty path by
+  fetching `GET /api/campaigns` and navigating to the first entry.
+  When the server reports an empty campaign list, the SPA renders a
+  terminal "No campaigns loaded" state instead of looping on retry.
+  Multi-campaign deployments route via real HTML navigation
+  (`/dragons_lair`, `/another_campaign`).
 
 The **UI layer** — workspace shell and entity-typed widgets — is
 specced separately in [[frontend-layout]].

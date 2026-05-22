@@ -129,12 +129,14 @@ in sync, spec amendments require a design conversation. See [[spec]].
 
 Four journeys traverse the whole shape end-to-end:
 
-1. **cuj-startup**: User runs `sidestage` → server opens FalkorDBLite at
-   `<sidestage_dir>/falkor.db` (per [[persistence]]
-   `persistence-engine-redislite`) → if no graph exists for the single
-   loaded campaign, runs `cuj-campaign-import`; otherwise `Campaign.open`
-   reads it back → flips to `SERVING` → SPA loads → FE Campaign connects
-   → resolves the scene → DOM renders.
+1. **cuj-startup**: User runs `sidestage` → server walks every
+   `<sidestage_dir>/campaigns/<id>/` with a `config.yaml`; for each, it
+   opens a per-campaign FalkorDBLite at `<campaign_dir>/falkor.db` (per
+   [[persistence]] `persistence-engine-redislite`). If the engine has
+   no `"world"` graph yet, `cuj-campaign-import` runs; otherwise
+   `Campaign.open` reads the graph back. After every campaign is
+   loaded, state flips to `SERVING` → SPA loads → FE Campaign connects
+   to a campaign chosen by URL → resolves the scene → DOM renders.
    - .implemented-by: App.run, App._setup_routes, Campaign,
      Campaign.open, Campaign.import_from_disk
 2. **cuj-hello-send / cuj-hello-respond**: User types a message → FE widget

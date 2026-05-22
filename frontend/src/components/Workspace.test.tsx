@@ -133,6 +133,37 @@ describe('Workspace', () => {
     expect(screen.queryByTestId('entity-panel-stub')).not.toBeInTheDocument();
   });
 
+  test('frontend-workspace-bootstrap-self-redirect-on-empty-path', async () => {
+    // frontend-workspace-cid-from-url: on `/` (no path segment), the SPA
+    // self-redirects to /<first-campaign-name> after fetching
+    // /api/campaigns. Covers the dev-server case where vite doesn't
+    // proxy `/` to the backend's redirect handler.
+    window.history.pushState({}, '', '/');
+    const redirect = vi.fn();
+
+    const fetcher = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === '/api/campaigns') {
+        return jsonResponse([{ name: CID, default_scene_id: 'parlor' }]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    render(
+      <Workspace
+        deps={{
+          fetcher: fetcher as unknown as typeof fetch,
+          registryFactory: fakeRegistry,
+          redirect,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(redirect).toHaveBeenCalledWith(`/${encodeURIComponent(CID)}`);
+    });
+  });
+
   test('frontend-workspace-component-layout default-scene after bootstrap', async () => {
     const fetcher = happyFetcher();
     render(

@@ -11,6 +11,11 @@ message persistence via the Redis stream (reached through
 rule here ("scalars → property, `list[EntityId]` → edges, anything
 else → skip") naturally leaves `list[Message]` to Scene.
 
+`FalkorEntityFactory` owns the engine end-to-end: construction opens
+the embedded `redislite` subprocess; `close()` SIGTERMs it (escalating
+to SIGKILL on hang) and clears every cached handle. The previous
+two-step `open_falkor` / `close_falkor` helpers have been folded in.
+
 Construction is per-campaign — the engine itself is the namespace.
 The graph name is `"world"`; stream keys (managed by Scene) are
 namespace-free.
@@ -19,7 +24,11 @@ namespace-free.
 from __future__ import annotations
 
 import logging
+import os
+import signal
+import time
 import typing
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from redislite import FalkorDB
@@ -41,6 +50,10 @@ GRAPH_NAME = "world"
 # Fields the factory never touches:
 #   - "id" — node identity, written as the MERGE key
 _SKIP_FIELDS = frozenset({"id"})
+
+# Engine shutdown budgets.
+_SIGTERM_GRACE_S = 1.0  # max wait for redis to exit after SIGTERM
+_SIGKILL_GRACE_S = 0.5  # max wait after escalating to SIGKILL
 
 
 def _is_entity_id_list(annotation: Any) -> bool:
@@ -115,17 +128,76 @@ def _classes_from_labels(labels: list[str]) -> tuple[type[Entity], type[Entity.M
     return Entity, Entity.Model
 
 
+def _noop_cleanup(*_args: Any, **_kwargs: Any) -> None:
+    """Replacement for `redislite.Redis._cleanup` — see
+    `FalkorEntityFactory.__init__` for why we neuter it."""
+    return None
+
+
+def _wait_for_exit(pid: int, budget_s: float) -> bool:
+    """Poll for process exit using `os.kill(pid, 0)`; return True if it
+    disappeared within `budget_s`, False on timeout. Step is 10ms."""
+    deadline = time.monotonic() + budget_s
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.01)
+    return False
+
+
 class FalkorEntityFactory(EntityFactory):
     """falkor-entity-factory: FalkorDBLite-backed `EntityFactory`.
+
+    Owns the embedded redislite subprocess end-to-end. Construction
+    opens the engine; `close()` shuts it down. Every public method
+    raises `RuntimeError` if called after `close()` (closed state is
+    fenced).
 
     .implements: entity-factory-impl, persistence-engine-redislite
     """
 
-    def __init__(self, falkor: FalkorDB) -> None:
-        self._falkor = falkor
-        self._graph = falkor.select_graph(GRAPH_NAME)
+    def __init__(self, db_path: Path) -> None:
+        """Open the embedded FalkorDBLite engine at `db_path`.
+
+        AOF is enabled by default so chat appends survive ≤1s of
+        crash exposure. Parent directory is created if missing.
+
+        Immediately overwrites the redislite `Redis._cleanup` callable
+        with a no-op so neither the atexit hook (registered in
+        `Redis.__init__`) nor the `Redis.__del__` finalizer will
+        attempt SHUTDOWN-with-retries against the subprocess we'll
+        kill in `close()`. Engine shutdown is fully owned here.
+
+        .implements: persistence-engine-redislite, persistence-engine-aof
+        """
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._falkor: FalkorDB | None = FalkorDB(
+            dbfilename=str(db_path),
+            serverconfig={"appendonly": "yes"},
+        )
+        # Neuter redislite's per-instance cleanup. Two paths fire it:
+        # an `atexit.register(self._cleanup, ...)` in `Redis.__init__`,
+        # and `Redis.__del__` at GC time. Both call SHUTDOWN-with-
+        # retries which costs ~15s when the subprocess is already dead.
+        # Replacing with a no-op disarms both. `close()` then has full
+        # ownership of subprocess teardown.
+        self._falkor.client._cleanup = _noop_cleanup
+        self._graph: Any = self._falkor.select_graph(GRAPH_NAME)
         self._cache: dict[str, Entity] = {}
         self._campaign: Campaign | None = None
+        self._closed: bool = False
+
+    # ---- closed-state fencing ----------------------------------------
+
+    def _ensure_open(self) -> None:
+        """Raise if the factory has been closed.
+
+        .implements: persistence-engine-shutdown
+        """
+        if self._closed:
+            raise RuntimeError("FalkorEntityFactory is closed")
 
     # ---- duck-typed Campaign coupling --------------------------------
 
@@ -134,15 +206,86 @@ class FalkorEntityFactory(EntityFactory):
         """Public seam for entities that need DB access (notably Scene
         for its message stream). Exposed via `Campaign.db_handle`.
 
+        Raises if the factory is closed. In-memory factories
+        (`DictEntityFactory`) don't expose `db_handle` at all, so
+        `getattr(store, "db_handle", None)` on `Campaign.db_handle`
+        returns `None` for them — that's the legitimate "no engine"
+        signal, distinct from the post-close error.
+
         .implements: persistence-campaign-db-handle
         """
+        self._ensure_open()
+        assert self._falkor is not None  # implied by _ensure_open
         return self._falkor
+
+    def is_populated(self) -> bool:
+        """True iff the world graph already exists in this engine.
+
+        `App._build_and_load` uses this to dispatch between
+        `Campaign.open` and `Campaign.import_from_disk` without having
+        to reach for the raw FalkorDB.
+        """
+        self._ensure_open()
+        assert self._falkor is not None
+        return GRAPH_NAME in self._falkor.list_graphs()
 
     def set_campaign(self, campaign: Campaign) -> None:
         """Stash the Campaign reference for wrapper construction at
         rehydration time. Called by `Campaign.__init__` via duck-typing.
         """
+        self._ensure_open()
         self._campaign = campaign
+
+    def close(self) -> None:
+        """Total, idempotent shutdown of the embedded engine.
+
+        Steps:
+          1. SIGTERM the redis subprocess; poll for exit (1s budget).
+          2. If still alive, SIGKILL; poll briefly (0.5s budget).
+          3. If STILL alive, raise — caller deserves to know.
+          4. Null every cached handle so any post-close use hits
+             `_ensure_open` cleanly.
+
+        `ProcessLookupError` (already gone) and `PermissionError` (pid
+        recycled to a process owned by another uid) are caught and
+        logged; other `OSError`s propagate.
+
+        .implements: persistence-engine-shutdown
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        falkor = self._falkor
+        if falkor is not None:
+            pid = getattr(falkor.client, "pid", 0) or 0
+            if pid:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    if not _wait_for_exit(pid, _SIGTERM_GRACE_S):
+                        os.kill(pid, signal.SIGKILL)
+                        if not _wait_for_exit(pid, _SIGKILL_GRACE_S):
+                            # Refuse to silently leak. Caller decides
+                            # whether to log and continue (App.close_campaigns)
+                            # or to fail hard.
+                            raise RuntimeError(
+                                f"redis subprocess {pid} did not exit "
+                                "after SIGTERM + SIGKILL"
+                            )
+                except ProcessLookupError:
+                    pass  # Already gone, fine.
+                except PermissionError:
+                    logger.warning(
+                        "redis subprocess %s is owned by another uid "
+                        "(pid likely recycled); not signalled",
+                        pid,
+                    )
+
+        # Drop every cached handle so post-close use hits _ensure_open.
+        self._falkor = None
+        self._graph = None
+        self._cache.clear()
+        self._campaign = None
 
     def load_existing(self) -> None:
         """Walk the graph in dependency order and construct all wrappers.
@@ -156,6 +299,7 @@ class FalkorEntityFactory(EntityFactory):
 
         .implements: persistence-startup
         """
+        self._ensure_open()
         for label in ("Character", "Scene"):
             result = self._graph.query(
                 f"MATCH (n:{label}) RETURN n.id",
@@ -168,6 +312,7 @@ class FalkorEntityFactory(EntityFactory):
     # ---- entity surface (the ABC contract) ---------------------------
 
     def get(self, id: str) -> Entity | None:
+        self._ensure_open()
         cached = self._cache.get(id)
         if cached is not None:
             return cached
@@ -181,6 +326,7 @@ class FalkorEntityFactory(EntityFactory):
 
         .implements: persistence-cypher-add, persistence-graph-edges-merge
         """
+        self._ensure_open()
         model = entity.model
         model_cls = type(model)
         node_label = _node_label(entity.type)
@@ -227,6 +373,7 @@ class FalkorEntityFactory(EntityFactory):
         self._cache[entity.id] = entity
 
     def delete(self, id: str) -> None:
+        self._ensure_open()
         self._graph.query(
             "MATCH (n:Entity {id: $id}) DETACH DELETE n",
             {"id": id},
@@ -234,12 +381,14 @@ class FalkorEntityFactory(EntityFactory):
         self._cache.pop(id, None)
 
     def entities(self) -> typing.Iterable[Entity]:
+        self._ensure_open()
         return self._cache.values()
 
     # ---- rehydration -------------------------------------------------
 
     def _hydrate(self, eid: str) -> Entity | None:
         """Build a wrapper for `eid` from the graph and cache it."""
+        self._ensure_open()
         if self._campaign is None:
             raise RuntimeError(
                 "FalkorEntityFactory.set_campaign was not called before "

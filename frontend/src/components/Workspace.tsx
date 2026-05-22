@@ -13,6 +13,10 @@ export interface WorkspaceDeps {
     campaignId: string,
     deps: { fetcher?: typeof fetch },
   ) => EntityRegistry;
+  // Hook for the dev-only empty-path self-redirect. Defaults to
+  // `window.location.replace`; tests inject a spy because jsdom's
+  // `window.location` is non-configurable.
+  redirect?: (url: string) => void;
 }
 
 export interface WorkspaceProps {
@@ -45,10 +49,14 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
   const registryFactory =
     deps.registryFactory ??
     ((cid, d) => new EntityRegistry(cid, { fetcher: d.fetcher }));
+  const redirect = deps.redirect ?? ((url: string) => window.location.replace(url));
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [, setDefaultSceneId] = useState<EntityId | null>(null);
   const [mainEntityId, setMainEntityId] = useState<EntityId | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<
+    'no-campaigns' | null
+  >(null);
 
   useEffect(() => {
     let backoff = INITIAL_BACKOFF_MS;
@@ -57,13 +65,25 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
 
     const bootstrap = async () => {
       // frontend-workspace-cid-from-url: the campaign id is the first
-      // path segment, URL-decoded. `/` is reserved for "no campaign
-      // selected" and is not a valid bootstrap target today.
+      // path segment, URL-decoded. In prod the backend 302-redirects
+      // `/` → `/<cid>` (per `backend-route-root`); in dev the vite
+      // server doesn't, so the SPA self-redirects on empty path by
+      // picking the first campaign returned by `/api/campaigns`.
       const segments = window.location.pathname.split('/').filter(Boolean);
       if (segments.length === 0) {
-        throw new Error(
-          'No campaign in URL — open /<campaign_name> instead of /',
-        );
+        const listRes = await doFetch('/api/campaigns');
+        if (!listRes.ok) {
+          throw new Error(`GET /api/campaigns → ${listRes.status}`);
+        }
+        const campaigns = (await listRes.json()) as Array<{ name: string }>;
+        if (cancelled) return;
+        if (campaigns.length === 0) {
+          // Terminal — no campaigns on the server. Render a clear
+          // empty-state instead of looping forever on a retry.
+          throw new Error('NO_CAMPAIGNS_LOADED');
+        }
+        redirect('/' + encodeURIComponent(campaigns[0].name));
+        return; // Browser navigates; the new page will re-run bootstrap.
       }
       const cid = decodeURIComponent(segments[0]);
 
@@ -86,8 +106,13 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
     const connect = () => {
       if (cancelled) return;
       bootstrap().catch((err) => {
-        console.error('Workspace bootstrap failed', err);
         if (cancelled) return;
+        // Terminal error — render an empty-state, don't loop.
+        if (err instanceof Error && err.message === 'NO_CAMPAIGNS_LOADED') {
+          setBootstrapError('no-campaigns');
+          return;
+        }
+        console.error('Workspace bootstrap failed', err);
         const delay = backoff;
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
         retryTimer = setTimeout(connect, delay);
@@ -137,6 +162,13 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
           <EntityRegistryProvider value={registry}>
             <EntityPanel key={mainEntityId} entityId={mainEntityId} />
           </EntityRegistryProvider>
+        ) : bootstrapError === 'no-campaigns' ? (
+          <div
+            data-testid="workspace-no-campaigns"
+            className="flex h-full items-center justify-center text-sm text-slate-500"
+          >
+            No campaigns loaded.
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-500">
             Select a scene from the left.

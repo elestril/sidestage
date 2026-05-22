@@ -140,25 +140,27 @@ campaign:<cid>:scene:<sid>:messages
 
 ```
 App._build_and_load:
-  1. open_clients(config.falkor_path) → (FalkorDB, Redis)
-  2. construct FalkorEntityFactory from the clients
-  3. resolve the single campaign dir under <sidestage_dir>/campaigns/
-  4. if "campaign:<name>" not in falkordb.list_graphs():
-       Campaign.import_from_disk(dir, store)
-     else:
-       Campaign.open(name, store)
-  5. campaigns[name] = campaign
+  1. resolve every <sidestage_dir>/campaigns/<id>/ that has config.yaml
+  2. for each campaign_dir:
+       falkor  = open_falkor(campaign_dir / "falkor.db")
+       factory = FalkorEntityFactory(falkor)
+       if "world" not in falkor.list_graphs():
+           campaign = Campaign.import_from_disk(campaign_dir, factory)
+       else:
+           campaign = Campaign.open(campaign_dir, factory)
+       campaigns[campaign.name] = campaign
 ```
 
-- persistence-startup-import-on-empty: The presence of a graph named
-  `campaign:<name>` is the sole signal that this campaign has
-  already been imported. Absent → import from disk. Present → open
-  from the graph; the markdown directory is not read for entity
-  state. A `--force` reimport flag is a deferred CLI hook.
-- persistence-startup-single-campaign: This iteration keeps the
-  current single-campaign-load behaviour ([[backend]] `backend-app`).
-  The `App.campaigns: dict` scaffolding is unchanged. Multi-campaign
-  iteration is deferred.
+- persistence-startup-import-on-empty: The presence of the `"world"`
+  graph in a campaign's FalkorDBLite engine is the sole signal that
+  this campaign has already been imported. Absent → import from disk.
+  Present → open from the graph; the markdown directory is not read
+  for entity state. A `--force` reimport flag is a deferred CLI hook.
+- persistence-startup-multi-campaign: Every campaign subdir is loaded
+  on startup, each into its own engine at `<campaign_dir>/falkor.db`.
+  `App.campaigns: dict[str, Campaign]` holds the registry; the engine
+  for each campaign is reachable via `campaign.db_handle` and closes
+  with the Campaign (per `persistence-engine-shutdown`).
 - .implements: cuj-startup-load
 - .implemented-by: App._build_and_load, Campaign.import_from_disk,
   Campaign.open

@@ -1,10 +1,11 @@
 # backend: Server lifecycle, REST + WS surface, action dispatch
 
 The Sidestage backend is a FastAPI process started by the `sidestage` CLI.
-On startup it loads the first campaign found in the config directory, then
-serves both the REST API (`/api/*`) and a multiplexed WebSocket
-(`/api/campaigns/{cid}/ws`). Per-route invariants (status codes, response
-shapes) live in pydoc on the handlers.
+On startup it loads **every** campaign subdir under
+`<sidestage_dir>/campaigns/` with a `config.yaml` into
+`App.campaigns[campaign.name]`, then serves both the REST API (`/api/*`)
+and a multiplexed WebSocket (`/api/campaigns/{cid}/ws`). Per-route
+invariants (status codes, response shapes) live in pydoc on the handlers.
 
 ## backend-app: App
 
@@ -125,7 +126,7 @@ Plus the static SPA bundle at `/`.
 ### backend-rest-debug: Read-only REST debug mirror
 
 ```
-GET /                                           302 → /<cid>  (single-campaign deploy)
+GET /                                           302 → /<cid>  (first campaign by sort order)
 GET /<cid>                                      SPA bundle (or inline fallback) — campaign-scoped
 GET /api/campaigns                              list[Campaign.Model]
 GET /api/campaigns/{cid}                        Campaign.Model
@@ -150,9 +151,11 @@ GET /api/campaigns/{cid}/scenes/{sid}/messages  list[Message.Model]
   `_require_serving()`, which raises 503 while `App.state == LOADING`.
 - backend-rest-debug-ws-lameduck: The WS handshake closes with code
   1013 in `LOADING`.
-- backend-route-root: GET `/` 302-redirects to `/<cid>` for the
-  single loaded campaign. Returns inline HTML when no campaigns are
-  loaded; returns 503 while `App.state == LOADING`.
+- backend-route-root: GET `/` 302-redirects to `/<cid>` for the first
+  loaded campaign (by sort order over `App.campaigns`). Returns inline
+  HTML when no campaigns are loaded; returns 503 while
+  `App.state == LOADING`. A future multi-campaign selector page would
+  live here.
 - backend-route-campaign-spa: GET `/<cid>` serves the SPA HTML
   (`static/index.html` when present, else inline). The FE reads the
   campaign id from `window.location.pathname` (per [[frontend]]
