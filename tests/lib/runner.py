@@ -8,21 +8,12 @@ Per `spec-location-pydoc`, the runner spec lives on this module's
 
 from __future__ import annotations
 
-import asyncio
-
-from sidestage.character import Character
 from sidestage.scene import SimpleScene
 from sidestage.server import App
 from tests.lib.scenarios import Scenario
 
-# Bound on the await-cycle wait. The npc cycle is fully in-process and
-# synchronous-ish (StubActor.respond does no real I/O), so 1 s is generous.
-_AWAIT_CYCLE_TIMEOUT_S = 1.0
-# Quiescence window: number of consecutive "no growth" yields that count as
-# "the npc cycle has settled". Two yields reliably catches the
-# `dispatch -> create_task -> await self._npc.respond -> append -> notify`
-# chain even when a future actor adds extra `await` steps.
-_QUIESCENCE_YIELDS = 3
+# Bound on the idle-wait for listener-spawned background tasks.
+_IDLE_TIMEOUT_S = 1.0
 
 
 async def run_scenario(scenario: Scenario, app: App) -> None:
@@ -30,62 +21,47 @@ async def run_scenario(scenario: Scenario, app: App) -> None:
 
     Steps:
     - run-scenario-build-scene: Construct a fresh `SimpleScene` from
-      `scenario.scene`, resolving each character id via the app's campaign
-      factory. Fresh scene = no message bleed across tests.
+      `scenario.scene` (a `Scene.Model`), bound to the app's campaign. The
+      campaign already holds the referenced characters; the SimpleScene
+      resolves them via `campaign.get(id)`. Fresh scene = no message bleed
+      across tests.
     - run-scenario-seed-history: Append each `Message` in
-      `scenario.chat_history` to the new scene's `_messages`.
-    - run-scenario-dispatch: Call `scene.append(scenario.input)` and
-      capture the returned index.
-    - run-scenario-await-cycle: Await the fire-and-forget npc cycle to
-      settle. Polls `len(scene.messages)` every `asyncio.sleep(0)` cycle;
-      treats N consecutive no-growth yields as "settled". Bounded by
-      `_AWAIT_CYCLE_TIMEOUT_S` to fail fast if a coroutine wedges.
+      `scenario.chat_history` to the new scene's `_messages` directly,
+      bypassing `append` so seeding doesn't fire any listener tasks.
+    - run-scenario-dispatch: Call `scene.append(scenario.input)`, which
+      records the message and emits `EntityChanged` — characters subscribed
+      at construction react via their `notify` handlers.
+    - run-scenario-await-cycle: Await `scene.idle()` to wait for all
+      listener-spawned background tasks to settle.
     - run-scenario-check: Invoke `scenario.expect.check(scene.messages)`.
 
     .implements: testing-runner
     """
-    # run-scenario-build-scene.
+    # run-scenario-build-scene. `scenario.scene` is a `Scene.Model`; wrap it
+    # in a fresh `SimpleScene` bound to the app's campaign. The campaign
+    # resolves the model's `character_ids` to registered Character entities.
     campaign = next(iter(app.campaigns.values()))
-    factory = campaign.factory
-    characters: list[Character] = []
-    for cid in scenario.scene.characters:
-        entity = factory.get(cid)
-        if entity is None:
-            raise RuntimeError(
-                f"run_scenario: scene references unknown character {cid!r}"
-            )
-        # The fixture campaign guarantees these are Characters.
-        characters.append(entity)  # type: ignore[arg-type]
+    # Re-validate as a SimpleScene.Model — `scenario.scene` is typed as the
+    # base `Scene.Model`, and `SimpleScene.__init__` is annotated to accept
+    # that, but constructing through `SimpleScene.Model` keeps the surface
+    # explicit (and is a no-op for already-matching shapes).
     scene = SimpleScene(
-        id=scenario.scene.id,
-        name=scenario.scene.name,
-        body=scenario.scene.body,
-        characters=characters,
+        SimpleScene.Model.model_validate(scenario.scene.model_dump()),
+        campaign,
     )
 
-    # run-scenario-seed-history. Mutate the underlying _messages list rather
-    # than the dispatch path so seeding doesn't fire any npc tasks.
+    # run-scenario-seed-history. Mutate `_messages` directly so seeding
+    # doesn't fire any listener tasks.
     for msg in scenario.chat_history:
         scene._messages.append(msg)
 
-    # run-scenario-dispatch. SimpleScene.dispatch is sync; the npc cycle is
-    # spawned via asyncio.create_task and runs after this returns.
-    scene.dispatch(scenario.input)
+    # run-scenario-dispatch. `scene.append` records the message and emits
+    # `EntityChanged`; subscribed characters react in spawned tasks.
+    scene.append(scenario.input)
 
-    # run-scenario-await-cycle. Poll for quiescence: once the message list
-    # stops growing for N consecutive yields, the spawned task chain is done.
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + _AWAIT_CYCLE_TIMEOUT_S
-    last_len = len(scene.messages)
-    stable = 0
-    while loop.time() < deadline and stable < _QUIESCENCE_YIELDS:
-        await asyncio.sleep(0)
-        cur = len(scene.messages)
-        if cur == last_len:
-            stable += 1
-        else:
-            stable = 0
-            last_len = cur
+    # run-scenario-await-cycle. Wait for every listener-spawned task to
+    # settle, bounded so a wedged coroutine fails fast.
+    await scene.idle(timeout=_IDLE_TIMEOUT_S)
 
     # run-scenario-check.
     scenario.expect.check(scene.messages)

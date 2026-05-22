@@ -67,6 +67,13 @@ filterwarnings = [
     # garbage-collected while pending, raising an unraisable warning that
     # has nothing to do with our code. Surgical match on the coroutine name.
     "ignore:.*Logging\\.async_success_handler.*:pytest.PytestUnraisableExceptionWarning",
+    # litellm also opens HTTPX sockets for the telemetry sink; when the loop
+    # tears down at process exit they're flagged as unclosed. Same source
+    # as the coroutine above — third-party cleanup race, not our code.
+    # (filter `message` field can't contain raw colons — pytest treats them
+    # as field separators. Match on the prefix only.)
+    "ignore:Exception ignored in.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:Exception ignored in.*BaseEventLoop\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.ruff]

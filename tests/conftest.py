@@ -1,8 +1,8 @@
 """Shared fixtures for `tests/`.
 
 Defines `test_campaign` (session-scoped), `test_app` (function-scoped) and
-`test_client` (function-scoped). The function-scoped fixtures reset
-class-level App state on teardown so tests don't leak across each other.
+`test_client` (function-scoped). The Campaign owns its own entity storage,
+so fixtures don't need to mutate class-level App state.
 
 E2E-tier fixtures (`test_server` — real uvicorn on an ephemeral port)
 live in `tests/e2e/conftest.py`.
@@ -28,11 +28,8 @@ def test_campaign() -> Campaign:
     """testing-fixture-test-campaign: Session-scoped Campaign loaded from
     `tests/sidestage/campaigns/test_campaign/` exactly once.
 
-    `Campaign.load` mutates `App.factory` and `App._actors` via
-    `Character.__init__ -> App.get_actor`. The session-scoped fixture is
-    safe because the loaded characters are read-only domain data; the
-    function-scoped `test_app` fixture wires App.factory back to this
-    campaign per test, so nothing leaks.
+    The Campaign carries its own entity storage, so reuse across tests is
+    safe: the loaded characters and scenes are read-only domain data.
 
     .implements: testing-fixture-test-campaign
     """
@@ -40,29 +37,20 @@ def test_campaign() -> Campaign:
 
 
 @pytest.fixture
-def test_app(test_campaign: Campaign):
+def test_app(test_campaign: Campaign) -> App:
     """testing-fixture-test-app: Per-test fresh `App` wired to the session
     `test_campaign`.
 
-    Sets `App.factory` and `App.campaigns` from the campaign, flips
-    `App.state` to `SERVING`, exposes `App.campaign` as an ergonomic alias
-    for the single loaded campaign, then yields. On teardown clears the
-    class-level actor registry so subsequent tests start clean.
+    Registers the campaign under `App.campaigns` and flips `App.state` to
+    `SERVING` so route handlers don't 503. The Campaign owns its entity
+    storage, so no class-level scaffolding needs resetting on teardown.
 
     .implements: testing-fixture-test-app
     """
     app = App()
     app.campaigns[test_campaign.name] = test_campaign
-    App.factory = test_campaign.factory
     app.state = ServerState.SERVING
-    try:
-        yield app
-    finally:
-        # The session-scoped Campaign holds Characters whose _actor refs
-        # point at the singletons in App._actors. Clearing the registry
-        # would invalidate those bindings, so we leave it intact and only
-        # reset App.factory.
-        App.factory = None
+    return app
 
 
 @pytest.fixture

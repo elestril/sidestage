@@ -6,29 +6,6 @@
 */
 
 /**
- * campaign-response: Wire shape for GET /api/campaigns/{cid}.
- *
- * .implements: rest-api-get-campaign
- */
-export interface CampaignResponse {
-  name: string;
-  default_scene_id: string | null;
-}
-/**
- * character-response: Wire shape for `GET /api/campaigns/{cid}/entities/{id}`
- * when the entity is a Character.
- *
- * Constructed exclusively by `Character.to_response()`. The `type`
- * discriminator distinguishes this variant within `EntityResponse`.
- */
-export interface CharacterResponse {
-  type?: "character";
-  id: string;
-  name: string;
-  body: string;
-  owner: "user" | "stub" | "npc";
-}
-/**
  * llm-profile-schema: a complete named topology — every role this
  * profile defines, mapped to a `ModelEntry`.
  */
@@ -78,19 +55,4 @@ export interface MessageAccepted {
 export interface MessageRequest {
   sender_id: string;
   body: string;
-}
-/**
- * scene-response: Wire shape for `GET /api/campaigns/{cid}/entities/{id}`
- * when the entity is a Scene, and for `GET /api/campaigns/{cid}/scenes`.
- *
- * Constructed exclusively by `Scene.to_response()`. The `type` discriminator
- * distinguishes this variant within `EntityResponse`.
- */
-export interface SceneResponse {
-  type?: "scene";
-  id: string;
-  name: string;
-  body: string;
-  character_ids: string[];
-  player_character_ids: string[];
 }

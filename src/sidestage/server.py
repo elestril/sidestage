@@ -13,15 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sidestage.actor import Actor, StubActor, UserActor
-from sidestage.campaign import Campaign, CampaignResponse
-from sidestage.character import CharacterResponse
-from sidestage.entity import (
-    DictEntityFactory,
-    EntityFactory,
-    EntityId,
-    EntityType,
-    UnresolvedEntityError,
-)
+from sidestage.campaign import Campaign
+from sidestage.entity import Entity, EntityId
 from sidestage.instance_config import (
     from_env as _instance_config_from_env,
 )
@@ -34,11 +27,8 @@ from sidestage.instance_config import (
 from sidestage.llm_profile import LlmProfile, load_profiles
 from sidestage.message import Message
 from sidestage.npc_actor import NpcActor
-from sidestage.scene import SceneResponse
+from sidestage.scene import Scene
 from sidestage.ws import WsConnection
-
-# rest-api-get-entity: discriminated union returned by GET /entities/{eid}.
-EntityResponse = SceneResponse | CharacterResponse
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +59,9 @@ class ServerState(Enum):
 
 
 # ---------------------------------------------------------------------------
-# Wire models for request bodies tied to POST endpoints. SceneResponse and
-# CampaignResponse live with their domain owners (sidestage.scene,
-# sidestage.campaign) per spec-location-pydoc.
+# Wire models for the Phase 1 POST endpoint. The Phase 2 WS EntityAction
+# path replaces this; until then, the POST endpoint stays as the FE write
+# path.
 # ---------------------------------------------------------------------------
 
 
@@ -87,8 +77,8 @@ class MessageRequest(BaseModel):
 
     sender_id: EntityId
     """server-message-request-sender-id: EntityId of the Character sending the
-    message; must appear in `SceneResponse.player_character_ids` or the request
-    is rejected with 422."""
+    message; must be one of the scene's user-characters (i.e.
+    `has_human_actor()` is True) or the request is rejected with 422."""
 
     body: str
     """server-message-request-body: The message body text."""
@@ -136,11 +126,10 @@ class App:
     """server-app: The Sidestage FastAPI application and CLI entry point.
 
     Owns the running campaign, the lifecycle state, and the FastAPI route
-    table. Also owns two class-level singletons that deserialize-time code
-    reaches via `App` directly: the actor registry (`_actors`, private) and
-    the active EntityFactory (`factory`). Both are accessed from
-    `Character.__init__` and `Scene.deserialize` without being threaded
-    through call signatures.
+    table. Holds two class-level slots: the actor registry (`_actors`,
+    private, accessed via `App.get_actor`) and the active `llm_profile`
+    (consulted by `App.get_actor("npc")`). Entity storage and forward-ref
+    resolution live on `Campaign` itself — see `entity-campaign`.
 
     HTTP route handlers are registered by `_setup_routes`; their per-route
     invariants live in `specs/backend.md`. Routes are deliberately thin:
@@ -180,16 +169,6 @@ class App:
     loaded. Every API route gates on this via `_require_serving`.
 
     .implements: server-state-loading, server-state-serving
-    """
-
-    factory: EntityFactory | None = None
-    """server-app-factory: Class-level slot holding the active load's
-    `EntityFactory`. Set by `App.run` BEFORE `Campaign.load` so
-    deserialize-time code (e.g. `Scene.deserialize`) can resolve
-    cross-references via `App.factory.get(...)` without the factory being
-    threaded through every call signature. `None` until the first load.
-
-    .implements: cuj-startup-load
     """
 
     llm_profile: LlmProfile | None = None
@@ -315,58 +294,42 @@ class App:
 
         # rest-api-list-campaigns: GET /api/campaigns
         @app.get("/api/campaigns")
-        async def list_campaigns() -> list[CampaignResponse]:
+        async def list_campaigns() -> list[Campaign.Model]:
             self._require_serving()
-            return [c.to_response() for c in self.campaigns.values()]
+            return [c.to_model() for c in self.campaigns.values()]
 
         # rest-api-get-campaign: GET /api/campaigns/{cid}
         @app.get("/api/campaigns/{cid}")
-        async def get_campaign(cid: str) -> CampaignResponse:
+        async def get_campaign(cid: str) -> Campaign.Model:
             self._require_serving()
             campaign = self.campaigns.get(cid)
             if campaign is None:
                 raise HTTPException(status_code=404, detail="campaign not found")
-            return campaign.to_response()
+            return campaign.to_model()
 
         # rest-api-get-scenes: GET /api/campaigns/{cid}/scenes
         @app.get("/api/campaigns/{cid}/scenes")
-        async def get_scenes(cid: str) -> list[SceneResponse]:
+        async def get_scenes(cid: str) -> list[Scene.Model]:
             self._require_serving()
             campaign = self.campaigns.get(cid)
             if campaign is None:
                 raise HTTPException(status_code=404, detail="campaign not found")
-            return [s.to_response() for s in campaign.scenes()]
+            return [s.model for s in campaign.scenes()]
 
-        # rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}
-        @app.get("/api/campaigns/{cid}/entities/{entity_id}")
-        async def get_entity(cid: str, entity_id: str) -> EntityResponse:
+        # rest-api-get-entity: GET /api/campaigns/{cid}/entities/{entity_id}.
+        # response_model=None: returning a subclass of Entity.Model (e.g.
+        # Character.Model with `owner`). FastAPI would otherwise project
+        # onto the base class and strip subclass fields.
+        @app.get("/api/campaigns/{cid}/entities/{entity_id}", response_model=None)
+        async def get_entity(cid: str, entity_id: str) -> Entity.Model:
             self._require_serving()
             campaign = self.campaigns.get(cid)
             if campaign is None:
                 raise HTTPException(status_code=404, detail="campaign not found")
-            entity = campaign.factory.get(entity_id)
-            # rest-api-entity-404: missing or unresolved entity.
+            entity = campaign.get(entity_id)
             if entity is None:
                 raise HTTPException(status_code=404, detail="entity not found")
-            # rest-api-entity-dispatch: dispatch by entity.type to the
-            # matching typed response. The ghost-attribute guard makes
-            # `entity.type` access raise UnresolvedEntityError on
-            # unresolved entities. Generic entities (no panel-renderer
-            # subclass) 404 — clients only request entities they intend
-            # to render.
-            try:
-                entity_type = entity.type
-            except UnresolvedEntityError as exc:
-                raise HTTPException(
-                    status_code=404, detail="entity not resolved"
-                ) from exc
-            if entity_type == EntityType.SCENE:
-                return entity.to_response()
-            if entity_type == EntityType.CHARACTER:
-                return entity.to_response()
-            raise HTTPException(
-                status_code=404, detail="no panel renderer for entity type"
-            )
+            return entity.model
 
         # rest-api-get-messages: GET /api/campaigns/{cid}/scenes/{scene_id}/messages
         @app.get("/api/campaigns/{cid}/scenes/{scene_id}/messages")
@@ -510,11 +473,6 @@ class App:
         instance = cls(sidestage_dir=sidestage_dir)
         # server-run-state-loading.
         instance.state = ServerState.LOADING
-
-        # server-app-factory: install the EntityFactory at the class level
-        # BEFORE campaign load so deserialize-time code can reach it via
-        # App.factory.
-        cls.factory = DictEntityFactory()
 
         # server-app-llm-profile: resolve the active LLM profile from disk.
         # Missing dir → empty dict per llm-profile-discovery-missing-dir;

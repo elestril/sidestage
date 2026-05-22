@@ -1,50 +1,84 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sidestage.campaign import Campaign
 from sidestage.character import Character
 from sidestage.entity import Entity, EntityId, EntityType
 from sidestage.events import EntityChanged
 from sidestage.message import Message
-from sidestage.scene import Scene, SceneResponse, SimpleScene
+from sidestage.scene import Scene, SimpleScene
 
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
 
 
-def make_character_mock(
-    id: str,
-    *,
-    is_human: bool = False,
-) -> MagicMock:
-    """A test double for Character.
+def _patch_get_actor(actor: object | None = None) -> AbstractContextManager[MagicMock]:
+    """Patch sidestage.server.App.get_actor to return `actor` (default: MagicMock).
 
-    `has_human_actor()` is set directly on the mock — we don't want test
-    failures here to depend on live Actor wiring.
+    `create=True` because tests must not depend on App.get_actor's presence
+    at import time.
     """
-    char = MagicMock(spec=Character)
-    char.id = EntityId(id)
-    char.has_human_actor = MagicMock(return_value=is_human)
+    if actor is None:
+        actor = MagicMock()
+    return patch("sidestage.server.App.get_actor", return_value=actor, create=True)
+
+
+def make_character(
+    campaign: Campaign,
+    *,
+    id: str,
+    owner: Literal["user", "stub", "npc"] = "stub",
+    name: str = "Char",
+    body: str = "",
+) -> Character:
+    """Build a Character with App.get_actor patched, register it in `campaign`."""
+    with _patch_get_actor():
+        char = Character(
+            Character.Model(
+                id=EntityId(id),
+                name=name,
+                type=EntityType.CHARACTER,
+                body=body,
+                owner=owner,
+            ),
+            campaign,
+        )
+    campaign.add(char)
     return char
 
 
 def make_simple_scene(
     *,
-    user: MagicMock | None = None,
-    npc: MagicMock | None = None,
     scene_id: str = "scene-1",
+    user_id: str = "user",
+    npc_id: str = "npc",
+    campaign: Campaign | None = None,
 ) -> SimpleScene:
-    user = user or make_character_mock("user", is_human=True)
-    npc = npc or make_character_mock("npc", is_human=False)
-    return SimpleScene(
-        id=EntityId(scene_id),
-        name="Test Scene",
-        body="scene body",
-        characters=[user, npc],
+    """Build a SimpleScene with two pre-registered characters in a fresh campaign."""
+    if campaign is None:
+        campaign = Campaign(name="t")
+    if campaign.get(user_id) is None:
+        make_character(campaign, id=user_id, owner="user", name="User")
+    if campaign.get(npc_id) is None:
+        make_character(campaign, id=npc_id, owner="stub", name="Npc")
+    scene = SimpleScene(
+        SimpleScene.Model(
+            id=EntityId(scene_id),
+            name="Test Scene",
+            type=EntityType.SCENE,
+            body="scene body",
+            character_ids=[EntityId(user_id), EntityId(npc_id)],
+        ),
+        campaign,
     )
+    campaign.add(scene)
+    return scene
 
 
 class _Recorder:
@@ -85,7 +119,7 @@ class TestSceneAppendMessage:
     def test_append_history(self) -> None:
         # scene-append-history: Appends message to self.messages.
         scene = make_simple_scene()
-        sender = make_character_mock("user", is_human=True)
+        sender = scene._user
         m = Message(sender=sender, body="first")
         scene._append_message(m)
         assert scene.messages == [m]
@@ -93,7 +127,7 @@ class TestSceneAppendMessage:
     def test_append_history_preserves_order(self) -> None:
         # scene-append-history: ordered list.
         scene = make_simple_scene()
-        s = make_character_mock("user", is_human=True)
+        s = scene._user
         m0 = Message(sender=s, body="a")
         m1 = Message(sender=s, body="b")
         m2 = Message(sender=s, body="c")
@@ -105,7 +139,7 @@ class TestSceneAppendMessage:
     def test_append_return(self) -> None:
         # scene-append-return: Returns the new index (len-1).
         scene = make_simple_scene()
-        s = make_character_mock("user", is_human=True)
+        s = scene._user
         idx0 = scene._append_message(Message(sender=s, body="a"))
         idx1 = scene._append_message(Message(sender=s, body="b"))
         idx2 = scene._append_message(Message(sender=s, body="c"))
@@ -126,7 +160,7 @@ class TestSceneAppend:
         # scene-append-records: appended via _append_message; visible in
         # scene.messages.
         scene = make_simple_scene()
-        sender = make_character_mock("u", is_human=True)
+        sender = scene._user
         m = Message(sender=sender, body="hello")
         scene.append(m)
         assert scene.messages == [m]
@@ -134,7 +168,7 @@ class TestSceneAppend:
     async def test_append_records_in_order(self) -> None:
         # scene-append-records: subsequent appends preserve order.
         scene = make_simple_scene()
-        s = make_character_mock("s", is_human=True)
+        s = scene._user
         m0 = Message(sender=s, body="a")
         m1 = Message(sender=s, body="b")
         m2 = Message(sender=s, body="c")
@@ -146,7 +180,7 @@ class TestSceneAppend:
     async def test_append_returns_index_for_first(self) -> None:
         # scene-append-returns: returns the new message's index; first append is 0.
         scene = make_simple_scene(scene_id="sceneid")
-        sender = make_character_mock("u", is_human=True)
+        sender = scene._user
         result = scene.append(Message(sender=sender, body="hi"))
         assert result == 0, (
             f"scene-append-returns: first append must return index 0; got {result!r}"
@@ -155,7 +189,7 @@ class TestSceneAppend:
     async def test_append_returns_monotonic_indices(self) -> None:
         # scene-append-returns: index advances per-append.
         scene = make_simple_scene(scene_id="s")
-        u = make_character_mock("u", is_human=True)
+        u = scene._user
         r0 = scene.append(Message(sender=u, body="a"))
         r1 = scene.append(Message(sender=u, body="b"))
         r2 = scene.append(Message(sender=u, body="c"))
@@ -167,19 +201,20 @@ class TestSceneAppend:
     async def test_append_emits_entity_changed_to_subscribers(self) -> None:
         # scene-append-emits: a subscribed listener receives an EntityChanged
         # whose entity is the scene and whose attributes contains "messages".
-        # Use a fresh scene with NO character listeners interfering — but the
-        # SimpleScene constructor subscribes them. We add our own recorder.
         scene = make_simple_scene()
         recorder = _Recorder()
         scene.subscribe(recorder)
 
-        sender = make_character_mock("u", is_human=True)
+        sender = scene._user
         scene.append(Message(sender=sender, body="hi"))
 
         # _emit wraps each listener in a task (events-async-tasks); wait for
         # them to settle before asserting.
         await scene.idle()
 
+        # The scene's own characters are also subscribed, so the recorder
+        # entry is one among potentially several listener invocations. We
+        # only care that recorder got exactly one event for this append.
         assert len(recorder.events) == 1
         event = recorder.events[0]
         assert isinstance(event, EntityChanged)
@@ -191,7 +226,7 @@ class TestSceneAppend:
         scene = make_simple_scene()
         recorder = _Recorder()
         scene.subscribe(recorder)
-        s = make_character_mock("u", is_human=True)
+        s = scene._user
         scene.append(Message(sender=s, body="a"))
         scene.append(Message(sender=s, body="b"))
         scene.append(Message(sender=s, body="c"))
@@ -211,8 +246,21 @@ class TestSceneSerializeMessage:
     def test_serialize_message_builds_model(self) -> None:
         # scene-serialize-message: returns Message.Model with scene_id,
         # index, sender_id, body.
-        scene = make_simple_scene(scene_id="scene-77")
-        sender = make_character_mock("char-x")
+        campaign = Campaign(name="t")
+        sender = make_character(campaign, id="char-x", owner="user", name="X")
+        # Also need an npc for SimpleScene's 2-character requirement.
+        make_character(campaign, id="npc-y", owner="stub", name="Y")
+        scene = SimpleScene(
+            SimpleScene.Model(
+                id=EntityId("scene-77"),
+                name="Test Scene",
+                type=EntityType.SCENE,
+                body="scene body",
+                character_ids=[EntityId("char-x"), EntityId("npc-y")],
+            ),
+            campaign,
+        )
+        campaign.add(scene)
         scene._append_message(Message(sender=sender, body="hello"))
         model = scene.serialize_message(0)
         assert isinstance(model, Message.Model)
@@ -230,7 +278,7 @@ class TestSceneSerializeMessage:
     def test_serialize_message_indices_advance(self) -> None:
         # scene-serialize-message: index reflects the requested position.
         scene = make_simple_scene(scene_id="abc")
-        s = make_character_mock("u")
+        s = scene._user
         scene._append_message(Message(sender=s, body="m0"))
         scene._append_message(Message(sender=s, body="m1"))
         scene._append_message(Message(sender=s, body="m2"))
@@ -240,7 +288,7 @@ class TestSceneSerializeMessage:
 
 
 # ---------------------------------------------------------------------------
-# Scene.Model + Scene.deserialize
+# Scene.Model
 # ---------------------------------------------------------------------------
 
 
@@ -249,137 +297,73 @@ class TestSceneModel:
         # scene-model: Scene.Model is an inner Pydantic model.
         assert hasattr(Scene, "Model")
 
-    def test_scene_model_has_characters_field_of_entity_ids(self) -> None:
-        # scene-model: characters is `list[EntityId]` (NOT active_character_ids).
+    def test_scene_model_has_character_ids_field_of_entity_ids(self) -> None:
+        # scene-model: character_ids is `list[EntityId]`.
         model = Scene.Model(
             id=EntityId("s"),
             name="n",
             type=EntityType.SCENE,
             body="b",
-            characters=[EntityId("c1"), EntityId("c2")],
+            character_ids=[EntityId("c1"), EntityId("c2")],
         )
-        assert model.characters == [EntityId("c1"), EntityId("c2")]
+        assert model.character_ids == [EntityId("c1"), EntityId("c2")]
 
-    def test_scene_model_does_not_have_active_character_ids(self) -> None:
-        # scene-model: spec mandates `characters`, NOT `active_character_ids`.
+    def test_scene_model_field_is_named_character_ids(self) -> None:
+        # scene-model: field is named `character_ids` (NOT `characters` or
+        # `active_character_ids`).
         fields = Scene.Model.model_fields
-        assert "characters" in fields
+        assert "character_ids" in fields
+        assert "characters" not in fields
         assert "active_character_ids" not in fields
 
 
-class TestSceneDeserialize:
-    def test_deserialize_resolves_each_id_via_app_factory(self) -> None:
-        # scene-deserialize-resolves: each id in model.characters is resolved
-        # via App.factory.get(id) to a Character.
-        user = make_character_mock("c1", is_human=True)
-        npc = make_character_mock("c2", is_human=False)
+# ---------------------------------------------------------------------------
+# Scene.characters property (resolves character_ids via campaign)
+# ---------------------------------------------------------------------------
 
-        fake_factory = MagicMock()
-        fake_factory.get.side_effect = lambda i: {"c1": user, "c2": npc}[i]
 
-        with patch("sidestage.server.App.factory", fake_factory, create=True):
-            model = SimpleScene.Model(
+class TestSceneCharactersProperty:
+    def test_characters_resolves_ids_via_campaign(self) -> None:
+        # scene-characters: each id in model.character_ids is resolved via
+        # campaign.get(id) to a Character.
+        campaign = Campaign(name="t")
+        user = make_character(campaign, id="c1", owner="user", name="U")
+        npc = make_character(campaign, id="c2", owner="stub", name="N")
+        scene = SimpleScene(
+            SimpleScene.Model(
                 id=EntityId("s"),
                 name="n",
                 type=EntityType.SCENE,
                 body="b",
-                characters=[EntityId("c1"), EntityId("c2")],
-            )
-            scene = SimpleScene.deserialize(model)
-
-        assert fake_factory.get.call_count == 2
-        fake_factory.get.assert_any_call(EntityId("c1"))
-        fake_factory.get.assert_any_call(EntityId("c2"))
+                character_ids=[EntityId("c1"), EntityId("c2")],
+            ),
+            campaign,
+        )
+        campaign.add(scene)
         assert scene.characters == [user, npc]
 
-    def test_deserialize_constructs_via_cls(self) -> None:
-        # scene-deserialize-constructs: returns cls(id=..., name=..., body=...,
-        # characters=resolved).
-        user = make_character_mock("c1", is_human=True)
-        npc = make_character_mock("c2", is_human=False)
-
-        fake_factory = MagicMock()
-        fake_factory.get.side_effect = lambda i: {"c1": user, "c2": npc}[i]
-
-        with patch("sidestage.server.App.factory", fake_factory, create=True):
-            model = SimpleScene.Model(
+    def test_characters_preserves_order(self) -> None:
+        # scene-characters: order follows model.character_ids order.
+        campaign = Campaign(name="t")
+        a = make_character(campaign, id="alpha", owner="user", name="A")
+        b = make_character(campaign, id="beta", owner="stub", name="B")
+        scene = SimpleScene(
+            SimpleScene.Model(
                 id=EntityId("scn"),
                 name="My Scene",
                 type=EntityType.SCENE,
                 body="The body",
-                characters=[EntityId("c1"), EntityId("c2")],
-            )
-            scene = SimpleScene.deserialize(model)
-
-        assert isinstance(scene, SimpleScene)
-        assert scene.id == EntityId("scn")
-        assert scene.name == "My Scene"
-        assert scene.body == "The body"
-        assert scene.characters == [user, npc]
-
-    def test_deserialize_signature_uniform_with_entity(self) -> None:
-        # scene-deserialize-signature: same `(cls, model)` signature as
-        # Entity.deserialize.
-        import inspect
-
-        sig = inspect.signature(Scene.deserialize)
-        params = list(sig.parameters.keys())
-        # Bound classmethod — params is ["model"].
-        assert params == ["model"]
-
-
-class TestSceneToModel:
-    """scene-to-model: inverse of Scene.deserialize."""
-
-    def test_to_model_returns_scene_model(self) -> None:
-        scene = make_simple_scene(scene_id="s")
-        model = scene.to_model()
-        assert isinstance(model, Scene.Model)
-
-    def test_to_model_captures_id_name_body(self) -> None:
-        user = make_character_mock("u", is_human=True)
-        npc = make_character_mock("n", is_human=False)
-        scene = SimpleScene(
-            id=EntityId("scn-7"),
-            name="My Scene",
-            body="The body",
-            characters=[user, npc],
+                character_ids=[EntityId("alpha"), EntityId("beta")],
+            ),
+            campaign,
         )
-        model = scene.to_model()
-        assert model.id == EntityId("scn-7")
-        assert model.name == "My Scene"
-        assert model.body == "The body"
+        campaign.add(scene)
+        assert scene.characters == [a, b]
 
-    def test_to_model_captures_character_ids_in_order(self) -> None:
-        # scene-to-model: characters is a list of EntityId (NOT Character).
-        user = make_character_mock("alpha", is_human=True)
-        npc = make_character_mock("beta", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        model = scene.to_model()
-        assert model.characters == [EntityId("alpha"), EntityId("beta")]
-
-    def test_to_model_round_trips_with_deserialize(self) -> None:
-        # scene-to-model is the inverse of Scene.deserialize for the
-        # persistent on-disk shape.
-        user = make_character_mock("c1", is_human=True)
-        npc = make_character_mock("c2", is_human=False)
-        scene = SimpleScene(
-            id=EntityId("rt"),
-            name="round-trip",
-            body="b",
-            characters=[user, npc],
-        )
-        model = scene.to_model()
-
-        fake_factory = MagicMock()
-        fake_factory.get.side_effect = lambda i: {"c1": user, "c2": npc}[i]
-        with patch("sidestage.server.App.factory", fake_factory, create=True):
-            rebuilt = SimpleScene.deserialize(model)
-
-        assert rebuilt.id == scene.id
-        assert rebuilt.name == scene.name
-        assert rebuilt.body == scene.body
-        assert rebuilt.characters == scene.characters
+    def test_characters_is_property(self) -> None:
+        # scene-characters: declared as a property on Scene.
+        attr = Scene.__dict__.get("characters")
+        assert isinstance(attr, property)
 
 
 # ---------------------------------------------------------------------------
@@ -388,88 +372,143 @@ class TestSceneToModel:
 
 
 class TestSimpleSceneInit:
+    def _campaign_with_chars(
+        self,
+        *,
+        user_human: bool = True,
+        npc_human: bool = False,
+        extra: bool = False,
+    ) -> Campaign:
+        campaign = Campaign(name="t")
+        make_character(
+            campaign,
+            id="u",
+            owner="user" if user_human else "stub",
+            name="U",
+        )
+        make_character(
+            campaign,
+            id="n",
+            owner="user" if npc_human else "stub",
+            name="N",
+        )
+        if extra:
+            make_character(campaign, id="x", owner="stub", name="X")
+        return campaign
+
     def test_init_messages_starts_empty(self) -> None:
         # simple-scene-init-messages: self._messages = [].
         scene = make_simple_scene()
         assert scene._messages == []
         assert isinstance(scene._messages, list)
 
-    def test_init_count_raises_when_not_two(self) -> None:
-        # simple-scene-init-count: ValueError if len(characters) != 2.
-        u = make_character_mock("u", is_human=True)
-        n = make_character_mock("n", is_human=False)
-        extra = make_character_mock("x", is_human=False)
+    def test_init_count_raises_when_too_few(self) -> None:
+        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        campaign = self._campaign_with_chars()
         with pytest.raises(ValueError):
-            SimpleScene(id=EntityId("s"), name="x", body="b", characters=[u])
+            SimpleScene(
+                SimpleScene.Model(
+                    id=EntityId("s"),
+                    name="x",
+                    type=EntityType.SCENE,
+                    body="b",
+                    character_ids=[EntityId("u")],
+                ),
+                campaign,
+            )
+
+    def test_init_count_raises_when_too_many(self) -> None:
+        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        campaign = self._campaign_with_chars(extra=True)
         with pytest.raises(ValueError):
-            SimpleScene(id=EntityId("s"), name="x", body="b", characters=[u, n, extra])
+            SimpleScene(
+                SimpleScene.Model(
+                    id=EntityId("s"),
+                    name="x",
+                    type=EntityType.SCENE,
+                    body="b",
+                    character_ids=[EntityId("u"), EntityId("n"), EntityId("x")],
+                ),
+                campaign,
+            )
+
+    def test_init_count_raises_when_empty(self) -> None:
+        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        campaign = self._campaign_with_chars()
         with pytest.raises(ValueError):
-            SimpleScene(id=EntityId("s"), name="x", body="b", characters=[])
+            SimpleScene(
+                SimpleScene.Model(
+                    id=EntityId("s"),
+                    name="x",
+                    type=EntityType.SCENE,
+                    body="b",
+                    character_ids=[],
+                ),
+                campaign,
+            )
 
     def test_init_user_must_be_human(self) -> None:
         # simple-scene-init-user: ValueError if characters[0].has_human_actor()
         # is False.
-        non_human = make_character_mock("u", is_human=False)
-        npc = make_character_mock("n", is_human=False)
+        campaign = self._campaign_with_chars(user_human=False, npc_human=False)
         with pytest.raises(ValueError):
             SimpleScene(
-                id=EntityId("s"),
-                name="x",
-                body="b",
-                characters=[non_human, npc],
+                SimpleScene.Model(
+                    id=EntityId("s"),
+                    name="x",
+                    type=EntityType.SCENE,
+                    body="b",
+                    character_ids=[EntityId("u"), EntityId("n")],
+                ),
+                campaign,
             )
 
     def test_init_npc_must_not_be_human(self) -> None:
         # simple-scene-init-npc: ValueError if characters[1].has_human_actor()
         # is True.
-        user = make_character_mock("u", is_human=True)
-        also_human = make_character_mock("n", is_human=True)
+        campaign = self._campaign_with_chars(user_human=True, npc_human=True)
         with pytest.raises(ValueError):
             SimpleScene(
-                id=EntityId("s"),
-                name="x",
-                body="b",
-                characters=[user, also_human],
+                SimpleScene.Model(
+                    id=EntityId("s"),
+                    name="x",
+                    type=EntityType.SCENE,
+                    body="b",
+                    character_ids=[EntityId("u"), EntityId("n")],
+                ),
+                campaign,
             )
 
     def test_init_aliases_set(self) -> None:
         # simple-scene-init-aliases: _user = characters[0], _npc = characters[1].
-        user = make_character_mock("the-user", is_human=True)
-        npc = make_character_mock("the-npc", is_human=False)
+        campaign = Campaign(name="t")
+        user = make_character(campaign, id="the-user", owner="user", name="U")
+        npc = make_character(campaign, id="the-npc", owner="stub", name="N")
         scene = SimpleScene(
-            id=EntityId("s"),
-            name="x",
-            body="b",
-            characters=[user, npc],
+            SimpleScene.Model(
+                id=EntityId("s"),
+                name="x",
+                type=EntityType.SCENE,
+                body="b",
+                character_ids=[EntityId("the-user"), EntityId("the-npc")],
+            ),
+            campaign,
         )
+        campaign.add(scene)
         assert scene._user is user
         assert scene._npc is npc
 
     def test_init_subscribes_every_character(self) -> None:
         # simple-scene-init-subscribes-characters: every character in
         # `characters` ends up in scene._listeners after construction.
-        user = make_character_mock("u", is_human=True)
-        npc = make_character_mock("n", is_human=False)
-        scene = SimpleScene(
-            id=EntityId("s"),
-            name="x",
-            body="b",
-            characters=[user, npc],
-        )
-        assert user in scene._listeners
-        assert npc in scene._listeners
+        scene = make_simple_scene()
+        assert scene._user in scene._listeners
+        assert scene._npc in scene._listeners
 
     def test_init_subscribes_characters_only(self) -> None:
         # simple-scene-init-subscribes-characters: no extra unrelated listeners
         # are added.
-        user = make_character_mock("u", is_human=True)
-        npc = make_character_mock("n", is_human=False)
-        scene = SimpleScene(
-            id=EntityId("s"),
-            name="x",
-            body="b",
-            characters=[user, npc],
-        )
+        scene = make_simple_scene()
         assert len(scene._listeners) == 2
 
 
@@ -487,7 +526,7 @@ class TestSimpleSceneMessages:
     def test_messages_mutable_via_append_message(self) -> None:
         # simple-scene-messages: mutable; _append_message mutates in place.
         scene = make_simple_scene()
-        s = make_character_mock("s")
+        s = scene._user
         m = Message(sender=s, body="a")
         scene._append_message(m)
         assert scene.messages == [m]
@@ -503,17 +542,12 @@ class TestSceneUserCharacters:
     def test_user_characters_returns_only_human_actors(self) -> None:
         # scene-user-characters: subset of `characters` with has_human_actor()
         # True.
-        user = make_character_mock("user", is_human=True)
-        npc = make_character_mock("npc", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        assert scene.user_characters == [user]
+        scene = make_simple_scene()
+        assert scene.user_characters == [scene._user]
 
     def test_user_characters_preserves_scene_order(self) -> None:
         # scene-user-characters: order follows `characters` order — filter only.
-        user = make_character_mock("user", is_human=True)
-        npc = make_character_mock("npc", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        # user is at characters[0], so it appears first (and is the only one).
+        scene = make_simple_scene()
         assert scene.user_characters == [
             c for c in scene.characters if c.has_human_actor()
         ]
@@ -525,38 +559,33 @@ class TestSceneUserCharacters:
 
 
 # ---------------------------------------------------------------------------
-# Scene.to_response + SceneResponse
+# Scene.model — the canonical wire shape
 # ---------------------------------------------------------------------------
 
 
-class TestSceneToResponse:
-    def test_to_response_builds_scene_response(self) -> None:
-        # scene-to-response: returns a SceneResponse with id, name,
-        # character_ids, and player_character_ids populated correctly.
-        user = make_character_mock("user-1", is_human=True)
-        npc = make_character_mock("npc-1", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc, scene_id="scn-7")
-        # SimpleScene constructor sets name="Test Scene".
-        resp = scene.to_response()
-        assert isinstance(resp, SceneResponse)
+class TestSceneModelAccessor:
+    def test_model_is_scene_model(self) -> None:
+        # scene-model: scene.model returns a Scene.Model with id, name, and
+        # character_ids populated correctly.
+        scene = make_simple_scene(scene_id="scn-7", user_id="user-1", npc_id="npc-1")
+        # make_simple_scene sets name="Test Scene".
+        resp = scene.model
+        assert isinstance(resp, Scene.Model)
         assert resp.id == EntityId("scn-7")
         assert resp.name == "Test Scene"
         assert resp.character_ids == [EntityId("user-1"), EntityId("npc-1")]
-        assert resp.player_character_ids == [EntityId("user-1")]
 
-    def test_to_response_player_character_ids_excludes_npcs(self) -> None:
-        # scene-to-response: player_character_ids only includes user_characters.
-        user = make_character_mock("u", is_human=True)
-        npc = make_character_mock("n", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        resp = scene.to_response()
-        assert EntityId("u") in resp.player_character_ids
-        assert EntityId("n") not in resp.player_character_ids
+    def test_user_characters_excludes_npcs(self) -> None:
+        # scene-user-characters: only includes characters with has_human_actor().
+        # Scene.Model carries only character_ids; the user subset is exposed
+        # via the `user_characters` property.
+        scene = make_simple_scene(user_id="u", npc_id="n")
+        user_ids = [c.id for c in scene.user_characters]
+        assert EntityId("u") in user_ids
+        assert EntityId("n") not in user_ids
 
-    def test_to_response_character_ids_includes_all_characters(self) -> None:
-        # scene-to-response: character_ids has every character's id, in order.
-        user = make_character_mock("u", is_human=True)
-        npc = make_character_mock("n", is_human=False)
-        scene = make_simple_scene(user=user, npc=npc)
-        resp = scene.to_response()
+    def test_model_character_ids_includes_all_characters(self) -> None:
+        # scene-model: character_ids has every character's id, in order.
+        scene = make_simple_scene(user_id="u", npc_id="n")
+        resp = scene.model
         assert resp.character_ids == [EntityId("u"), EntityId("n")]

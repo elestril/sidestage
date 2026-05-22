@@ -118,7 +118,7 @@ class WsConnection:
         eid = EntityId(entity_id_raw)
         if eid in self._subscriptions:
             return
-        entity = self.campaign.factory.get(eid)
+        entity = self.campaign.get(eid)
         if entity is None:
             logger.warning("ws: subscribe unknown entity %r", entity_id_raw)
             return
@@ -135,14 +135,14 @@ class WsConnection:
         listener = self._subscriptions.pop(eid, None)
         if listener is None:
             return
-        entity = self.campaign.factory.get(eid)
+        entity = self.campaign.get(eid)
         if entity is not None:
             entity.unsubscribe(listener)
 
     def _unsubscribe_all(self) -> None:
         """Walk every subscription and unsubscribe on disconnect."""
         for eid, listener in list(self._subscriptions.items()):
-            entity = self.campaign.factory.get(eid)
+            entity = self.campaign.get(eid)
             if entity is not None:
                 entity.unsubscribe(listener)
         self._subscriptions.clear()

@@ -6,36 +6,29 @@ import logging
 
 import pytest
 
+from sidestage.campaign import Campaign
 from sidestage.entity import (
     DictEntityFactory,
     Entity,
     EntityId,
     EntityType,
     MessageContext,
-    UnresolvedEntityError,
 )
 from sidestage.events import EntityChanged
 
 
-def make_entity(id: str = "e1", name: str = "Test", body: str = "body") -> Entity:
+def make_campaign() -> Campaign:
+    return Campaign(name="test")
+
+
+def make_entity(
+    id: str = "e1",
+    name: str = "Test",
+    body: str = "body",
+    campaign: Campaign | None = None,
+) -> Entity:
     model = Entity.Model(id=EntityId(id), name=name, type=EntityType.ENTITY, body=body)
-    return Entity.deserialize(model)
-
-
-class _TestEntity(Entity):
-    """A concrete Entity subclass for direct instantiation in tests."""
-
-
-def make_test_entity(id: str = "te1") -> _TestEntity:
-    instance = _TestEntity.__new__(_TestEntity)
-    object.__setattr__(instance, "id", EntityId(id))
-    object.__setattr__(instance, "_loaded", True)
-    object.__setattr__(instance, "name", "TestEntity")
-    object.__setattr__(instance, "type", EntityType.ENTITY)
-    object.__setattr__(instance, "body", "")
-    object.__setattr__(instance, "_listeners", [])
-    object.__setattr__(instance, "_pending_tasks", set())
-    return instance
+    return Entity(model, campaign if campaign is not None else make_campaign())
 
 
 class _SyncListener:
@@ -65,7 +58,7 @@ class _RaisingListener:
 
 
 # ----------------------------------------------------------------------
-# Existing tests (kept) — id, ghost, model, factory
+# id, model, factory
 # ----------------------------------------------------------------------
 
 
@@ -76,59 +69,68 @@ class TestEntityId:
         assert eid == "abc"
 
 
-class TestEntityGhost:
-    def test_ghost_safe_id(self) -> None:
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        assert ghost.id == "g1"
+class TestEntityConstruction:
+    """Entity wraps a Model bound to a Campaign — `__init__` stores both."""
 
-    def test_ghost_safe_loaded(self) -> None:
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        assert ghost._loaded is False
+    def test_stores_model_and_campaign(self) -> None:
+        campaign = make_campaign()
+        model = Entity.Model(
+            id=EntityId("e1"), name="N", type=EntityType.ENTITY, body="b"
+        )
+        entity = Entity(model, campaign)
+        assert entity._model is model
+        assert entity._campaign is campaign
 
-    def test_ghost_unresolved_raises(self) -> None:
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        with pytest.raises(UnresolvedEntityError):
-            _ = ghost.name
-
-    def test_ghost_unresolved_body_raises(self) -> None:
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        with pytest.raises(UnresolvedEntityError):
-            _ = ghost.body
-
-
-class TestEntityModel:
-    def test_deserialize_returns_entity(self) -> None:
-        entity = make_entity()
-        assert isinstance(entity, Entity)
-
-    def test_deserialize_sets_loaded(self) -> None:
-        entity = make_entity()
-        assert entity._loaded is True
-
-    def test_deserialize_fields(self) -> None:
-        entity = make_entity(id="abc", name="Foo", body="bar")
+    def test_reads_forward_to_model(self) -> None:
+        model = Entity.Model(
+            id=EntityId("abc"), name="Foo", type=EntityType.ENTITY, body="bar"
+        )
+        entity = Entity(model, make_campaign())
         assert entity.id == "abc"
         assert entity.name == "Foo"
         assert entity.body == "bar"
         assert entity.type == EntityType.ENTITY
 
-    def test_serialize_returns_model(self) -> None:
-        entity = make_entity(id="abc", name="Foo", body="bar")
-        model = entity.serialize()
-        assert isinstance(model, Entity.Model)
-        assert model.id == "abc"
-        assert model.name == "Foo"
-        assert model.body == "bar"
+    def test_writes_to_model_field_emit_entity_changed(self) -> None:
+        entity = make_entity(id="e1", body="original")
+        listener = _SyncListener()
+        entity.subscribe(listener)
 
-    def test_serialize_ghost_raises(self) -> None:
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        with pytest.raises(UnresolvedEntityError):
-            ghost.serialize()
+        async def run() -> None:
+            entity.body = "new"
+            await entity.idle()
+
+        asyncio.run(run())
+
+        assert len(listener.received) == 1
+        event = listener.received[0]
+        assert event.entity is entity
+        assert event.attributes == ["body"]
+        # The model was updated.
+        assert entity.body == "new"
+
+    def test_writes_to_model_field_same_value_no_emit(self) -> None:
+        entity = make_entity(id="e1", body="same")
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.body = "same"
+            await entity.idle()
+
+        asyncio.run(run())
+
+        assert listener.received == []
+
+    def test_non_model_attribute_writes_go_to_dict(self) -> None:
+        entity = make_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        entity._foo = 1  # type: ignore[attr-defined]
+        assert entity._foo == 1  # type: ignore[attr-defined]
+        # No EntityChanged emitted for non-Model attribute.
+        assert listener.received == []
 
 
 class TestDictEntityFactory:
@@ -142,36 +144,25 @@ class TestDictEntityFactory:
         factory.add(entity)
         assert factory.get("e1") is entity
 
-    def test_add_sets_loaded(self) -> None:
+    def test_delete_removes(self) -> None:
         factory = DictEntityFactory()
         entity = make_entity("e1")
         factory.add(entity)
-        result = factory.get("e1")
-        assert result is not None
-        assert result._loaded is True
+        factory.delete("e1")
+        assert factory.get("e1") is None
 
-    def test_add_hydrates_ghost(self) -> None:
+    def test_delete_missing_is_noop(self) -> None:
         factory = DictEntityFactory()
-        ghost = factory.ghost("e1", EntityType.ENTITY)
-        assert ghost._loaded is False
+        # Should not raise.
+        factory.delete("missing")
 
-        entity = make_entity("e1")
-        factory.add(entity)
-
-        assert ghost._loaded is True
-        assert ghost.name == "Test"
-
-    def test_ghost_creates_unresolved(self) -> None:
+    def test_entities_returns_all_added(self) -> None:
         factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        assert ghost._loaded is False
-        assert ghost.id == "g1"
-
-    def test_ghost_returns_same_instance(self) -> None:
-        factory = DictEntityFactory()
-        g1 = factory.ghost("g1", EntityType.ENTITY)
-        g2 = factory.ghost("g1", EntityType.ENTITY)
-        assert g1 is g2
+        e1 = make_entity("e1")
+        e2 = make_entity("e2")
+        factory.add(e1)
+        factory.add(e2)
+        assert set(factory.entities()) == {e1, e2}
 
     def test_add_registers_new_entity(self) -> None:
         factory = DictEntityFactory()
@@ -189,13 +180,13 @@ class TestEntitySubscribe:
     """entity-subscribe: subscribe appends to listener list."""
 
     def test_subscribe_appends_listener(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         listener = _SyncListener()
         entity.subscribe(listener)
         assert listener in entity._listeners
 
     def test_subscribe_appends_multiple_in_order(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         l1 = _SyncListener()
         l2 = _SyncListener()
         l3 = _SyncListener()
@@ -209,14 +200,14 @@ class TestEntityUnsubscribe:
     """entity-unsubscribe: removes listener; no-op if not subscribed."""
 
     def test_unsubscribe_removes_listener(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         listener = _SyncListener()
         entity.subscribe(listener)
         entity.unsubscribe(listener)
         assert listener not in entity._listeners
 
     def test_unsubscribe_not_subscribed_is_noop(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         listener = _SyncListener()
         # Should not raise.
         entity.unsubscribe(listener)
@@ -228,7 +219,7 @@ class TestEntityEmit:
     per-listener isolation."""
 
     async def test_emit_invokes_each_listener(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         l1 = _SyncListener()
         l2 = _SyncListener()
         entity.subscribe(l1)
@@ -242,7 +233,7 @@ class TestEntityEmit:
         assert l2.received == [event]
 
     async def test_emit_wraps_in_tracked_tasks(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         # Use an async listener so the task is observably alive after _emit.
         listener = _AsyncListener()
         entity.subscribe(listener)
@@ -255,7 +246,7 @@ class TestEntityEmit:
         assert listener.received == [event]
 
     async def test_emit_per_listener_isolation(self, caplog) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         bad = _RaisingListener("emit-isolation")
         good = _SyncListener()
         entity.subscribe(bad)
@@ -275,7 +266,7 @@ class TestEntitySpawnTask:
     on completion + logs exception."""
 
     async def test_spawn_task_returns_task(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> str:
             return "ok"
@@ -285,7 +276,7 @@ class TestEntitySpawnTask:
         await task
 
     async def test_spawn_task_tracks_in_pending(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> None:
             await asyncio.sleep(0.01)
@@ -296,7 +287,7 @@ class TestEntitySpawnTask:
         assert task not in entity._pending_tasks
 
     async def test_spawn_task_done_callback_removes(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> None:
             return None
@@ -308,7 +299,7 @@ class TestEntitySpawnTask:
         assert task not in entity._pending_tasks
 
     async def test_spawn_task_done_callback_logs_exception(self, caplog) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> None:
             raise RuntimeError("spawn-task-boom")
@@ -334,13 +325,13 @@ class TestEntityIdle:
     handles cascading tasks."""
 
     async def test_idle_returns_immediately_when_empty(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         # No pending tasks — idle should return immediately.
         await entity.idle()
         assert entity._pending_tasks == set()
 
     async def test_idle_waits_for_pending(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         completed: list[bool] = []
 
         async def slow() -> None:
@@ -353,7 +344,7 @@ class TestEntityIdle:
         assert entity._pending_tasks == set()
 
     async def test_idle_bounded_by_timeout(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def forever() -> None:
             await asyncio.sleep(2.0)
@@ -364,7 +355,7 @@ class TestEntityIdle:
 
     async def test_idle_handles_cascading_tasks(self) -> None:
         """A task that spawns another task (cascading) should still be awaited."""
-        entity = make_test_entity()
+        entity = make_entity()
         order: list[str] = []
 
         async def second() -> None:
@@ -387,13 +378,13 @@ class TestEntityNotifyDefaultNoop:
     """entity-notify-default-noop: default Entity.notify returns None / does nothing."""
 
     def test_default_notify_returns_none(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         result = entity.notify(event)
         assert result is None
 
     def test_default_notify_does_not_raise(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         # Should not raise for any input.
         entity.notify(event)
@@ -408,7 +399,7 @@ class TestEventsProtocolSyncOrAsync:
     """events-protocol-sync-or-async: notify can be sync or async; bus awaits if coroutine."""
 
     async def test_sync_listener_invoked(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         listener = _SyncListener()
         entity.subscribe(listener)
 
@@ -419,7 +410,7 @@ class TestEventsProtocolSyncOrAsync:
         assert listener.received == [event]
 
     async def test_async_listener_awaited(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         listener = _AsyncListener()
         entity.subscribe(listener)
 
@@ -438,7 +429,7 @@ class TestEventsErrorsListenerIsolation:
     fanout; logs via caplog."""
 
     async def test_raising_listener_does_not_abort_fanout(self, caplog) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         bad = _RaisingListener("isolation-test")
         good = _SyncListener()
         entity.subscribe(bad)
@@ -452,7 +443,7 @@ class TestEventsErrorsListenerIsolation:
         assert good.received == [event]
 
     async def test_raising_listener_logs_error(self, caplog) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         bad = _RaisingListener("listener-log-check")
         entity.subscribe(bad)
 
@@ -474,7 +465,7 @@ class TestEventsErrorsSpawnedTask:
     """events-errors-spawned-task: failed spawned task logs via done-callback."""
 
     async def test_failed_spawned_task_is_logged(self, caplog) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def boom() -> None:
             raise RuntimeError("spawned-task-log-check")
@@ -494,7 +485,7 @@ class TestEventsAsyncTasksSpawn:
     """events-async-tasks-spawn: spawn_task returns the task; cleanup on done."""
 
     async def test_spawn_task_returns_the_task(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> int:
             return 42
@@ -505,7 +496,7 @@ class TestEventsAsyncTasksSpawn:
         assert result == 42
 
     async def test_spawn_task_cleanup_on_done(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
 
         async def coro() -> None:
             return None
@@ -553,15 +544,6 @@ class TestEntityHashableById:
         a = make_entity(id="x")
         assert a != "x"
         assert a != 42
-
-    def test_ghost_safe(self) -> None:
-        # entity-hashable-by-id-ghost-safe: ghost and loaded with same id
-        # collapse to one key.
-        factory = DictEntityFactory()
-        ghost = factory.ghost("g1", EntityType.ENTITY)
-        loaded = make_entity(id="g1")
-        assert hash(ghost) == hash(loaded)
-        assert ghost == loaded
 
     def test_keyable_in_dict(self) -> None:
         # The whole point: an Entity can key a dict (used by MessageContext).
@@ -654,7 +636,7 @@ class TestEventsAsyncTasksIdle:
     async def test_cascading_emit_settles_via_idle(self) -> None:
         """A listener that itself spawns a task on the entity — idle should
         wait for the cascaded task too."""
-        entity = make_test_entity()
+        entity = make_entity()
         cascaded: list[str] = []
 
         async def cascaded_work() -> None:
@@ -675,7 +657,7 @@ class TestEventsAsyncTasksIdle:
         assert entity._pending_tasks == set()
 
     async def test_idle_waits_for_chained_spawn_tasks(self) -> None:
-        entity = make_test_entity()
+        entity = make_entity()
         completed: list[str] = []
 
         async def grandchild() -> None:

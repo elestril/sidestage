@@ -6,11 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sidestage.campaign import Campaign
 from sidestage.character import Character
 from sidestage.entity import (
-    DictEntityFactory,
     Entity,
-    EntityFactory,
     EntityId,
     EntityType,
     MessageContext,
@@ -42,23 +41,24 @@ def make_character(
     body: str = "a body",
     owner: Literal["user", "stub", "npc"] = "stub",
     actor: object | None = None,
-    factory: EntityFactory | None = None,
+    campaign: Campaign | None = None,
 ) -> Character:
     """Construct a Character with App.get_actor patched to return `actor`.
 
-    `factory` defaults to a fresh `DictEntityFactory` — tests that don't
-    exercise `annotate_context` don't need to think about it.
+    `campaign` defaults to a fresh in-memory `Campaign` — tests that don't
+    exercise cross-entity recursion don't need to think about it.
     """
-    if factory is None:
-        factory = DictEntityFactory()
+    if campaign is None:
+        campaign = Campaign(name="t")
+    model = Character.Model(
+        id=EntityId(id),
+        name=name,
+        type=EntityType.CHARACTER,
+        body=body,
+        owner=owner,
+    )
     with _patch_get_actor(actor):
-        return Character(
-            id=EntityId(id),
-            name=name,
-            body=body,
-            owner=owner,
-            factory=factory,
-        )
+        return Character(model, campaign)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,22 @@ class TestCharacterInitStoresOwner:
 # ---------------------------------------------------------------------------
 
 
+def _build_model(
+    *,
+    id: str = "c1",
+    name: str = "Alice",
+    body: str = "body",
+    owner: Literal["user", "stub", "npc"] = "stub",
+) -> Character.Model:
+    return Character.Model(
+        id=EntityId(id),
+        name=name,
+        type=EntityType.CHARACTER,
+        body=body,
+        owner=owner,
+    )
+
+
 class TestCharacterInitBindsActor:
     """character-init-binds-actor: Calls App.get_actor(self.owner) and stores
     the returned Actor as self._actor."""
@@ -121,13 +137,7 @@ class TestCharacterInitBindsActor:
     def test_get_actor_called_with_owner(self) -> None:
         sentinel_actor = MagicMock(name="actor")
         with _patch_get_actor(sentinel_actor) as mock_get_actor:
-            Character(
-                id=EntityId("c1"),
-                name="Alice",
-                body="body",
-                owner="stub",
-                factory=DictEntityFactory(),
-            )
+            Character(_build_model(owner="stub"), Campaign(name="t"))
         mock_get_actor.assert_called_once_with("stub")
 
     def test_stores_returned_actor_as_underscore_actor(self) -> None:
@@ -137,24 +147,12 @@ class TestCharacterInitBindsActor:
 
     def test_get_actor_called_with_user_owner(self) -> None:
         with _patch_get_actor() as mock_get_actor:
-            Character(
-                id=EntityId("c1"),
-                name="Alice",
-                body="body",
-                owner="user",
-                factory=DictEntityFactory(),
-            )
+            Character(_build_model(owner="user"), Campaign(name="t"))
         mock_get_actor.assert_called_once_with("user")
 
     def test_get_actor_called_with_stub_owner(self) -> None:
         with _patch_get_actor() as mock_get_actor:
-            Character(
-                id=EntityId("c1"),
-                name="Alice",
-                body="body",
-                owner="stub",
-                factory=DictEntityFactory(),
-            )
+            Character(_build_model(owner="stub"), Campaign(name="t"))
         mock_get_actor.assert_called_once_with("stub")
 
 
@@ -415,103 +413,19 @@ class TestCharacterModel:
 
 
 # ---------------------------------------------------------------------------
-# Character.deserialize — constructs via __init__ with owner from model.
+# character-campaign-ref + character-annotate-context
 # ---------------------------------------------------------------------------
 
 
-class TestCharacterDeserialize:
-    """Character.deserialize(model) constructs
-    Character(id=..., name=..., body=..., owner=model.owner)."""
+class TestCharacterCampaignRef:
+    """character-campaign-ref: Character stores the campaign passed at construction."""
 
-    def test_deserialize_builds_character_with_owner(self) -> None:
-        model = Character.Model(
-            id=EntityId("c2"),
-            name="Bob",
-            type=EntityType.CHARACTER,
-            body="bob body",
-            owner="user",
-        )
-        with _patch_get_actor():
-            char = Character.deserialize(model, DictEntityFactory())
-
-        assert char.id == "c2"
-        assert char.name == "Bob"
-        assert char.body == "bob body"
-        assert char.owner == "user"
-        assert char.type == EntityType.CHARACTER
-
-    def test_deserialize_invokes_get_actor(self) -> None:
-        model = Character.Model(
-            id=EntityId("c3"),
-            name="Carol",
-            type=EntityType.CHARACTER,
-            body="carol body",
-            owner="stub",
-        )
-        sentinel = MagicMock(name="actor")
-        with _patch_get_actor(sentinel) as mock_get_actor:
-            char = Character.deserialize(model, DictEntityFactory())
-
-        mock_get_actor.assert_called_once_with("stub")
-        assert char._actor is sentinel
-
-    def test_serialize_roundtrip(self) -> None:
-        factory = DictEntityFactory()
-        with _patch_get_actor():
-            char = Character(
-                id=EntityId("c4"),
-                name="Dave",
-                body="dave body",
-                owner="user",
-                factory=factory,
-            )
-        model = char.serialize()
-        assert model.id == "c4"
-        assert model.name == "Dave"
-        assert model.body == "dave body"
-        assert model.owner == "user"
-
-        with _patch_get_actor():
-            char2 = Character.deserialize(model, factory)
-        assert char2.id == "c4"
-        assert char2.name == "Dave"
-        assert char2.body == "dave body"
-        assert char2.owner == "user"
-
-
-# ---------------------------------------------------------------------------
-# character-factory-ref + character-annotate-context
-# ---------------------------------------------------------------------------
-
-
-class TestCharacterFactoryRef:
-    """character-factory-ref: Character stores the factory passed at construction."""
-
-    def test_init_stores_factory(self) -> None:
-        factory = DictEntityFactory()
-        char = make_character(factory=factory)
-        assert char._factory is factory, (
-            "character-factory-ref: __init__ MUST store the factory arg as "
-            f"self._factory; got {char._factory!r}"
-        )
-
-    def test_deserialize_threads_factory(self) -> None:
-        # character-factory-ref-deserialize: deserialize takes factory as second
-        # arg and threads it into __init__.
-        factory = DictEntityFactory()
-        model = Character.Model(
-            id=EntityId("c5"),
-            name="Eve",
-            type=EntityType.CHARACTER,
-            body="eve body",
-            owner="npc",
-        )
-        with _patch_get_actor():
-            char = Character.deserialize(model, factory)
-        assert char._factory is factory, (
-            "character-factory-ref-deserialize: factory MUST be threaded "
-            "from deserialize into Character.__init__; "
-            f"got {char._factory!r}"
+    def test_init_stores_campaign(self) -> None:
+        campaign = Campaign(name="t")
+        char = make_character(campaign=campaign)
+        assert char._campaign is campaign, (
+            "character-campaign-ref: __init__ MUST store the campaign arg as "
+            f"self._campaign; got {char._campaign!r}"
         )
 
 

@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import pytest
 
+from sidestage.campaign import Campaign
 from sidestage.character import Character
-from sidestage.entity import DictEntityFactory, EntityId
+from sidestage.entity import EntityId, EntityType
 from sidestage.events import EntityChanged
 from sidestage.message import Message
 from sidestage.scene import SimpleScene
@@ -25,27 +26,43 @@ pytestmark = pytest.mark.integration
 
 
 async def test_events_dataflow() -> None:
-    factory = DictEntityFactory()
+    campaign = Campaign(name="test")
+
     alice = Character(
-        id=EntityId("alice"),
-        name="Alice",
-        body="A curious traveler.",
-        owner="user",
-        factory=factory,
+        Character.Model(
+            id=EntityId("alice"),
+            name="Alice",
+            type=EntityType.CHARACTER,
+            body="A curious traveler.",
+            owner="user",
+        ),
+        campaign,
     )
+    campaign.add(alice)
+
     bob = Character(
-        id=EntityId("bob"),
-        name="Bob",
-        body="*nods quietly*",
-        owner="stub",
-        factory=factory,
+        Character.Model(
+            id=EntityId("bob"),
+            name="Bob",
+            type=EntityType.CHARACTER,
+            body="*nods quietly*",
+            owner="stub",
+        ),
+        campaign,
     )
+    campaign.add(bob)
+
     scene = SimpleScene(
-        id=EntityId("parlor"),
-        name="Parlor",
-        body="A quiet room.",
-        characters=[alice, bob],
+        SimpleScene.Model(
+            id=EntityId("parlor"),
+            name="Parlor",
+            type=EntityType.SCENE,
+            body="A quiet room.",
+            character_ids=[EntityId("alice"), EntityId("bob")],
+        ),
+        campaign,
     )
+    campaign.add(scene)
 
     notify_events: list[EntityChanged] = []
     original_notify = alice.notify

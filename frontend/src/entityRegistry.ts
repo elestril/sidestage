@@ -38,15 +38,18 @@ function brandSceneResponse(raw: unknown): SceneResponse {
     name: string;
     body: string;
     character_ids: string[];
-    player_character_ids: string[];
   };
+  const character_ids = r.character_ids.map(asEntityId);
   return {
     type: 'scene',
     id: asEntityId(r.id),
     name: r.name,
     body: r.body,
-    character_ids: r.character_ids.map(asEntityId),
-    player_character_ids: r.player_character_ids.map(asEntityId),
+    character_ids,
+    // Phase-1 stub: SimpleScene puts the user character first, so the
+    // first character_id is the player. Phase 2b: compute properly by
+    // looking up each Character's owner via the registry.
+    player_character_ids: character_ids.length > 0 ? [character_ids[0]] : [],
   };
 }
 

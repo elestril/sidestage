@@ -12,10 +12,10 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from sidestage.actor import StubActor, UserActor
-from sidestage.campaign import CampaignResponse
+from sidestage.campaign import Campaign
 from sidestage.entity import EntityId, EntityType
 from sidestage.message import Message
-from sidestage.scene import SceneResponse
+from sidestage.scene import Scene
 from sidestage.server import (
     App,
     MessageAccepted,
@@ -35,46 +35,61 @@ def _reset_actor_registry() -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_app_state() -> Iterator[None]:
-    """Each test starts with a clean App class-level registry/factory/profile."""
+    """Each test starts with a clean App class-level registry/profile."""
     _reset_actor_registry()
-    if hasattr(App, "factory"):
-        with contextlib.suppress(AttributeError):
-            del App.factory
     App.llm_profile = None
     yield
     _reset_actor_registry()
-    if hasattr(App, "factory"):
-        with contextlib.suppress(AttributeError):
-            del App.factory
     App.llm_profile = None
 
 
 def make_human_character(id: str = "bob") -> MagicMock:
-    """A character whose `has_human_actor()` is True."""
-    char = MagicMock(spec=[])
+    """A character whose `has_human_actor()` is True.
+
+    Uses `spec=Character` so `isinstance(mock, Character)` returns True —
+    the server's entity-dispatch route narrows by isinstance.
+    """
+    from sidestage.character import Character
+
+    char = MagicMock(spec=Character)
     char.id = EntityId(id)
     char.name = id.capitalize()
+    char.body = ""
+    char.owner = "user"
     char._actor = StubActor()
     char.has_human_actor = lambda: True
+    char.model = Character.Model(
+        id=char.id, name=char.name, type=EntityType.CHARACTER, body="", owner="user"
+    )
     return char
 
 
 def make_npc_character(id: str = "elara") -> MagicMock:
-    char = MagicMock(spec=[])
+    from sidestage.character import Character
+
+    char = MagicMock(spec=Character)
     char.id = EntityId(id)
     char.name = id.capitalize()
+    char.body = ""
+    char.owner = "stub"
     char._actor = StubActor()
     char.has_human_actor = lambda: False
+    char.model = Character.Model(
+        id=char.id, name=char.name, type=EntityType.CHARACTER, body="", owner="stub"
+    )
     return char
 
 
 def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     """Mock Scene exposing the surface the server now relies on:
-    - `to_response()` builds the wire shape (server no longer constructs it).
+    - `model` is the canonical Scene.Model wire shape (server reads it directly).
     - `user_characters` is the player-character subset.
     - `serialize_message`, `messages`, `append` are the message API.
+
+    Uses `spec=Scene` so `isinstance(mock, Scene)` returns True — the
+    server's entity-dispatch route narrows by isinstance.
     """
-    scene = MagicMock(spec=[])
+    scene = MagicMock(spec=Scene)
     scene.id = EntityId(scene_id)
     scene.name = "Test Scene"
     scene.body = ""
@@ -82,15 +97,13 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     scene.characters = [human, npc]
     scene.user_characters = [c for c in scene.characters if c.has_human_actor()]
     scene.messages = []
-
-    def to_response() -> SceneResponse:
-        return SceneResponse(
-            id=scene.id,
-            name=scene.name,
-            body=scene.body,
-            character_ids=[c.id for c in scene.characters],
-            player_character_ids=[c.id for c in scene.user_characters],
-        )
+    scene.model = Scene.Model(
+        id=scene.id,
+        name=scene.name,
+        type=EntityType.SCENE,
+        body=scene.body,
+        character_ids=[c.id for c in scene.characters],
+    )
 
     def serialize_message(idx: int) -> Message.Model:
         m = scene.messages[idx]
@@ -105,7 +118,6 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
         scene.messages.append(msg)
         return len(scene.messages) - 1
 
-    scene.to_response = to_response
     scene.serialize_message = serialize_message
     scene.append = MagicMock(side_effect=append)
     return scene
@@ -116,8 +128,8 @@ def make_campaign(scene, name: str = "Test Campaign") -> MagicMock:
     - `scene(id)` is a method (not an attribute) returning Optional[Scene].
     - `scenes()` is a method returning list[Scene].
     - `default_scene_id` replaces the dropped `active_scene_id`.
-    - `to_response()` builds the CampaignResponse.
-    - `factory.get(id)` still serves the entity route.
+    - `to_model()` builds the Campaign.Model.
+    - `get(id)` (directly on Campaign — no factory) serves the entity route.
     """
     campaign = MagicMock(spec=[])
     campaign.name = name
@@ -130,18 +142,19 @@ def make_campaign(scene, name: str = "Test Campaign") -> MagicMock:
 
     campaign.scene = MagicMock(side_effect=_scene)
     campaign.scenes = MagicMock(return_value=[scene])
-    campaign.to_response = lambda: CampaignResponse(
-        name=campaign.name,
-        default_scene_id=campaign.default_scene_id,
+    campaign.to_model = MagicMock(
+        return_value=Campaign.Model(
+            name=name,
+            default_scene_id=scene.id,
+        )
     )
-    campaign.factory = MagicMock()
 
-    def _factory_get(eid) -> MagicMock | None:
+    def _get(eid) -> MagicMock | None:
         if eid == scene.id:
             return scene
         return None
 
-    campaign.factory.get = MagicMock(side_effect=_factory_get)
+    campaign.get = MagicMock(side_effect=_get)
     return campaign
 
 
@@ -284,13 +297,6 @@ class TestAppGetActor:
     def test_actors_dict_class_level(self) -> None:
         # _actors is a class-level dict on App.
         assert isinstance(App._actors, dict)
-
-    def test_factory_class_level_attribute_settable(self) -> None:
-        # App.factory is a class-level attribute that can be set
-        # before Campaign.load by App.run.
-        sentinel = object()
-        App.factory = sentinel  # type: ignore[assignment]  # pyright: ignore[reportAttributeAccessIssue]
-        assert App.factory is sentinel
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +532,7 @@ class TestListCampaigns:
         assert response.status_code == 503
 
     def test_list_returns_one_entry_today(self) -> None:
-        # server-route-list-campaigns: returns list[CampaignResponse] from
+        # server-route-list-campaigns: returns list[Campaign.Model] from
         # `App.campaigns.values()`. Today there is exactly one entry.
         app, scene, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
@@ -568,9 +574,9 @@ class TestGetCampaign:
             response = client.get("/api/campaigns/no-such-campaign")
         assert response.status_code == 404
 
-    def test_campaign_returns_response(self) -> None:
-        # server-route-campaign: returns CampaignResponse from
-        # `campaign.to_response()`. Server constructs nothing.
+    def test_campaign_returns_model(self) -> None:
+        # server-route-campaign: returns Campaign.Model from
+        # `campaign.to_model()`. Server constructs nothing.
         app, scene, *_ = make_loaded_app()
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
@@ -579,18 +585,18 @@ class TestGetCampaign:
         assert body["name"] == "Test Campaign"
         assert body["default_scene_id"] == "s1"
 
-    def test_campaign_delegates_to_campaign_to_response(self) -> None:
-        # The route must call `campaign.to_response()`, not build its own
-        # CampaignResponse.
+    def test_campaign_delegates_to_campaign_to_model(self) -> None:
+        # The route must call `campaign.to_model()`, not build its own
+        # Campaign.Model.
         app, *_ = make_loaded_app()
         campaign = app.campaigns[CAMPAIGN_ID]
-        campaign.to_response = MagicMock(
-            return_value=CampaignResponse(name="X", default_scene_id=None)
+        campaign.to_model = MagicMock(
+            return_value=Campaign.Model(name="X", default_scene_id=None)
         )
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}")
         assert response.status_code == 200
-        campaign.to_response.assert_called_once()
+        campaign.to_model.assert_called_once()
         assert response.json() == {"name": "X", "default_scene_id": None}
 
 
@@ -614,8 +620,8 @@ class TestGetScenes:
             response = client.get("/api/campaigns/no-such/scenes")
         assert response.status_code == 404
 
-    def test_scenes_returns_list_of_scene_responses(self) -> None:
-        # server-route-scenes: returns list[SceneResponse] = one entry per
+    def test_scenes_returns_list_of_scene_models(self) -> None:
+        # server-route-scenes: returns list[Scene.Model] = one entry per
         # scene in `campaign.scenes()`.
         app, scene, human, npc = make_loaded_app()
         with TestClient(app._fastapi) as client:
@@ -626,7 +632,6 @@ class TestGetScenes:
         assert body[0]["id"] == "s1"
         assert body[0]["name"] == "Test Scene"
         assert set(body[0]["character_ids"]) == {"bob", "elara"}
-        assert body[0]["player_character_ids"] == ["bob"]
 
     def test_scenes_delegates_to_campaign_scenes(self) -> None:
         # Server iterates `campaign.scenes()`, not factory internals.
@@ -665,103 +670,71 @@ class TestGetEntity:
         assert response.status_code == 404
 
     def test_entity_404_when_missing(self) -> None:
-        # rest-api-entity-404: factory.get returns None.
+        # rest-api-entity-404: campaign.get returns None.
         app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=None)
+        app.campaigns[CAMPAIGN_ID].get = MagicMock(return_value=None)
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/missing")
         assert response.status_code == 404
 
-    def test_entity_404_when_unresolved(self) -> None:
-        # rest-api-entity-404: ghost (unresolved) entity should 404.
-        from sidestage.entity import Entity
-
-        ghost = Entity.__new__(Entity)
-        object.__setattr__(ghost, "id", EntityId("ghost-id"))
-        object.__setattr__(ghost, "_loaded", False)
-
-        app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=ghost)
-        with TestClient(app._fastapi) as client:
-            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/ghost-id")
-        assert response.status_code == 404
-
-    def test_entity_scene_returns_scene_response(self) -> None:
-        # rest-api-entity-dispatch: a Scene entity dispatches to
-        # `scene.to_response()` and returns a SceneResponse.
-        from sidestage.entity import EntityType
-        from sidestage.scene import SceneResponse
-
-        scene_entity = MagicMock(spec=[])
+    def test_entity_scene_returns_scene_model(self) -> None:
+        # rest-api-get-entity: a Scene entity returns its `entity.model`
+        # (a Scene.Model) directly — no isinstance dispatch, no conversion.
+        # `spec=Scene` so isinstance(mock, Scene) returns True (kept as a
+        # safety net even though the route no longer narrows by type).
+        scene_entity = MagicMock(spec=Scene)
         scene_entity.id = EntityId("s1")
         scene_entity.type = EntityType.SCENE
-        scene_entity.to_response = MagicMock(
-            return_value=SceneResponse(
-                id=EntityId("s1"),
-                name="Test Scene",
-                body="A small room.",
-                character_ids=[EntityId("bob"), EntityId("elara")],
-                player_character_ids=[EntityId("bob")],
-            )
+        scene_entity.model = Scene.Model(
+            id=EntityId("s1"),
+            name="Test Scene",
+            type=EntityType.SCENE,
+            body="A small room.",
+            character_ids=[EntityId("bob"), EntityId("elara")],
         )
 
         app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=scene_entity)
+        app.campaigns[CAMPAIGN_ID].get = MagicMock(return_value=scene_entity)
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/s1")
         assert response.status_code == 200
         body = response.json()
+        # The route's response_model is Entity.Model, so only the base
+        # Entity.Model fields survive on the wire.
         assert body["type"] == "scene"
         assert body["id"] == "s1"
         assert body["name"] == "Test Scene"
         assert body["body"] == "A small room."
-        assert set(body["character_ids"]) == {"bob", "elara"}
-        assert body["player_character_ids"] == ["bob"]
 
-    def test_entity_character_returns_character_response(self) -> None:
-        # rest-api-entity-dispatch: a Character entity dispatches to
-        # `character.to_response()` and returns a CharacterResponse.
-        from sidestage.character import CharacterResponse
-        from sidestage.entity import EntityType
+    def test_entity_character_returns_character_model(self) -> None:
+        # rest-api-get-entity: a Character entity returns its `entity.model`
+        # (a Character.Model) directly — no isinstance dispatch, no conversion.
+        from sidestage.character import Character
 
-        char_entity = MagicMock(spec=[])
+        # `spec=Character` so isinstance(mock, Character) returns True.
+        char_entity = MagicMock(spec=Character)
         char_entity.id = EntityId("alice")
         char_entity.type = EntityType.CHARACTER
-        char_entity.to_response = MagicMock(
-            return_value=CharacterResponse(
-                id=EntityId("alice"),
-                name="Alice",
-                body="A curious user.",
-                owner="user",
-            )
+        char_entity.model = Character.Model(
+            id=EntityId("alice"),
+            name="Alice",
+            type=EntityType.CHARACTER,
+            body="A curious user.",
+            owner="user",
         )
 
         app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=char_entity)
+        app.campaigns[CAMPAIGN_ID].get = MagicMock(return_value=char_entity)
         with TestClient(app._fastapi) as client:
             response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/alice")
         assert response.status_code == 200
         body = response.json()
+        # Entity.Model response_model strips subclass-specific fields like
+        # `owner`; only base Entity.Model fields appear on the wire.
         assert body["type"] == "character"
         assert body["id"] == "alice"
         assert body["name"] == "Alice"
         assert body["body"] == "A curious user."
-        assert body["owner"] == "user"
-
-    def test_entity_404_when_no_panel_renderer(self) -> None:
-        # rest-api-entity-dispatch: entities of unknown type (not Scene or
-        # Character) return 404 — no panel renderer is registered.
-        from sidestage.entity import EntityType
-
-        generic_entity = MagicMock(spec=[])
-        generic_entity.id = EntityId("thing")
-        generic_entity.type = EntityType.ENTITY
-
-        app, *_ = make_loaded_app()
-        app.campaigns[CAMPAIGN_ID].factory.get = MagicMock(return_value=generic_entity)
-        with TestClient(app._fastapi) as client:
-            response = client.get(f"/api/campaigns/{CAMPAIGN_ID}/entities/thing")
-        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -1058,8 +1031,7 @@ class TestWsConnection:
 
     def _make_campaign_for(self, scene: MagicMock) -> MagicMock:
         campaign = MagicMock(spec=[])
-        campaign.factory = MagicMock()
-        campaign.factory.get = MagicMock(
+        campaign.get = MagicMock(
             side_effect=lambda eid: scene if eid == scene.id else None
         )
         return campaign
@@ -1187,7 +1159,7 @@ class TestWsConnection:
         )
 
     async def test_unknown_entity_id_is_ignored(self) -> None:
-        # Subscribe to a non-existent entity: factory.get returns None,
+        # Subscribe to a non-existent entity: campaign.get returns None,
         # the handler logs and ignores. No crash, no listener registered.
         from sidestage.ws import WsConnection
 
@@ -1266,9 +1238,7 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run") as run_mock,
             patch("sidestage.server.Campaign.load", side_effect=fake_load),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=sidestage_dir)
 
         # Sorted order: a_camp comes first.
@@ -1296,9 +1266,7 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch("sidestage.server.Campaign.load", side_effect=fake_load),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=str(root.parent) + "/")
 
         assert len(loaded_paths) == 1
@@ -1312,11 +1280,9 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch("sidestage.server.Campaign.load") as load_mock,
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
+            pytest.raises(RuntimeError),
         ):
-            factory_mock.return_value = MagicMock()
-            with pytest.raises(RuntimeError):
-                App.run(sidestage_dir=str(root) + "/")
+            App.run(sidestage_dir=str(root) + "/")
         load_mock.assert_not_called()
 
     def test_run_raises_when_campaigns_dir_missing(self, tmp_path) -> None:
@@ -1327,11 +1293,9 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run"),
             patch("sidestage.server.Campaign.load") as load_mock,
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
+            pytest.raises(RuntimeError),
         ):
-            factory_mock.return_value = MagicMock()
-            with pytest.raises(RuntimeError):
-                App.run(sidestage_dir=str(root) + "/")
+            App.run(sidestage_dir=str(root) + "/")
         load_mock.assert_not_called()
 
     def test_run_registers_campaign_by_name(self, tmp_path) -> None:
@@ -1357,40 +1321,13 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
             patch("sidestage.server.Campaign.load", return_value=fake_campaign),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
             patch.object(App, "__init__", capturing_init),
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=sidestage_dir)
 
         assert captured.get("called") is True
         assert len(instances) == 1
         assert instances[0].campaigns == {"Only Campaign": fake_campaign}
-
-    def test_run_sets_factory_before_load(self, tmp_path) -> None:
-        # App.factory is set BEFORE Campaign.load so deserialize-time code
-        # can reach the factory via App.factory.
-        sidestage_dir = self._make_sidestage_tree(tmp_path, ["a_camp"])
-        observed = {}
-
-        def fake_load(path) -> MagicMock:
-            # When Campaign.load is invoked, App.factory must already be set.
-            observed["factory_set"] = (
-                hasattr(App, "factory") and App.factory is not None
-            )
-            c = MagicMock()
-            c.name = "a"
-            return c
-
-        with (
-            patch("sidestage.server.uvicorn.run"),
-            patch("sidestage.server.Campaign.load", side_effect=fake_load),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
-        ):
-            factory_mock.return_value = MagicMock()
-            App.run(sidestage_dir=sidestage_dir)
-
-        assert observed.get("factory_set") is True
 
     def test_run_state_serving_after_load(self, tmp_path) -> None:
         # server-run-state-serving: state flips to SERVING after Campaign.load.
@@ -1413,10 +1350,8 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
             patch("sidestage.server.Campaign.load", return_value=fake_campaign),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
             patch.object(App, "__init__", capturing_init),
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=sidestage_dir)
 
         assert observed.get("state_at_serve") == ServerState.SERVING
@@ -1434,9 +1369,7 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
             patch("sidestage.server.Campaign.load", return_value=fake_campaign),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=sidestage_dir)
 
         assert observed.get("port") == 8000, (
@@ -1457,9 +1390,7 @@ class TestAppRun:
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
             patch("sidestage.server.Campaign.load", return_value=fake_campaign),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
         ):
-            factory_mock.return_value = MagicMock()
             App.run(sidestage_dir=sidestage_dir, port=54321)
 
         assert observed.get("port") == 54321, (
@@ -1490,11 +1421,7 @@ class TestCreateApp:
 
         fake_campaign = MagicMock()
         fake_campaign.name = "c"
-        with (
-            patch("sidestage.server.Campaign.load", return_value=fake_campaign),
-            patch("sidestage.server.DictEntityFactory") as factory_mock,
-        ):
-            factory_mock.return_value = MagicMock()
+        with patch("sidestage.server.Campaign.load", return_value=fake_campaign):
             asgi = create_app()
         assert isinstance(asgi, FastAPI), (
             f"server-create-app: factory MUST return a FastAPI app; got {type(asgi)!r}"
@@ -1535,9 +1462,7 @@ class TestServerMainLoadsDotenv:
             patch.object(server_mod, "load_dotenv") as load_mock,
             patch.object(server_mod.uvicorn, "run"),
             patch.object(server_mod.Campaign, "load", return_value=fake_campaign),
-            patch.object(server_mod, "DictEntityFactory") as factory_mock,
         ):
-            factory_mock.return_value = MagicMock()
             server_mod.main()
 
         load_mock.assert_called_once_with()

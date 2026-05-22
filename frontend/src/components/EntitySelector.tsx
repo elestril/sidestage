@@ -9,23 +9,24 @@ export interface EntitySelectorProps {
 }
 
 function brandSceneListing(raw: unknown): SceneResponse {
-  // Listing endpoint returns SceneResponse[]. We only brand the id-bearing
-  // fields; the rest of the wire shape matches the typed response.
+  // Wire shape is Scene.Model: id + name + body + character_ids only.
+  // player_character_ids is Phase-1 stubbed (first character_id) — see
+  // brandSceneResponse in entityRegistry.ts.
   const r = raw as {
     type: 'scene';
     id: string;
     name: string;
     body: string;
     character_ids: string[];
-    player_character_ids: string[];
   };
+  const character_ids = r.character_ids.map(asEntityId);
   return {
     type: 'scene',
     id: asEntityId(r.id),
     name: r.name,
     body: r.body,
-    character_ids: r.character_ids.map(asEntityId),
-    player_character_ids: r.player_character_ids.map(asEntityId),
+    character_ids,
+    player_character_ids: character_ids.length > 0 ? [character_ids[0]] : [],
   };
 }
 
