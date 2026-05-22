@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from contextlib import asynccontextmanager
 from enum import Enum
 from pathlib import Path
 from urllib.parse import quote
@@ -78,6 +79,22 @@ _INLINE_HTML = """<!DOCTYPE html>
 # ---------------------------------------------------------------------------
 
 
+@asynccontextmanager
+async def _app_lifespan(fastapi_app: FastAPI):
+    """Module-level FastAPI lifespan. Finds the owning App via
+    `fastapi_app.state.app` (set in `App.__init__`) and drives
+    `App.close_campaigns` on shutdown. Defined at module scope so
+    repeated `App()` instantiations in tests don't accumulate unique
+    per-instance lifespan closures (which asyncio's process-exit
+    cleanup has to walk one by one — slow at suite scale)."""
+    try:
+        yield
+    finally:
+        app: App | None = getattr(fastapi_app.state, "app", None)
+        if app is not None:
+            app.close_campaigns()
+
+
 class App:
     """server-app: The Sidestage FastAPI application and CLI entry point.
 
@@ -129,16 +146,16 @@ class App:
     """
 
     llm_profile: LlmProfile | None = None
-    """server-app-llm-profile: Class-level slot holding the resolved
+    """backend-llm-profile-slot: Class-level slot holding the resolved
     `LlmProfile` for this instance. Set by `_build_and_load` immediately
     after `factory`, by reading
     `load_profiles(sidestage_dir)[config.llm_profile]`. Parallel to
     `server-app-factory`. `None` until the first load.
 
     `App.get_actor("npc")` reads `cls.llm_profile.models["default"]` to
-    construct the `NpcActor` (per `server-app-llm-profile-required-for-npc`).
+    construct the `NpcActor` (per `backend-llm-profile-slot`).
 
-    .implements: server-app-llm-profile
+    .implements: backend-llm-profile-slot
     """
 
     # server-app: class-level Actor registry. Private (leading underscore) per
@@ -151,16 +168,12 @@ class App:
         self.campaigns = {}
         # server-state-loading: initial state is LOADING.
         self.state = ServerState.LOADING
-        from contextlib import asynccontextmanager
-
-        @asynccontextmanager
-        async def _lifespan(fastapi_app):
-            try:
-                yield
-            finally:
-                self.close_campaigns()
-
-        self._fastapi: FastAPI = FastAPI(lifespan=_lifespan)
+        # Lifespan is a module-level function (not a closure capturing
+        # `self`) so per-instance App objects don't pin their lifespan
+        # generators in asyncio's process-exit cleanup. The lifespan
+        # finds the App via `fastapi.state.app` set below.
+        self._fastapi: FastAPI = FastAPI(lifespan=_app_lifespan)
+        self._fastapi.state.app = self
         self._setup_routes()
 
     # ----------------------- actor registry -----------------------
@@ -203,7 +216,7 @@ class App:
             # bug, not a runtime fallback.
             if cls.llm_profile is None:
                 raise RuntimeError(
-                    "server-app-llm-profile-required-for-npc: "
+                    "backend-llm-profile-slot: "
                     "App.llm_profile is None — _build_and_load must "
                     "populate it before any Character with owner='npc' "
                     "is constructed."
@@ -416,7 +429,7 @@ class App:
 
         - server-run-state-loading: Sets `state = LOADING` before campaign
           load; while in this state every API route returns 503.
-        - server-app-llm-profile: Loads
+        - backend-llm-profile-slot: Loads
           `<sidestage_dir>/llm_profiles/<llm_profile_name>.yaml` into
           `cls.llm_profile` BEFORE campaign load so that any Character
           with `owner="npc"` can construct its NpcActor at deserialize
@@ -436,7 +449,7 @@ class App:
         # server-run-state-loading.
         instance.state = ServerState.LOADING
 
-        # server-app-llm-profile: resolve the active LLM profile from disk.
+        # backend-llm-profile-slot: resolve the active LLM profile from disk.
         # Missing dir → empty dict per llm-profile-discovery-missing-dir;
         # missing-named-profile is a config error (we surface a clear
         # message instead of letting NpcActor instantiation crash later).
@@ -444,7 +457,7 @@ class App:
         if profiles and llm_profile_name not in profiles:
             available = ", ".join(sorted(profiles)) or "(none)"
             raise RuntimeError(
-                f"server-app-llm-profile: profile {llm_profile_name!r} not "
+                f"backend-llm-profile-slot: profile {llm_profile_name!r} not "
                 f"found in {sidestage_dir}/llm_profiles/; "
                 f"available: {available}"
             )
@@ -544,7 +557,7 @@ class App:
 
         `llm_profile_name` selects which YAML under
         `<sidestage_dir>/llm_profiles/` is loaded into `App.llm_profile`
-        (per `server-app-llm-profile`).
+        (per `backend-llm-profile-slot`).
 
         For the reload path see `create_app` and `server-run-reload`.
 

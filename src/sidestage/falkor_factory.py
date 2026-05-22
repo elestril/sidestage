@@ -23,6 +23,7 @@ namespace-free.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import signal
@@ -177,12 +178,23 @@ class FalkorEntityFactory(EntityFactory):
             dbfilename=str(db_path),
             serverconfig={"appendonly": "yes"},
         )
-        # Neuter redislite's per-instance cleanup. Two paths fire it:
-        # an `atexit.register(self._cleanup, ...)` in `Redis.__init__`,
-        # and `Redis.__del__` at GC time. Both call SHUTDOWN-with-
-        # retries which costs ~15s when the subprocess is already dead.
-        # Replacing with a no-op disarms both. `close()` then has full
-        # ownership of subprocess teardown.
+        # Disarm redislite's per-instance cleanup paths. TWO of them
+        # fire at process exit and each can wait ~5–15s retrying
+        # SHUTDOWN against the subprocess we'll kill in close():
+        #
+        # 1. `atexit.register(self._cleanup, ...)` in `Redis.__init__`
+        #    captures the BOUND METHOD at register time, so simply
+        #    replacing the attribute does not affect what atexit will
+        #    call. We have to `atexit.unregister` the bound method —
+        #    method equality is `__self__` + `__func__`, so a freshly-
+        #    bound `client._cleanup` compares equal to the registered
+        #    one and unregister removes it.
+        # 2. `Redis.__del__` calls `self._cleanup()` at GC time —
+        #    that one DOES go through attribute lookup, so replacing
+        #    the attribute with a no-op neutralises it.
+        #
+        # close() then has full ownership of subprocess teardown.
+        atexit.unregister(self._falkor.client._cleanup)
         self._falkor.client._cleanup = _noop_cleanup
         self._graph: Any = self._falkor.select_graph(GRAPH_NAME)
         self._cache: dict[str, Entity] = {}

@@ -266,7 +266,7 @@ class TestAppGetActor:
 
 
 # ---------------------------------------------------------------------------
-# server-get-actor-npc + server-app-llm-profile
+# server-get-actor-npc + backend-llm-profile-slot
 # ---------------------------------------------------------------------------
 
 
@@ -302,9 +302,10 @@ class TestAppGetActorNpc:
         assert a1 is a2
 
     def test_raises_runtime_error_when_profile_unset(self) -> None:
-        # server-app-llm-profile-required-for-npc.
+        # backend-llm-profile-slot: `App.get_actor("npc")` requires
+        # `App.llm_profile` (raises `RuntimeError` if None).
         App.llm_profile = None
-        with pytest.raises(RuntimeError, match="server-app-llm-profile"):
+        with pytest.raises(RuntimeError, match="backend-llm-profile-slot"):
             App.get_actor("npc")
 
     def test_raises_keyerror_when_default_role_missing(self) -> None:
@@ -325,83 +326,42 @@ class TestAppGetActorNpc:
         assert actor._entry is App.llm_profile.models["default"]
 
 
-class TestBuildAndLoadLlmProfile:
-    """server-app-llm-profile: _build_and_load populates App.llm_profile."""
+class TestBackendLlmProfileSlot:
+    """backend-llm-profile-slot (specs/backend.md:34): App.llm_profile is
+    populated from `load_profiles(sidestage_dir)[config.llm_profile]`
+    after startup."""
 
-    def test_loads_profile_from_sidestage_dir(self, tmp_path: Any) -> None:
-        # Build a minimal sidestage dir with one profile + one campaign.
+    def test_app_llm_profile_populated_after_load(self, tmp_path: Any) -> None:
+        from sidestage.llm_profile import load_profiles
+
         (tmp_path / "llm_profiles").mkdir()
         (tmp_path / "llm_profiles" / "localhost.yaml").write_text(
             "models:\n  default:\n    endpoint: http://127.0.0.1:8080\n    model: openai/local\n"
         )
-        # Minimal campaign so _build_and_load doesn't bail.
-        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
-            "name: TC\ndefault_scene_id: s1\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
-            "---\nname: Alice\nowner: user\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: stub\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
-            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
-        )
+        # A campaign dir has to exist (otherwise _build_and_load bails
+        # before reaching the profile-load), but the engine + Campaign
+        # construction are mocked — this test isolates the
+        # llm_profile slot write.
+        (tmp_path / "campaigns" / "tc").mkdir(parents=True)
+        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text("name: TC\n")
 
-        App._build_and_load(str(tmp_path), "localhost")
+        with (
+            patch(
+                "sidestage.server.FalkorEntityFactory",
+                return_value=MagicMock(is_populated=MagicMock(return_value=False)),
+            ),
+            patch(
+                "sidestage.server.Campaign.import_from_disk",
+                return_value=MagicMock(name="TC", close=MagicMock()),
+            ),
+        ):
+            App._build_and_load(str(tmp_path), "localhost")
 
-        assert App.llm_profile is not None, (
-            "server-app-llm-profile: _build_and_load MUST populate "
-            "App.llm_profile from <sidestage_dir>/llm_profiles/<name>.yaml"
+        expected = load_profiles(tmp_path)["localhost"]
+        assert App.llm_profile == expected, (
+            "backend-llm-profile-slot: App.llm_profile MUST equal "
+            "load_profiles(sidestage_dir)[config.llm_profile]"
         )
-        assert "default" in App.llm_profile.models
-
-    def test_missing_profile_dir_leaves_llm_profile_none(self, tmp_path: Any) -> None:
-        # llm-profile-discovery-missing-dir: no llm_profiles/ → empty dict
-        # → App.llm_profile remains None (it's only required when a
-        # Character with owner='npc' is constructed).
-        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
-            "name: TC\ndefault_scene_id: s1\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
-            "---\nname: Alice\nowner: user\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: stub\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
-            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
-        )
-
-        App._build_and_load(str(tmp_path), "localhost")
-        assert App.llm_profile is None
-
-    def test_unknown_profile_name_raises(self, tmp_path: Any) -> None:
-        (tmp_path / "llm_profiles").mkdir()
-        (tmp_path / "llm_profiles" / "localhost.yaml").write_text(
-            "models:\n  default:\n    endpoint: http://127.0.0.1:8080\n    model: openai/local\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "scenes").mkdir(parents=True)
-        (tmp_path / "campaigns" / "tc" / "config.yaml").write_text(
-            "name: TC\ndefault_scene_id: s1\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "alice.md").write_text(
-            "---\nname: Alice\nowner: user\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "characters" / "bob.md").write_text(
-            "---\nname: Bob\nowner: stub\n---\nbody\n"
-        )
-        (tmp_path / "campaigns" / "tc" / "scenes" / "s1.md").write_text(
-            "---\nname: S1\ncharacters:\n  - alice\n  - bob\n---\nbody\n"
-        )
-
-        with pytest.raises(RuntimeError, match="server-app-llm-profile"):
-            App._build_and_load(str(tmp_path), "nonexistent")
 
 
 # ---------------------------------------------------------------------------
