@@ -220,7 +220,7 @@ class Entity:
         .implements: events-dataflow-fan-out, events-errors-listener-isolation
         """
         for listener in list(self._listeners):
-            self.spawn_task(self._invoke_listener(listener, event))
+            self._spawn_task(self._invoke_listener(listener, event))
 
     async def _invoke_listener(self, listener: Listener, event: EntityChanged) -> None:
         """Per-listener task body: invoke `listener.notify`, awaiting if it
@@ -232,10 +232,11 @@ class Entity:
         except Exception:
             logger.exception("listener %r raised in notify", listener)
 
-    def spawn_task(self, coro) -> asyncio.Task:
-        """entity-spawn-task: Track `coro` as a task on this entity.
+    def _spawn_task(self, coro) -> asyncio.Task:
+        """events-async-tasks-private: Track `coro` as a task on this
+        entity. Private — `_emit` is the only production caller.
 
-        .implements: events-async-tasks-spawn
+        .implements: events-async-tasks-spawn, events-async-tasks-private
         """
         task = asyncio.create_task(coro)
         self._pending_tasks.add(task)
@@ -250,11 +251,14 @@ class Entity:
         if exc is not None:
             logger.error("spawned task raised", exc_info=exc)
 
-    async def idle(self, timeout: float = 5.0) -> None:
-        """entity-idle: Wait for all pending listener tasks to complete.
-        Test-only primitive.
+    async def _idle(self, timeout: float = 5.0) -> None:
+        """events-async-tasks-idle: Wait for all pending listener tasks to
+        complete. Internal — production never calls this; tests use the
+        public `Scene.idle()` wrapper. Lives on Entity so the same
+        machinery can be exercised by Entity-level unit tests, but is
+        deliberately not surfaced on the base API.
 
-        .implements: events-async-tasks-idle, testing-runner
+        .implements: events-async-tasks-idle
         """
         deadline = asyncio.get_running_loop().time() + timeout
         while self._pending_tasks:

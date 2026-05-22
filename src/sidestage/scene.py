@@ -61,6 +61,16 @@ class Scene(Entity):
         """scene-user-characters: Characters with `has_human_actor()` True."""
         return [c for c in self.characters if c.has_human_actor()]
 
+    async def idle(self, timeout: float = 5.0) -> None:
+        """scene-idle: Wait for all background tasks spawned in response to
+        recent emissions to settle. Test-only primitive — production
+        never calls it. Public on Scene because Scene is where mutation
+        cascades actually happen (per `events-async-tasks-idle`).
+
+        .implements: events-async-tasks-idle, scene-idle
+        """
+        await self._idle(timeout)
+
 
 class SimpleScene(Scene):
     """simple-scene: Two-party scene — exactly one user-controlled character

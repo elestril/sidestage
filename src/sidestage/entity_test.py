@@ -100,7 +100,7 @@ class TestEntityConstruction:
 
         async def run() -> None:
             entity.body = "new"
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -122,7 +122,7 @@ class TestEntityConstruction:
 
         async def run() -> None:
             entity.body = "same"
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -233,7 +233,7 @@ class TestEntityEmit:
 
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         entity._emit(event)
-        await entity.idle()
+        await entity._idle()
 
         assert l1.received == [event]
         assert l2.received == [event]
@@ -248,7 +248,7 @@ class TestEntityEmit:
         entity._emit(event)
         # Immediately after _emit (no awaits), there should be a pending task.
         assert len(entity._pending_tasks) == 1
-        await entity.idle()
+        await entity._idle()
         assert listener.received == [event]
 
     async def test_emit_per_listener_isolation(self, caplog) -> None:
@@ -261,7 +261,7 @@ class TestEntityEmit:
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         with caplog.at_level(logging.ERROR):
             entity._emit(event)
-            await entity.idle()
+            await entity._idle()
 
         # The good listener still received the event despite the bad one raising.
         assert good.received == [event]
@@ -277,7 +277,7 @@ class TestEntitySpawnTask:
         async def coro() -> str:
             return "ok"
 
-        task = entity.spawn_task(coro())
+        task = entity._spawn_task(coro())
         assert isinstance(task, asyncio.Task)
         await task
 
@@ -287,9 +287,9 @@ class TestEntitySpawnTask:
         async def coro() -> None:
             await asyncio.sleep(0.01)
 
-        task = entity.spawn_task(coro())
+        task = entity._spawn_task(coro())
         assert task in entity._pending_tasks
-        await entity.idle()
+        await entity._idle()
         assert task not in entity._pending_tasks
 
     async def test_spawn_task_done_callback_removes(self) -> None:
@@ -298,7 +298,7 @@ class TestEntitySpawnTask:
         async def coro() -> None:
             return None
 
-        task = entity.spawn_task(coro())
+        task = entity._spawn_task(coro())
         await task
         # Allow the done-callback to fire.
         await asyncio.sleep(0)
@@ -311,7 +311,7 @@ class TestEntitySpawnTask:
             raise RuntimeError("spawn-task-boom")
 
         with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
-            task = entity.spawn_task(coro())
+            task = entity._spawn_task(coro())
             with contextlib.suppress(RuntimeError):
                 await task
             # Allow the done-callback to fire.
@@ -333,7 +333,7 @@ class TestEntityIdle:
     async def test_idle_returns_immediately_when_empty(self) -> None:
         entity = make_entity()
         # No pending tasks — idle should return immediately.
-        await entity.idle()
+        await entity._idle()
         assert entity._pending_tasks == set()
 
     async def test_idle_waits_for_pending(self) -> None:
@@ -344,8 +344,8 @@ class TestEntityIdle:
             await asyncio.sleep(0.01)
             completed.append(True)
 
-        entity.spawn_task(slow())
-        await entity.idle()
+        entity._spawn_task(slow())
+        await entity._idle()
         assert completed == [True]
         assert entity._pending_tasks == set()
 
@@ -355,9 +355,9 @@ class TestEntityIdle:
         async def forever() -> None:
             await asyncio.sleep(2.0)
 
-        entity.spawn_task(forever())
+        entity._spawn_task(forever())
         with pytest.raises(asyncio.TimeoutError):
-            await entity.idle(timeout=0.05)
+            await entity._idle(timeout=0.05)
 
     async def test_idle_handles_cascading_tasks(self) -> None:
         """A task that spawns another task (cascading) should still be awaited."""
@@ -371,10 +371,10 @@ class TestEntityIdle:
         async def first() -> None:
             await asyncio.sleep(0)
             order.append("first")
-            entity.spawn_task(second())
+            entity._spawn_task(second())
 
-        entity.spawn_task(first())
-        await entity.idle(timeout=1.0)
+        entity._spawn_task(first())
+        await entity._idle(timeout=1.0)
         assert "first" in order
         assert "second" in order
         assert entity._pending_tasks == set()
@@ -411,7 +411,7 @@ class TestEventsProtocolSyncOrAsync:
 
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         entity._emit(event)
-        await entity.idle()
+        await entity._idle()
 
         assert listener.received == [event]
 
@@ -422,7 +422,7 @@ class TestEventsProtocolSyncOrAsync:
 
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         entity._emit(event)
-        await entity.idle()
+        await entity._idle()
 
         # If the bus did not await the coroutine, .received would be empty
         # because the await asyncio.sleep(0) in _AsyncListener.notify would
@@ -444,7 +444,7 @@ class TestEventsErrorsListenerIsolation:
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
             entity._emit(event)
-            await entity.idle()
+            await entity._idle()
 
         assert good.received == [event]
 
@@ -456,7 +456,7 @@ class TestEventsErrorsListenerIsolation:
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
             entity._emit(event)
-            await entity.idle()
+            await entity._idle()
 
         error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert error_records, "expected at least one ERROR log for raising listener"
@@ -477,7 +477,7 @@ class TestEventsErrorsSpawnedTask:
             raise RuntimeError("spawned-task-log-check")
 
         with caplog.at_level(logging.ERROR, logger="sidestage.entity"):
-            task = entity.spawn_task(boom())
+            task = entity._spawn_task(boom())
             with contextlib.suppress(RuntimeError):
                 await task
             # Done-callback runs after the task finishes; yield once.
@@ -496,7 +496,7 @@ class TestEventsAsyncTasksSpawn:
         async def coro() -> int:
             return 42
 
-        task = entity.spawn_task(coro())
+        task = entity._spawn_task(coro())
         assert isinstance(task, asyncio.Task)
         result = await task
         assert result == 42
@@ -507,7 +507,7 @@ class TestEventsAsyncTasksSpawn:
         async def coro() -> None:
             return None
 
-        task = entity.spawn_task(coro())
+        task = entity._spawn_task(coro())
         assert task in entity._pending_tasks
         await task
         # The done-callback runs in the same loop iteration after task completion.
@@ -680,7 +680,7 @@ class TestEntityListAppend:
 
         async def run() -> None:
             entity.items.append("x")
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -703,7 +703,7 @@ class TestEntityListInsert:
 
         async def run() -> None:
             entity.items.insert(1, "x")
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -723,7 +723,7 @@ class TestEntityListExtend:
 
         async def run() -> None:
             entity.items.extend(["a", "b"])
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -744,7 +744,7 @@ class TestEntityListPop:
 
         async def run() -> None:
             entity.items.pop()
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -763,7 +763,7 @@ class TestEntityListRemove:
 
         async def run() -> None:
             entity.items.remove("a")
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -782,7 +782,7 @@ class TestEntityListClear:
 
         async def run() -> None:
             entity.items.clear()
-            await entity.idle()
+            await entity._idle()
 
         asyncio.run(run())
 
@@ -885,13 +885,13 @@ class TestEventsAsyncTasksIdle:
 
         class CascadingListener:
             def notify(self, event: EntityChanged) -> None:
-                event.entity.spawn_task(cascaded_work())
+                event.entity._spawn_task(cascaded_work())
 
         entity.subscribe(CascadingListener())
 
         event = EntityChanged(entity=entity, attributes=["test_attr"])
         entity._emit(event)
-        await entity.idle(timeout=1.0)
+        await entity._idle(timeout=1.0)
 
         assert cascaded == ["done"]
         assert entity._pending_tasks == set()
@@ -907,10 +907,10 @@ class TestEventsAsyncTasksIdle:
         async def child() -> None:
             await asyncio.sleep(0)
             completed.append("child")
-            entity.spawn_task(grandchild())
+            entity._spawn_task(grandchild())
 
-        entity.spawn_task(child())
-        await entity.idle(timeout=1.0)
+        entity._spawn_task(child())
+        await entity._idle(timeout=1.0)
 
         assert completed == ["child", "grandchild"]
         assert entity._pending_tasks == set()

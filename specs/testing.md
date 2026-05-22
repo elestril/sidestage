@@ -127,8 +127,9 @@ Shared fixtures live in `tests/conftest.py`; e2e-only in
   loads `tests/sidestage/campaigns/test_campaign/` once. Read-only
   across the session.
 - testing-fixture-test-app: `test_app` (function-scoped) — fresh `App`
-  with campaigns + factory wired from `test_campaign`, `state =
-  SERVING`. Resets `App.factory` on teardown.
+  with `campaigns` wired from `test_campaign`, `state = SERVING`.
+  Campaign owns its entity storage internally (per
+  [[entity-model]] `entity-campaign`); no class-level slot to reset.
 - testing-fixture-test-client: `test_client` (function-scoped) — sync
   `TestClient(test_app._fastapi)` for non-streaming routes.
 - testing-fixture-test-server: `test_server` (function-scoped, in

@@ -101,11 +101,9 @@ class TestCharacterInitStoresOwner:
         assert char.body == "some body"
         assert char.type == EntityType.CHARACTER
 
-    def test_loaded_true_after_init(self) -> None:
-        # The Entity ghost guard must allow free attribute access — i.e. the
-        # newly-constructed Character is a real (non-ghost) entity.
+    def test_attributes_accessible_after_init(self) -> None:
+        # Construction wires `_model` so attribute reads forward correctly.
         char = make_character(owner="stub")
-        # If _loaded were False this would raise UnresolvedEntityError.
         assert char.name == "Alice"
 
 
