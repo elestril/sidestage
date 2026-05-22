@@ -127,17 +127,44 @@ in sync, spec amendments require a design conversation. See [[spec]].
 
 ## architecture-cuj: Canonical CUJs
 
-Two journeys traverse the whole shape end-to-end:
+Four journeys traverse the whole shape end-to-end:
 
-1. **cuj-startup**: User runs `sidestage` → server loads the first campaign →
-   flips to `SERVING` → SPA loads → FE Campaign connects → resolves the scene
-   → DOM renders.
-   - .implemented-by: App.run, App._setup_routes, Campaign
+1. **cuj-startup**: User runs `sidestage` → server opens FalkorDBLite at
+   `<sidestage_dir>/falkor.db` (per [[persistence]]
+   `persistence-engine-redislite`) → if no graph exists for the single
+   loaded campaign, runs `cuj-campaign-import`; otherwise `Campaign.open`
+   reads it back → flips to `SERVING` → SPA loads → FE Campaign connects
+   → resolves the scene → DOM renders.
+   - .implemented-by: App.run, App._setup_routes, Campaign,
+     Campaign.open, Campaign.import_from_disk
 2. **cuj-hello-send / cuj-hello-respond**: User types a message → FE widget
    calls `alice.speak("Hi")` → relayed to BE as EntityAction → BE
    `Character.speak` constructs a Message and appends to the scene →
    `EntityChanged` cascades to in-process listeners (NPC actor responds via
-   its own `character.speak(...)`) AND to FE Campaign → FE re-renders.
+   its own `character.speak(...)`) AND to FE Campaign → FE re-renders. The
+   append also writes the message through to the per-scene Redis stream
+   (per [[persistence]] `persistence-streams-append`), so the journey is
+   durable across reload.
    - .tested-by: cuj-hello-browser
+3. **cuj-campaign-import**: On first launch (or after the graph is
+   dropped), the server walks `<sidestage_dir>/campaigns/<id>/` and
+   parses every entity `.md` into Model + Campaign.add via
+   `Campaign.import_from_disk` (per [[persistence]]
+   `persistence-import-dataflow`). The factory translates
+   `EntityList[EntityId]`-typed Model fields into graph relationships
+   internally (per [[persistence]] `persistence-graph-edges`).
+   Subsequent launches skip this and run `Campaign.open` instead.
+   - .implemented-by: Campaign.import_from_disk
+4. **cuj-campaign-export**: An operator (today: via direct call;
+   future: CLI/route) triggers `Campaign.export(path)`, which
+   regenerates the on-disk markdown directory canonically from the
+   live graph (per [[persistence]] `persistence-export-dataflow`).
+   The markdown directory is the savegame format; the graph is the
+   runtime source of truth. Chat history is NOT exported — it lives
+   in per-scene Redis streams.
+   - .implemented-by: Campaign.export
 
-The whole loop is exercised by `tests/playwright/cuj_hello.spec.ts`.
+The cuj-hello loop is exercised by `tests/playwright/cuj_hello.spec.ts`;
+`cuj-campaign-import` and `cuj-campaign-export` are exercised by the
+roundtrip integration test (`tests/integration/test_falkor_roundtrip.py`,
+per [[testing]]).

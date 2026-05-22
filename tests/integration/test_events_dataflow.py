@@ -58,7 +58,7 @@ async def test_events_dataflow() -> None:
             name="Parlor",
             type=EntityType.SCENE,
             body="A quiet room.",
-            character_ids=[EntityId("alice"), EntityId("bob")],
+            characters=[EntityId("alice"), EntityId("bob")],
         ),
         campaign,
     )

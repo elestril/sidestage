@@ -33,7 +33,7 @@ def test_campaign() -> Campaign:
 
     .implements: testing-fixture-test-campaign
     """
-    return Campaign.load(_TEST_CAMPAIGN_DIR)
+    return Campaign.import_from_disk(_TEST_CAMPAIGN_DIR)
 
 
 @pytest.fixture

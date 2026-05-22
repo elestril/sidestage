@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import frontmatter
 import yaml
@@ -97,6 +98,24 @@ class Campaign:
         self.name = name
         self.default_scene_id = default_scene_id
         self._store = store if store is not None else DictEntityFactory()
+        # FalkorEntityFactory needs a backreference to this Campaign to
+        # construct Entity wrappers on rehydration. In-memory factories
+        # don't — so we duck-type instead of putting the hook on the
+        # base `EntityFactory` ABC.
+        set_campaign = getattr(self._store, "set_campaign", None)
+        if callable(set_campaign):
+            set_campaign(self)
+
+    @property
+    def db_handle(self):
+        """campaign-db-handle: Public seam for entities that need DB
+        access (e.g. Scene's message stream). Returns the store's
+        underlying FalkorDB handle, or `None` when the campaign runs
+        in-memory.
+
+        .implements: persistence-campaign-db-handle
+        """
+        return getattr(self._store, "db_handle", None)
 
     # ----------------------------------------------------------------
     # Architectural surface: get / add / delete
@@ -156,32 +175,31 @@ class Campaign:
         )
 
     # ----------------------------------------------------------------
-    # Load
+    # Load / open / export — see [[persistence]] startup contract
     # ----------------------------------------------------------------
 
     @classmethod
-    def load(cls, path: Path) -> Campaign:
-        """campaign-load: Single-pass load from disk.
-
-        Walks the tree in dependency order (characters before scenes), so
-        cross-entity references resolve at construction time via
-        `campaign.get(id)`. Each entity is constructed by calling its
-        class on the parsed Model.
-
-        - campaign-load-config: Reads `<path>/config.yaml`.
-        - campaign-load-construct: Each entity is built via `Cls(model,
-          campaign)` and registered with `campaign.add(entity)`.
-        - campaign-load-default-scene-id: Stored as the navigation hint.
-        - campaign-load-order: Characters before scenes. Scenes' cross-refs
-          resolve at construction.
-
-        .implements: fs-dataflow-config, fs-dataflow-walk, fs-dataflow-classify,
-            fs-dataflow-parse, fs-dataflow-deserialize, fs-dataflow-add,
-            fs-dataflow-finalize
-        """
+    def _read_config(cls, path: Path) -> CampaignConfig:
+        """Read `<path>/config.yaml` into a `CampaignConfig`. Shared by
+        both `import_from_disk` and `open`."""
         config_data = yaml.safe_load((path / "config.yaml").read_text())
-        config = CampaignConfig(**config_data)
+        return CampaignConfig(**config_data)
 
+    @classmethod
+    def open(cls, path: Path, store: EntityFactory) -> Campaign:
+        """campaign-open: Construct a Campaign assuming `store` is already
+        populated (typically by `FalkorEntityFactory` against an existing
+        graph). Reads `<path>/config.yaml` for campaign metadata; does NOT
+        read entity `.md` files — entity state comes from the store. After
+        construction, calls `store.load_existing()` so persistent factories
+        can hydrate their wrapper caches from the graph.
+
+        Used when the campaign's graph already exists
+        (per [[persistence]] `persistence-startup-import-on-empty`).
+
+        .implements: campaign-open, persistence-startup
+        """
+        config = cls._read_config(path)
         default_scene_id = (
             EntityId(config.default_scene_id)
             if config.default_scene_id is not None
@@ -190,6 +208,52 @@ class Campaign:
         campaign = cls(
             name=config.name,
             default_scene_id=default_scene_id,
+            store=store,
+        )
+        # Persistent factories (FalkorEntityFactory) hydrate their wrapper
+        # cache from the underlying store. In-memory factories don't need
+        # this hook — duck-typed for the same reason as bind_campaign.
+        load = getattr(store, "load_existing", None)
+        if callable(load):
+            load()
+        return campaign
+
+    @classmethod
+    def import_from_disk(
+        cls, path: Path, store: EntityFactory | None = None
+    ) -> Campaign:
+        """campaign-import-from-disk: Single-pass load from disk into an
+        (empty) `store`. Default store is `DictEntityFactory()` for unit
+        tests; production passes a `FalkorEntityFactory` so the load
+        materialises in the graph.
+
+        Walks the tree in dependency order (characters before scenes), so
+        cross-entity references resolve at construction time via
+        `campaign.get(id)`. Each entity is constructed by calling its
+        class on the parsed Model.
+
+        - campaign-import-config: Reads `<path>/config.yaml`.
+        - campaign-import-construct: Each entity is built via `Cls(model,
+          campaign)` and registered with `campaign.add(entity)`.
+        - campaign-import-default-scene-id: Stored as the navigation hint.
+        - campaign-import-order: Characters before scenes. Scenes' cross-
+          refs resolve at construction.
+
+        .implements: persistence-import-dataflow,
+            persistence-import-dataflow-config,
+            persistence-import-dataflow-walk,
+            persistence-import-dataflow-add
+        """
+        config = cls._read_config(path)
+        default_scene_id = (
+            EntityId(config.default_scene_id)
+            if config.default_scene_id is not None
+            else None
+        )
+        campaign = cls(
+            name=config.name,
+            default_scene_id=default_scene_id,
+            store=store,
         )
 
         # Characters first — scene cross-refs resolve against them.
@@ -214,14 +278,10 @@ class Campaign:
             for md_file in scenes_dir.glob("*.md"):
                 scene_id = md_file.stem
                 post = frontmatter.load(str(md_file))
-                raw_chars = (
-                    post.metadata.get("character_ids")
-                    or post.metadata.get("characters")
-                    or []
-                )
+                raw_chars = post.metadata.get("characters") or []
                 if not isinstance(raw_chars, list):
                     raise ValueError(
-                        f"{md_file}: `character_ids` must be a list, "
+                        f"{md_file}: `characters` must be a list, "
                         f"got {type(raw_chars).__name__}"
                     )
                 char_ids = [EntityId(str(cid)) for cid in raw_chars]
@@ -231,9 +291,69 @@ class Campaign:
                         "name": post.metadata.get("name", scene_id),
                         "type": EntityType.SCENE,
                         "body": post.content,
-                        "character_ids": char_ids,
+                        "characters": char_ids,
                     }
                 )
                 campaign.add(SimpleScene(model, campaign))
 
         return campaign
+
+    def export(self, path: Path) -> None:
+        """campaign-export: Regenerate the markdown directory canonically
+        from the in-memory + store state.
+
+        Writes `config.yaml`, then for each entity in
+        `self._store.entities()` writes `<kind>/<id>.md` with frontmatter
+        (Model's intrinsic + edge fields) + body. Chat history is NOT
+        exported — it lives in per-scene Redis streams.
+
+        First-export diff noise against hand-written markdown is accepted
+        (per [[persistence]] `persistence-export-dataflow-canonical`).
+
+        .implements: persistence-export-dataflow,
+            persistence-export-dataflow-config,
+            persistence-export-dataflow-nodes
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        # campaign-export-config
+        config = CampaignConfig(
+            name=self.name,
+            default_scene_id=self.default_scene_id,
+        )
+        config_dict: dict[str, Any] = {"name": config.name}
+        if config.default_scene_id is not None:
+            config_dict["default_scene_id"] = config.default_scene_id
+        (path / "config.yaml").write_text(yaml.safe_dump(config_dict, sort_keys=False))
+
+        # Group entities by subdirectory based on their EntityType.
+        by_dir: dict[str, list[Entity]] = {"characters": [], "scenes": []}
+        for entity in self._store.entities():
+            if entity.type == EntityType.CHARACTER:
+                by_dir["characters"].append(entity)
+            elif entity.type == EntityType.SCENE:
+                by_dir["scenes"].append(entity)
+            # Other entity types are out of scope for this iteration.
+
+        for subdir, entities in by_dir.items():
+            if not entities:
+                continue
+            (path / subdir).mkdir(exist_ok=True)
+            for entity in entities:
+                meta: dict[str, Any] = {}
+                model_fields = type(entity.model).model_fields
+                for field_name in model_fields:
+                    # `id`, `type`, `body` live elsewhere (filename, dir,
+                    # body); skip them in frontmatter.
+                    if field_name in ("id", "type", "body"):
+                        continue
+                    value = getattr(entity.model, field_name)
+                    # EntityList serialises as a plain list of strings.
+                    if isinstance(value, list):
+                        meta[field_name] = list(value)
+                    else:
+                        meta[field_name] = value
+                post = frontmatter.Post(content=entity.body, **meta)
+                # frontmatter.dumps emits the YAML header + body.
+                (path / subdir / f"{entity.id}.md").write_text(
+                    frontmatter.dumps(post) + "\n"
+                )

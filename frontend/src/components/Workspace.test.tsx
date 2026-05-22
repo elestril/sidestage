@@ -52,7 +52,7 @@ const parlor = {
   id: 'parlor',
   name: 'Parlor',
   body: '',
-  character_ids: [],
+  characters: [],
   player_character_ids: [],
 };
 const study = {
@@ -60,7 +60,7 @@ const study = {
   id: 'study',
   name: 'Study',
   body: '',
-  character_ids: [],
+  characters: [],
   player_character_ids: [],
 };
 

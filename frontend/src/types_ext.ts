@@ -38,7 +38,7 @@ export interface SceneModel {
   id: EntityId;
   name: string;
   body: string;
-  character_ids: EntityId[];
+  characters: EntityId[];
 }
 
 export interface CampaignModel {
@@ -58,7 +58,7 @@ export type EntityModel = SceneModel | CharacterModel;
 export type CharacterResponse = CharacterModel;
 export type SceneResponse = SceneModel & {
   // Derived field exposed on the legacy wire shape; the new Scene.Model
-  // does not carry it (the FE computes it from `character_ids` +
+  // does not carry it (the FE computes it from `characters` +
   // per-character owner). Kept here so Phase 1 widget code compiles.
   player_character_ids: EntityId[];
 };

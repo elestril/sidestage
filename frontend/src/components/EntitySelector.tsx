@@ -9,24 +9,24 @@ export interface EntitySelectorProps {
 }
 
 function brandSceneListing(raw: unknown): SceneResponse {
-  // Wire shape is Scene.Model: id + name + body + character_ids only.
-  // player_character_ids is Phase-1 stubbed (first character_id) — see
+  // Wire shape is Scene.Model: id + name + body + characters only.
+  // player_character_ids is Phase-1 stubbed (first character id) — see
   // brandSceneResponse in entityRegistry.ts.
   const r = raw as {
     type: 'scene';
     id: string;
     name: string;
     body: string;
-    character_ids: string[];
+    characters: string[];
   };
-  const character_ids = r.character_ids.map(asEntityId);
+  const characters = r.characters.map(asEntityId);
   return {
     type: 'scene',
     id: asEntityId(r.id),
     name: r.name,
     body: r.body,
-    character_ids,
-    player_character_ids: character_ids.length > 0 ? [character_ids[0]] : [],
+    characters,
+    player_character_ids: characters.length > 0 ? [characters[0]] : [],
   };
 }
 

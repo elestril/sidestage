@@ -39,7 +39,7 @@ const sceneEntity = (id: EntityId): SceneResponse => ({
   id,
   name: 'Parlor',
   body: '',
-  character_ids: [],
+  characters: [],
   player_character_ids: [],
 });
 

@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from sidestage.actor import Actor, StubActor, UserActor
 from sidestage.campaign import Campaign
 from sidestage.entity import Entity, EntityId
+from sidestage.falkor_client import close_falkor, open_falkor
+from sidestage.falkor_factory import GRAPH_NAME, FalkorEntityFactory
 from sidestage.instance_config import (
     from_env as _instance_config_from_env,
 )
@@ -149,7 +151,19 @@ class App:
         self.campaigns = {}
         # server-state-loading: initial state is LOADING.
         self.state = ServerState.LOADING
-        self._fastapi: FastAPI = FastAPI()
+        # FalkorDBLite engines opened by `_build_and_load` — closed on
+        # FastAPI shutdown (per `persistence-engine-shutdown`).
+        self._falkor_engines: list = []
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _lifespan(fastapi_app):
+            try:
+                yield
+            finally:
+                self.close_engines()
+
+        self._fastapi: FastAPI = FastAPI(lifespan=_lifespan)
         self._setup_routes()
 
     # ----------------------- actor registry -----------------------
@@ -448,11 +462,34 @@ class App:
         )
         if not campaign_dirs:
             raise RuntimeError(f"No campaign with config.yaml in {campaigns_root}")
-        campaign = Campaign.load(campaign_dirs[0])
+        campaign_dir = campaign_dirs[0]
+
+        # persistence-startup-import-on-empty: open the per-campaign
+        # FalkorDBLite engine; if its world graph is empty, import from
+        # markdown — otherwise just open from the existing graph.
+        falkor = open_falkor(campaign_dir / "falkor.db")
+        instance._falkor_engines.append(falkor)
+        factory = FalkorEntityFactory(falkor)
+        if GRAPH_NAME in falkor.list_graphs():
+            campaign = Campaign.open(campaign_dir, factory)
+        else:
+            campaign = Campaign.import_from_disk(campaign_dir, factory)
         instance.campaigns[campaign.name] = campaign
         # server-run-state-serving.
         instance.state = ServerState.SERVING
         return instance
+
+    def close_engines(self) -> None:
+        """Stop every FalkorDBLite engine opened by this App.
+
+        Wired into FastAPI's `shutdown` event so `--reload` worker
+        tear-down doesn't leave a stale socket (per
+        `persistence-engine-shutdown`).
+
+        .implements: persistence-engine-shutdown
+        """
+        while self._falkor_engines:
+            close_falkor(self._falkor_engines.pop())
 
     @classmethod
     def run(

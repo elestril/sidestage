@@ -93,15 +93,14 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     scene.name = "Test Scene"
     scene.body = ""
     scene.type = EntityType.SCENE
-    scene.characters = [human, npc]
-    scene.user_characters = [c for c in scene.characters if c.has_human_actor()]
+    scene.characters = [human.id, npc.id]
     scene.messages = []
     scene.model = Scene.Model(
         id=scene.id,
         name=scene.name,
         type=EntityType.SCENE,
         body=scene.body,
-        character_ids=[c.id for c in scene.characters],
+        characters=list(scene.characters),
     )
     return scene
 
@@ -601,7 +600,7 @@ class TestGetScenes:
         assert len(body) == 1
         assert body[0]["id"] == "s1"
         assert body[0]["name"] == "Test Scene"
-        assert set(body[0]["character_ids"]) == {"bob", "elara"}
+        assert set(body[0]["characters"]) == {"bob", "elara"}
 
     def test_scenes_delegates_to_campaign_scenes(self) -> None:
         # Server iterates `campaign.scenes()`, not factory internals.
@@ -660,7 +659,7 @@ class TestGetEntity:
             name="Test Scene",
             type=EntityType.SCENE,
             body="A small room.",
-            character_ids=[EntityId("bob"), EntityId("elara")],
+            characters=[EntityId("bob"), EntityId("elara")],
         )
 
         app, *_ = make_loaded_app()
@@ -714,7 +713,8 @@ class TestGetEntity:
 
 class TestGetMessages:
     def _seed_messages(self, scene, count: int = 3) -> None:
-        sender_id = scene.characters[0].id
+        # scene.characters is a list of EntityIds; pick the first as the sender.
+        sender_id = scene.characters[0]
         for i in range(count):
             scene.messages.append(Message(sender_id=sender_id, body=f"m{i}"))
 
@@ -943,7 +943,7 @@ class TestWsConnection:
             name="Test Scene",
             type=EntityType.SCENE,
             body="",
-            character_ids=[],
+            characters=[],
         )
         subscribed: list = []
         unsubscribed: list = []
@@ -1359,7 +1359,7 @@ class TestAppRun:
         sidestage_dir = self._make_sidestage_tree(tmp_path, ["b_camp", "a_camp"])
         loaded_paths: list = []
 
-        def fake_load(path) -> MagicMock:
+        def fake_load(path, store=None) -> MagicMock:
             loaded_paths.append(path)
             c = MagicMock()
             c.name = path.name
@@ -1367,7 +1367,12 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run") as run_mock,
-            patch("sidestage.server.Campaign.load", side_effect=fake_load),
+            patch(
+                "sidestage.server.open_falkor",
+                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+            ),
+            patch("sidestage.server.FalkorEntityFactory"),
+            patch("sidestage.server.Campaign.import_from_disk", side_effect=fake_load),
         ):
             App.run(sidestage_dir=sidestage_dir)
 
@@ -1387,7 +1392,7 @@ class TestAppRun:
 
         loaded_paths: list = []
 
-        def fake_load(path) -> MagicMock:
+        def fake_load(path, store=None) -> MagicMock:
             loaded_paths.append(path)
             c = MagicMock()
             c.name = path.name
@@ -1395,7 +1400,12 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run"),
-            patch("sidestage.server.Campaign.load", side_effect=fake_load),
+            patch(
+                "sidestage.server.open_falkor",
+                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+            ),
+            patch("sidestage.server.FalkorEntityFactory"),
+            patch("sidestage.server.Campaign.import_from_disk", side_effect=fake_load),
         ):
             App.run(sidestage_dir=str(root.parent) + "/")
 
@@ -1409,7 +1419,12 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run"),
-            patch("sidestage.server.Campaign.load") as load_mock,
+            patch(
+                "sidestage.server.open_falkor",
+                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+            ),
+            patch("sidestage.server.FalkorEntityFactory"),
+            patch("sidestage.server.Campaign.import_from_disk") as load_mock,
             pytest.raises(RuntimeError),
         ):
             App.run(sidestage_dir=str(root) + "/")
@@ -1422,7 +1437,12 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run"),
-            patch("sidestage.server.Campaign.load") as load_mock,
+            patch(
+                "sidestage.server.open_falkor",
+                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+            ),
+            patch("sidestage.server.FalkorEntityFactory"),
+            patch("sidestage.server.Campaign.import_from_disk") as load_mock,
             pytest.raises(RuntimeError),
         ):
             App.run(sidestage_dir=str(root) + "/")
@@ -1450,7 +1470,9 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
-            patch("sidestage.server.Campaign.load", return_value=fake_campaign),
+            patch(
+                "sidestage.server.Campaign.import_from_disk", return_value=fake_campaign
+            ),
             patch.object(App, "__init__", capturing_init),
         ):
             App.run(sidestage_dir=sidestage_dir)
@@ -1460,7 +1482,7 @@ class TestAppRun:
         assert instances[0].campaigns == {"Only Campaign": fake_campaign}
 
     def test_run_state_serving_after_load(self, tmp_path) -> None:
-        # server-run-state-serving: state flips to SERVING after Campaign.load.
+        # server-run-state-serving: state flips to SERVING after Campaign.import_from_disk.
         sidestage_dir = self._make_sidestage_tree(tmp_path, ["a_camp"])
 
         observed: dict = {}
@@ -1479,7 +1501,9 @@ class TestAppRun:
 
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
-            patch("sidestage.server.Campaign.load", return_value=fake_campaign),
+            patch(
+                "sidestage.server.Campaign.import_from_disk", return_value=fake_campaign
+            ),
             patch.object(App, "__init__", capturing_init),
         ):
             App.run(sidestage_dir=sidestage_dir)
@@ -1498,7 +1522,9 @@ class TestAppRun:
         fake_campaign.name = "a"
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
-            patch("sidestage.server.Campaign.load", return_value=fake_campaign),
+            patch(
+                "sidestage.server.Campaign.import_from_disk", return_value=fake_campaign
+            ),
         ):
             App.run(sidestage_dir=sidestage_dir)
 
@@ -1519,7 +1545,9 @@ class TestAppRun:
         fake_campaign.name = "a"
         with (
             patch("sidestage.server.uvicorn.run", side_effect=fake_uvicorn_run),
-            patch("sidestage.server.Campaign.load", return_value=fake_campaign),
+            patch(
+                "sidestage.server.Campaign.import_from_disk", return_value=fake_campaign
+            ),
         ):
             App.run(sidestage_dir=sidestage_dir, port=54321)
 
@@ -1551,7 +1579,9 @@ class TestCreateApp:
 
         fake_campaign = MagicMock()
         fake_campaign.name = "c"
-        with patch("sidestage.server.Campaign.load", return_value=fake_campaign):
+        with patch(
+            "sidestage.server.Campaign.import_from_disk", return_value=fake_campaign
+        ):
             asgi = create_app()
         assert isinstance(asgi, FastAPI), (
             f"server-create-app: factory MUST return a FastAPI app; got {type(asgi)!r}"
@@ -1591,7 +1621,15 @@ class TestServerMainLoadsDotenv:
         with (
             patch.object(server_mod, "load_dotenv") as load_mock,
             patch.object(server_mod.uvicorn, "run"),
-            patch.object(server_mod.Campaign, "load", return_value=fake_campaign),
+            patch.object(
+                server_mod,
+                "open_falkor",
+                return_value=MagicMock(list_graphs=MagicMock(return_value=[])),
+            ),
+            patch.object(server_mod, "FalkorEntityFactory"),
+            patch.object(
+                server_mod.Campaign, "import_from_disk", return_value=fake_campaign
+            ),
         ):
             server_mod.main()
 

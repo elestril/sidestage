@@ -18,6 +18,13 @@ specs/generated/
 # Instance runtime artifacts
 sidestage/logs/
 
+# Per-campaign FalkorDBLite runtime files (graph DB + AOF dir + redislite
+# settings). Source-of-truth state is the markdown; the DB is regenerated
+# on first launch via Campaign.import_from_disk.
+sidestage/campaigns/*/falkor.db
+sidestage/campaigns/*/falkor.db.settings
+sidestage/campaigns/*/appendonlydir/
+
 # Node — covers frontend/ and tests/playwright/ trees
 node_modules/
 

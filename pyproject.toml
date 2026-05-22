@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings",
     "pyyaml",
     "python-frontmatter",
+    "falkordblite",
 ]
 
 [project.scripts]

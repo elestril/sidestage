@@ -68,10 +68,10 @@ function brandSceneModel(raw: unknown, scene_id: EntityId): CachedScene {
     id: string;
     name: string;
     body: string;
-    character_ids: string[];
+    characters: string[];
     messages?: Array<{ sender_id: string; body: string }>;
   };
-  const character_ids = r.character_ids.map(asEntityId);
+  const characters = r.characters.map(asEntityId);
   const rawMessages = r.messages ?? [];
   const messages: MessageModel[] = rawMessages.map((m, idx) => ({
     // Wire shape is positional ({sender_id, body}); synthesise the
@@ -87,11 +87,11 @@ function brandSceneModel(raw: unknown, scene_id: EntityId): CachedScene {
     id: asEntityId(r.id),
     name: r.name,
     body: r.body,
-    character_ids,
+    characters,
     // Phase-1 stub: SimpleScene puts the user character first, so the
-    // first character_id is the player. Phase 2b: compute properly by
-    // looking up each Character's owner via the registry.
-    player_character_ids: character_ids.length > 0 ? [character_ids[0]] : [],
+    // first id is the player. Phase 2b: compute properly by looking up
+    // each Character's owner via the registry.
+    player_character_ids: characters.length > 0 ? [characters[0]] : [],
     messages,
   };
 }

@@ -49,9 +49,12 @@ class App:
 
 `App` holds no factory slot. `Campaign` owns its own entities and
 exposes `get`/`add`/`delete` directly (per [[entity-model]]
-`entity-campaign`). `Campaign.load(path)` accepts the directory and
-returns a fully-loaded `Campaign`; no class-level scaffolding is
-needed.
+`entity-campaign`). On startup, `App._build_and_load` opens the embedded
+FalkorDBLite engine (per [[persistence]] `persistence-engine-redislite`),
+constructs a `FalkorEntityFactory` from the clients, and chooses between
+`Campaign.import_from_disk(dir, store)` (graph absent) and
+`Campaign.open(name, store)` (graph present) via
+`persistence-startup-import-on-empty`.
 
 ## backend-instance-config: InstanceConfig
 
@@ -61,6 +64,7 @@ class InstanceConfig(BaseSettings):
     port: int = 8000
     reload: bool = False
     llm_profile: str = "localhost"
+    falkor_path: str = ""        # default derived from sidestage_dir
 ```
 
 Typed pydantic-settings model. Resolution precedence (highest to
@@ -76,6 +80,11 @@ lowest): **CLI overrides > env vars (`SIDESTAGE_*`) >
   uvicorn. The `create_app` factory reads it back via
   `model_validate_json`. Missing env var in `create_app` is a hard
   error.
+- instance-config-falkor-path: Path to the embedded FalkorDBLite file
+  (per [[persistence]] `persistence-engine-path`). Empty default is
+  resolved to `f"{sidestage_dir}/falkor.db"` after the rest of the
+  config lands so it tracks any override of `sidestage_dir`. Env var
+  is `SIDESTAGE_FALKOR_PATH`.
 - .implemented-by: InstanceConfig, instance_config.resolve,
   instance_config.serialize_to_env, instance_config.from_env
 
@@ -91,10 +100,12 @@ instead of the direct `App.run` path.
   parent → worker boundary via env (`SIDESTAGE_INSTANCE_CONFIG`).
 - backend-reload-dirs: Only `src/sidestage/` is watched. Frontend HMR
   is owned by Vite (`:5173`).
-- backend-reload-no-state-persistence: Each reload re-imports the module
-  → `App._actors` and per-process state start fresh. Scene message
-  history (runtime-only) is wiped. The SPA's reconnect re-fetches the
-  (now-empty) authoritative state.
+- backend-reload-state-persistence: Each reload re-imports the module
+  → `App._actors` and per-process Python state start fresh. Entity
+  state, edges, and chat history all survive because they live in the
+  FalkorDBLite engine (per [[persistence]]) — re-opened on the new
+  worker via `Campaign.open`. The SPA's reconnect re-fetches the
+  (now-current) authoritative state from the graph + stream.
 - .implemented-by: server.create_app, server.main
 
 ## backend-routes: API surface

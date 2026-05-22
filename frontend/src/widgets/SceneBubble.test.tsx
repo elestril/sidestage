@@ -15,7 +15,7 @@ const scene = (id: EntityId, name: string): SceneResponse => ({
   id,
   name,
   body: '',
-  character_ids: [],
+  characters: [],
   player_character_ids: [],
 });
 

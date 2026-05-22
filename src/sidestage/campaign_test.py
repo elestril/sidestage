@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from sidestage.campaign import Campaign, CampaignConfig
-from sidestage.character import Character
 from sidestage.entity import EntityId
 from sidestage.scene import Scene
 
@@ -106,7 +105,7 @@ class TestCampaignConfig:
 
 
 # ---------------------------------------------------------------------------
-# Happy-path Campaign.load against the in-tree minimal_campaign fixture.
+# Happy-path Campaign.import_from_disk against the in-tree minimal_campaign fixture.
 #
 # Uses the session-scoped `minimal_campaign` fixture (see conftest.py) so the
 # load only happens once for the whole session.
@@ -157,24 +156,18 @@ class TestCampaignLoadMinimal:
         for cid in ("alice", "bob"):
             assert minimal_campaign.get(cid) is not None
 
-    def test_default_scene_characters_are_real_characters(
-        self, minimal_campaign: Any
-    ) -> None:
-        # scene-deserialize-resolves: ids in `model.characters` resolve to
-        # real Character instances (not ghosts, not ids).
+    def test_default_scene_characters_loaded(self, minimal_campaign: Any) -> None:
+        # campaign-load: `characters: [...]` in scene frontmatter is loaded
+        # into `Scene.Model.characters` as a list of EntityIds.
         scene = minimal_campaign.get(minimal_campaign.default_scene_id)
-        assert all(isinstance(c, Character) for c in scene.characters)
-        assert {c.id for c in scene.characters} == {"alice", "bob"}
+        assert set(scene.characters) == {"alice", "bob"}
 
-    def test_default_scene_user_is_first(self, minimal_campaign: Any) -> None:
-        # simple-scene-init-user: characters[0] must be human.
+    def test_default_scene_simple_aliases_assigned(self, minimal_campaign: Any) -> None:
+        # simple-scene-init-roles: scene._user resolves to the human-actor
+        # character, scene._npc to the non-human one — by role, not position.
         scene = minimal_campaign.get(minimal_campaign.default_scene_id)
-        assert scene.characters[0].owner == "user"
-
-    def test_default_scene_npc_is_second(self, minimal_campaign: Any) -> None:
-        # simple-scene-init-npc: characters[1] must be non-human.
-        scene = minimal_campaign.get(minimal_campaign.default_scene_id)
-        assert scene.characters[1].has_human_actor() is False
+        assert scene._user.owner == "user"
+        assert scene._npc.has_human_actor() is False
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +200,7 @@ class TestCampaignLoadOwners:
     def test_load_owner_user(self, tmp_path: Any, clean_app_state: Any) -> None:
         self._write_min_campaign(tmp_path, {"alice": "user", "bob": "stub"})
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
         alice = campaign.get("alice")
         assert alice is not None
         assert alice.owner == "user"
@@ -217,7 +210,7 @@ class TestCampaignLoadOwners:
     def test_load_owner_stub(self, tmp_path: Any, clean_app_state: Any) -> None:
         self._write_min_campaign(tmp_path, {"alice": "user", "bob": "stub"})
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
         bob = campaign.get("bob")
         assert bob is not None
         assert bob.owner == "stub"
@@ -227,7 +220,7 @@ class TestCampaignLoadOwners:
         self, tmp_path: Any, clean_app_state: Any
     ) -> None:
         # Character markdown without an explicit `owner:` field defaults to
-        # "stub" — the safest non-human, non-AI value (per Campaign.load).
+        # "stub" — the safest non-human, non-AI value (per Campaign.import_from_disk).
         (tmp_path / "characters").mkdir()
         (tmp_path / "scenes").mkdir()
         (tmp_path / "characters" / "alice.md").write_text(
@@ -245,7 +238,7 @@ class TestCampaignLoadOwners:
         )
 
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
         mystery = campaign.get("mystery")
         assert mystery is not None
         assert mystery.owner == "stub"
@@ -290,7 +283,7 @@ class TestCharacterActorBinding:
             side_effect=_get_actor,
             create=True,
         ):
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
 
         # Both characters were instantiated via __init__, which calls
         # App.get_actor (character-init-binds-actor).
@@ -334,7 +327,7 @@ class TestDefaultScene:
         )
 
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
 
         # Stored as id, not as Scene.
         assert campaign.default_scene_id == "s2"
@@ -365,7 +358,7 @@ class TestDefaultScene:
         )
 
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
 
         assert campaign.default_scene_id is None
 
@@ -405,7 +398,7 @@ class TestCampaignScenes:
         )
 
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
 
         scenes = campaign.scenes()
         assert {s.id for s in scenes} == {"s1", "s2"}
@@ -455,9 +448,62 @@ class TestCampaignToModel:
         )
 
         with _patched_get_actor():
-            campaign = Campaign.load(tmp_path)
+            campaign = Campaign.import_from_disk(tmp_path)
 
         resp = campaign.to_model()
         assert isinstance(resp, Campaign.Model)
         assert resp.name == "Hintless"
         assert resp.default_scene_id is None
+
+
+# ---------------------------------------------------------------------------
+# Campaign.export — write the campaign back out as canonical markdown.
+# ---------------------------------------------------------------------------
+
+
+class TestCampaignExport:
+    """campaign-export: regenerate <path>/{config.yaml, characters/*.md,
+    scenes/*.md} canonically from the live store."""
+
+    def test_export_round_trips_against_import(
+        self, tmp_path: Path, clean_app_state: Any
+    ) -> None:
+        # campaign-export-canonical: import → export → re-import yields the
+        # same logical Campaign (config + entities + characters list).
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "characters").mkdir()
+        (src / "scenes").mkdir()
+        (src / "config.yaml").write_text("name: Roundtrip\ndefault_scene_id: parlor\n")
+        (src / "characters" / "alice.md").write_text(
+            "---\nname: Alice\nowner: user\n---\nalice body\n"
+        )
+        (src / "characters" / "bob.md").write_text(
+            "---\nname: Bob\nowner: stub\n---\nbob body\n"
+        )
+        (src / "scenes" / "parlor.md").write_text(
+            "---\nname: Parlor\ncharacters:\n  - alice\n  - bob\n---\nparlor body\n"
+        )
+
+        with _patched_get_actor():
+            original = Campaign.import_from_disk(src)
+
+            dst = tmp_path / "dst"
+            original.export(dst)
+
+            # Re-import the exported tree; the second campaign should be
+            # equivalent to the first.
+            reloaded = Campaign.import_from_disk(dst)
+
+        assert reloaded.name == original.name == "Roundtrip"
+        assert reloaded.default_scene_id == original.default_scene_id == "parlor"
+        scene = reloaded.get("parlor")
+        alice = reloaded.get("alice")
+        bob = reloaded.get("bob")
+        assert scene is not None and alice is not None and bob is not None
+        assert set(scene.characters) == {"alice", "bob"}
+        assert alice.owner == "user"
+        assert bob.owner == "stub"
+        # Body content survives the roundtrip too.
+        assert alice.body.strip() == "alice body"
+        assert scene.body.strip() == "parlor body"

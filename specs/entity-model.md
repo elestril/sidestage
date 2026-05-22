@@ -110,9 +110,14 @@ manual emit in `@action` methods or anywhere else (per [[events]]
   "this attribute is always an EntityList" holds.
 - entity-list-attribute-no-subclass: Lists that need per-item
   processing on add (e.g. ordered timelines that timestamp items)
-  subclass `EntityList[T]` and override an `_on_add` hook. Today's
-  only list (`Scene.messages`) doesn't need one — the base
-  `EntityList[Message]` is enough.
+  subclass `EntityList[T]` and override an `_on_add` hook.
+  `Scene.characters` uses the base `EntityList[EntityId]`; no per-
+  item hook needed. `Scene.messages` uses `MessageList`, whose
+  `_on_add` calls `factory.append_message(scene_id, msg)` so each
+  append also lands in the Redis stream (per [[persistence]]
+  `persistence-streams-append`); the in-memory
+  `DictEntityFactory.append_message` is a no-op since the
+  `EntityList` already stores the item on `Scene.Model.messages`.
 - .implemented-by: EntityList
 
 ## entity-character: Character
@@ -163,39 +168,51 @@ class Character(Entity):
 ```python
 class Scene(Entity):                  # abstract
     class Model(Entity.Model):
-        character_ids: list[EntityId]
-        messages: list[Message] = []   # EntityList[Message] at runtime
-
-    @property
-    def characters(self) -> list[Character]: ...        # resolved via campaign
-    @property
-    def user_characters(self) -> list[Character]: ...   # has_human_actor() subset
+        characters: list[EntityId] = []   # EntityList[EntityId] at runtime
+        messages: list[Message] = []      # MessageList at runtime; stream-backed
 
     async def idle(self, timeout: float = 5.0) -> None: ...
 
 class SimpleScene(Scene):             # concrete: exactly two characters
-    def __init__(...): ...            # validates 1 user + 1 non-user; subscribes
+    def __init__(self, model, campaign):    # validates 1 user + 1 npc; subscribes
+        ...
 ```
 
-- scene-pure-data: Scene is pure data + event source. The single
-  mutation surface is `scene.messages.append(msg)` (the EntityList
-  mutator) — no `Scene.append` method, no `dispatch`, no
-  orchestration. The mutator's auto-emit fires the EntityChanged
-  cascade. Wire identity of a message is the composite
+- scene-pure-data: Scene is pure data + event source. The mutation
+  surfaces are `scene.characters.append(id)` and
+  `scene.messages.append(msg)` (both EntityList mutators) — no
+  `Scene.append` method, no `dispatch`, no orchestration. The
+  mutators auto-emit `EntityChanged`, firing the cascade. Wire
+  identity of a message is the composite
   `(scene.id, position-in-messages)`; nothing on the Message itself
   carries identity.
-- scene-characters-resolve-on-demand: `Scene.characters` is a
-  property that resolves `self._model.character_ids` through the
-  campaign on every access. No cached list on the Entity.
-- scene-init-subscribes-characters: `SimpleScene.__init__` subscribes
-  every character to itself, wiring the listener-driven response
-  cycle automatically.
-- scene-on-disk: `Scene.Model.character_ids` is persisted to the
-  scene's markdown frontmatter. `Scene.Model.messages` is a Model
-  field but runtime-only at the persistence layer: on `App` reload
-  it's wiped (per [[backend]] `backend-reload`); the loader does
-  not read or write `messages` to disk. Save-game persistence adds
-  a messages sidecar later.
+- scene-characters-list: `Scene.Model.characters` is a `list[EntityId]`
+  carrying the in-scene character ids. Wrapped in an
+  `EntityList[EntityId]` at construction (registered in
+  `_entity_lists` alongside `messages`), so add/remove mutations
+  emit a `ListDelta` and the FE picks them up over the WS. The
+  `EntityId`-typed element signals "list of references"; consumers
+  resolve via `self._campaign.get(id)`.
+- scene-characters-graph-edges: FalkorEntityFactory translates
+  `EntityList[EntityId]`-typed Model fields into real graph
+  relationships internally (per [[persistence]]
+  `persistence-graph-edges`). The rest of the codebase never sees
+  edges as a primitive; the Model field is the only surface.
+- simple-scene-init-roles: `SimpleScene.__init__` validates count
+  and roles at construction. Role identification is by
+  `Character.owner` (the human-controlled character is the user;
+  the other is the NPC), NOT by position in `model.characters`.
+  Raises `ValueError` unless exactly one of each role is present.
+- simple-scene-init-subscribes-characters: After validation,
+  subscribes every character so the listener-driven response cycle
+  runs.
+  - .tested-by: test_events_dataflow
+- scene-on-disk: Scene serialises as YAML frontmatter +
+  markdown body. `characters: [...]` lists the in-scene character
+  ids. `messages` is NOT persisted to markdown — chat history lives
+  in the per-scene Redis stream (per [[persistence]]
+  `persistence-streams-key`) and is populated from `XRANGE` at
+  scene open, appended through `XADD` on mutation.
 - scene-idle: `await scene.idle()` waits for all background tasks
   spawned in response to recent emissions to settle. Lives on Scene
   (not Entity) because Scene is where mutation cascades actually
@@ -221,19 +238,33 @@ class Message(BaseModel):
   identity — `scene_id`, `index`, message_id all absent by design.
 - message-not-entity: Messages are NOT Entities. No `EntityId`, no
   individual subscribe. They live as `Scene.Model.messages:
-  list[Message]` — an `EntityList[Message]` at runtime (per
-  `entity-list-attribute`). Per-message operations beyond append
-  (edit/react/redact, if/when added) are exposed as `@action`
-  methods on Scene; Scene is the entity-level addressable
+  list[Message]` — a `MessageList` at runtime (per
+  `entity-list-attribute-no-subclass`). Per-message operations
+  beyond append (edit/react/redact, if/when added) are exposed as
+  `@action` methods on Scene; Scene is the entity-level addressable
   container.
+- message-stream-backed: `Scene.Model.messages` is backed by a per-scene
+  Redis stream when the campaign runs against
+  `FalkorEntityFactory` (per [[persistence]] `persistence-streams-key`).
+  Population is one-shot at scene open: the factory's
+  `read_messages(scene_id)` is called *before* the Scene wrapper is
+  constructed, so the load-time `list.extend` bypasses emit (per
+  `entity-list-attribute-mechanism`). Mutations write through:
+  `MessageList._on_add` calls `factory.append_message(scene_id, msg)`
+  before the item lands in the list, so `XADD` and the in-memory
+  append are atomic from the caller's perspective. Chat history
+  survives reload. Against `DictEntityFactory` (unit tests), the
+  message methods are no-ops / empty: the in-memory list IS the
+  authority.
 - message-dataflow: Every message is appended via
-  `scene.messages.append(msg)`. The EntityList mutator emits
-  `EntityChanged` carrying a `ListDelta(start=-1, len=0,
-  items=[msg])` (per [[events]] `events-attribute-deltas`).
-  Reactions cascade via listener fanout per [[events]]
-  (`events-dataflow`). Both user input (via `Character.say` from
-  an `EntityAction`) and NPC response (in-process call from
-  `Character.notify`) flow through the same append.
+  `scene.messages.append(msg)`. The MessageList mutator writes
+  through to the stream and emits `EntityChanged` carrying a
+  `ListDelta(start=-1, len=0, items=[msg])` (per [[events]]
+  `events-attribute-deltas`). Reactions cascade via listener
+  fanout per [[events]] (`events-dataflow`). Both user input (via
+  `Character.say` from an `EntityAction`) and NPC response
+  (in-process call from `Character.notify`) flow through the same
+  append.
 - .implemented-by: Message, Character.say, EntityList
 
 ## entity-context: MessageContext
@@ -264,7 +295,10 @@ class Campaign:
     def delete(self, entity_id: EntityId) -> None: ...
 
     @classmethod
-    def load(cls, path: Path) -> Campaign: ...
+    def open(cls, name: str, store: EntityFactory) -> Campaign: ...
+    @classmethod
+    def import_from_disk(cls, path: Path, store: EntityFactory) -> Campaign: ...
+    def export(self, path: Path) -> None: ...
 
     class Model(BaseModel):                # canonical serialised form
         name: str
@@ -272,18 +306,37 @@ class Campaign:
 ```
 
 - campaign-container: Campaign holds every loaded entity directly,
-  backed internally by an `EntityFactory` (default
-  `DictEntityFactory` — in-memory dict). Storage is private
+  backed internally by an `EntityFactory`. Storage is private
   (`self._store`); the public surface is `get` / `add` / `delete`.
-  The storage abstraction is the seam for future persistent
-  backends; today nothing else implements `EntityFactory`.
-- campaign-load: Single forward pass in dependency order
-  (characters before scenes, so a scene's cross-refs resolve at
-  construction time via `campaign.get(id)`). Reads `config.yaml`,
-  walks each directory, parses YAML frontmatter + body into
-  `Entity.Model`, calls `EntityClass(model, self)`, then
-  `self.add(entity)`. No ghost pattern, no two-phase wire-up —
-  load order eliminates the need.
+  Two concrete factories exist: `DictEntityFactory` (in-memory, used
+  by unit tests) and `FalkorEntityFactory` (FalkorDBLite-backed, used
+  in production and integration tests — per [[persistence]]).
+- campaign-open: Open a Campaign from a populated graph + stream
+  store. Reads `<sidestage_dir>/campaigns/<name>/config.yaml` for
+  intrinsic campaign metadata; walks `store.entities()` to construct
+  Entity wrappers around the rehydrated Models. No markdown is read
+  for entity state. Used when the campaign's graph already exists
+  (per [[persistence]] `persistence-startup-import-on-empty`).
+- campaign-import-from-disk: Import a Campaign from its markdown
+  directory into an empty store. Reads `config.yaml`, walks each
+  entity directory in dependency order (characters before scenes —
+  so a scene's `characters: [...]` ids resolve at construction time
+  via `campaign.get(id)`), parses YAML frontmatter + body into
+  `Entity.Model`, and calls `store.add(entity)`. For
+  `FalkorEntityFactory`, the factory introspects each Model's fields
+  on `add` and translates any `EntityList[EntityId]`-typed field
+  into real graph relationships (per [[persistence]]
+  `persistence-graph-edges`); the rest of the codebase is unaware
+  of the translation. The single cross-cutting load path used when
+  `persistence-startup-import-on-empty` fires.
+- campaign-export: Regenerate the markdown directory canonically
+  from the store. Writes `config.yaml`, walks `store.entities()`
+  to emit each entity's `.md` (frontmatter + body). The
+  `EntityList[EntityId]` fields serialise as plain YAML lists in
+  the frontmatter (e.g. `characters: [alice, bob]`); chat history
+  is NOT exported (lives in the stream, not in markdown). First-
+  export diff noise against hand-written markdown is accepted
+  (per [[persistence]] `persistence-export-dataflow-canonical`).
 - campaign-model: `Campaign.Model` is the canonical serialised form
   (carries `name` + `default_scene_id`). Same one-model rule as
   Entity: no parallel `CampaignResponse`.
@@ -308,20 +361,22 @@ class Campaign:
   `EntityChanged` through the existing machinery, and the FE picks
   up the diff as a normal `ListDelta`. Not implemented; flagged so
   the design point isn't lost.
-- .implemented-by: Campaign, Campaign.load
+- .implemented-by: Campaign, Campaign.open, Campaign.import_from_disk,
+  Campaign.export
 
 ## entity-campaign-tree: On-disk layout
 
 ```
 <sidestage_dir>/campaigns/<campaign_name>/
-├── config.yaml                # Campaign.Model fields
-├── characters/<id>/CHARACTER.md
-├── scenes/<id>/SCENE.md
-├── locations/<id>.md
-└── entities/<id>.md           # generic
+├── config.yaml                       # CampaignConfig fields
+├── characters/<id>.md                # Character.Model frontmatter + body
+└── scenes/<id>.md                    # Scene.Model frontmatter + body
 ```
 
-`config.yaml` serialises a `Campaign.Model`. The example above includes
-aspirational subdirs (per-character `inventory/`, `attributes.yaml`,
-`locations/`) not yet implemented; generic entities live in
-`entities/`.
+`config.yaml` serialises a `CampaignConfig`. Each Entity subclass
+serialises as a single `.md` file: YAML frontmatter holds the Model's
+intrinsic fields (`name`, plus subclass extras like `owner` and
+`characters: [...]`); the markdown body is the entity's `body`. The
+on-disk directory is the savegame format — entity state at runtime
+lives in the graph (per [[persistence]]). Edits to markdown while the
+server runs have no effect until `Campaign.import_from_disk` reimports.

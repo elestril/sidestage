@@ -14,9 +14,9 @@ def minimal_campaign() -> Campaign:
     Loads `src/sidestage/testdata/minimal_campaign` exactly once per test
     session. Use for happy-path read-only assertions on campaign shape.
 
-    NOTE: `Campaign.load` mutates `App.factory` as a side effect. Tests that
+    NOTE: `Campaign.import_from_disk` mutates `App.factory` as a side effect. Tests that
     need a clean `App.factory` / `App._actors` state MUST mock or override —
     do not rely on this fixture for those.
     """
     path = Path(__file__).parent / "testdata" / "minimal_campaign"
-    return Campaign.load(path)
+    return Campaign.import_from_disk(path)

@@ -73,7 +73,7 @@ def make_simple_scene(
             name="Test Scene",
             type=EntityType.SCENE,
             body="scene body",
-            character_ids=[EntityId(user_id), EntityId(npc_id)],
+            characters=[EntityId(user_id), EntityId(npc_id)],
         ),
         campaign,
     )
@@ -125,6 +125,18 @@ class TestSceneMessagesAppend:
         m = Message(sender_id=scene._user.id, body="hello")
         scene.messages.append(m)
         assert list(scene.messages) == [m]
+
+    async def test_append_noop_persistence_when_db_handle_none(self) -> None:
+        # scene-message-persistence: against `DictEntityFactory`,
+        # `campaign.db_handle is None` and `MessageList._on_add` skips
+        # the XADD path. The message still lands in the in-memory list
+        # and a ListDelta still fires — only durable persistence is
+        # skipped.
+        scene = make_simple_scene()
+        assert scene._campaign.db_handle is None  # DictEntityFactory case
+        scene.messages.append(Message(sender_id=scene._user.id, body="hi"))
+        # No exception means MessageList._on_add gracefully no-op'd.
+        assert [m.body for m in scene.messages] == ["hi"]
 
     async def test_append_records_in_order(self) -> None:
         scene = make_simple_scene()
@@ -221,24 +233,29 @@ class TestSceneModel:
         # scene-model: Scene.Model is an inner Pydantic model.
         assert hasattr(Scene, "Model")
 
-    def test_scene_model_has_character_ids_field_of_entity_ids(self) -> None:
-        # scene-model: character_ids is `list[EntityId]`.
+    def test_scene_model_characters_is_list_of_entity_ids(self) -> None:
+        # scene-model: `characters` is a list of `EntityId` references.
         model = Scene.Model(
             id=EntityId("s"),
             name="n",
             type=EntityType.SCENE,
             body="b",
-            character_ids=[EntityId("c1"), EntityId("c2")],
+            characters=[EntityId("c1"), EntityId("c2")],
         )
-        assert model.character_ids == [EntityId("c1"), EntityId("c2")]
+        assert model.characters == [EntityId("c1"), EntityId("c2")]
 
-    def test_scene_model_field_is_named_character_ids(self) -> None:
-        # scene-model: field is named `character_ids` (NOT `characters` or
-        # `active_character_ids`).
+    def test_scene_model_field_is_named_characters(self) -> None:
+        # scene-model: field is named `characters` (NOT `character_ids`).
+        # The `EntityId` element type carries the "list of references"
+        # semantics; the suffix is no longer needed on the field name.
         fields = Scene.Model.model_fields
-        assert "character_ids" in fields
-        assert "characters" not in fields
-        assert "active_character_ids" not in fields
+        assert "characters" in fields
+        assert "character_ids" not in fields
+
+    def test_scene_characters_registered_as_entity_list(self) -> None:
+        # entity-list-attribute: `characters` is auto-wrapped at
+        # construction so mutations emit `ListDelta`.
+        assert "characters" in Scene._entity_lists
 
     def test_scene_model_messages_defaults_empty(self) -> None:
         model = Scene.Model(
@@ -246,58 +263,43 @@ class TestSceneModel:
             name="n",
             type=EntityType.SCENE,
             body="b",
-            character_ids=[EntityId("c1"), EntityId("c2")],
+            characters=[EntityId("c1"), EntityId("c2")],
         )
         assert model.messages == []
 
 
 # ---------------------------------------------------------------------------
-# Scene.characters property (resolves character_ids via campaign)
+# scene.characters — EntityList[EntityId] field with auto-ListDelta emission
 # ---------------------------------------------------------------------------
 
 
-class TestSceneCharactersProperty:
-    def test_characters_resolves_ids_via_campaign(self) -> None:
-        # scene-characters: each id in model.character_ids is resolved via
-        # campaign.get(id) to a Character.
-        campaign = Campaign(name="t")
-        user = make_character(campaign, id="c1", owner="user", name="U")
-        npc = make_character(campaign, id="c2", owner="stub", name="N")
-        scene = SimpleScene(
-            SimpleScene.Model(
-                id=EntityId("s"),
-                name="n",
-                type=EntityType.SCENE,
-                body="b",
-                character_ids=[EntityId("c1"), EntityId("c2")],
-            ),
-            campaign,
-        )
-        campaign.add(scene)
-        assert scene.characters == [user, npc]
+class TestSceneCharactersAttribute:
+    def test_characters_is_entity_list(self) -> None:
+        # scene-model: `characters` is wrapped in an EntityList at
+        # construction so append/remove emit ListDelta.
+        scene = make_simple_scene()
+        assert isinstance(scene.characters, EntityList)
 
-    def test_characters_preserves_order(self) -> None:
-        # scene-characters: order follows model.character_ids order.
-        campaign = Campaign(name="t")
-        a = make_character(campaign, id="alpha", owner="user", name="A")
-        b = make_character(campaign, id="beta", owner="stub", name="B")
-        scene = SimpleScene(
-            SimpleScene.Model(
-                id=EntityId("scn"),
-                name="My Scene",
-                type=EntityType.SCENE,
-                body="The body",
-                character_ids=[EntityId("alpha"), EntityId("beta")],
-            ),
-            campaign,
-        )
-        campaign.add(scene)
-        assert scene.characters == [a, b]
+    def test_characters_contains_ids_in_construction_order(self) -> None:
+        scene = make_simple_scene(user_id="alpha", npc_id="beta")
+        assert list(scene.characters) == [EntityId("alpha"), EntityId("beta")]
 
-    def test_characters_is_property(self) -> None:
-        # scene-characters: declared as a property on Scene.
-        attr = Scene.__dict__.get("characters")
-        assert isinstance(attr, property)
+    async def test_characters_append_emits_list_delta(self) -> None:
+        # Mutating `scene.characters` is observable over the WS, same
+        # machinery as `scene.messages`.
+        scene = make_simple_scene()
+        recorder = _Recorder()
+        scene.subscribe(recorder)
+
+        scene.characters.append(EntityId("late-arrival"))
+        await scene.idle()
+
+        assert len(recorder.events) == 1
+        event = recorder.events[0]
+        assert "characters" in event.attributes
+        delta = event.deltas["characters"]
+        assert isinstance(delta, ListDelta)
+        assert delta.items == [EntityId("late-arrival")]
 
 
 # ---------------------------------------------------------------------------
@@ -330,14 +332,8 @@ class TestSimpleSceneInit:
             make_character(campaign, id="x", owner="stub", name="X")
         return campaign
 
-    def test_init_messages_starts_empty(self) -> None:
-        # The auto-wrapped EntityList[Message] starts empty.
-        scene = make_simple_scene()
-        assert list(scene.messages) == []
-        assert isinstance(scene.messages, EntityList)
-
     def test_init_count_raises_when_too_few(self) -> None:
-        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        # simple-scene-init-count: ValueError if len(characters) != 2.
         campaign = self._campaign_with_chars()
         with pytest.raises(ValueError):
             SimpleScene(
@@ -346,13 +342,13 @@ class TestSimpleSceneInit:
                     name="x",
                     type=EntityType.SCENE,
                     body="b",
-                    character_ids=[EntityId("u")],
+                    characters=[EntityId("u")],
                 ),
                 campaign,
             )
 
     def test_init_count_raises_when_too_many(self) -> None:
-        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        # simple-scene-init-count: ValueError if len(characters) != 2.
         campaign = self._campaign_with_chars(extra=True)
         with pytest.raises(ValueError):
             SimpleScene(
@@ -361,13 +357,13 @@ class TestSimpleSceneInit:
                     name="x",
                     type=EntityType.SCENE,
                     body="b",
-                    character_ids=[EntityId("u"), EntityId("n"), EntityId("x")],
+                    characters=[EntityId("u"), EntityId("n"), EntityId("x")],
                 ),
                 campaign,
             )
 
     def test_init_count_raises_when_empty(self) -> None:
-        # simple-scene-init-count: ValueError if len(character_ids) != 2.
+        # simple-scene-init-count: ValueError if len(characters) != 2.
         campaign = self._campaign_with_chars()
         with pytest.raises(ValueError):
             SimpleScene(
@@ -376,14 +372,16 @@ class TestSimpleSceneInit:
                     name="x",
                     type=EntityType.SCENE,
                     body="b",
-                    character_ids=[],
+                    characters=[],
                 ),
                 campaign,
             )
 
-    def test_init_user_must_be_human(self) -> None:
-        # simple-scene-init-user: ValueError if characters[0].has_human_actor()
-        # is False.
+    def test_init_requires_one_user_one_npc(self) -> None:
+        # simple-scene-init-roles: ValueError unless exactly one character
+        # has has_human_actor()=True and one has False. Role identification
+        # is by Character.owner, not list position — so two NPCs (or two
+        # users) is invalid.
         campaign = self._campaign_with_chars(user_human=False, npc_human=False)
         with pytest.raises(ValueError):
             SimpleScene(
@@ -392,14 +390,14 @@ class TestSimpleSceneInit:
                     name="x",
                     type=EntityType.SCENE,
                     body="b",
-                    character_ids=[EntityId("u"), EntityId("n")],
+                    characters=[EntityId("u"), EntityId("n")],
                 ),
                 campaign,
             )
 
-    def test_init_npc_must_not_be_human(self) -> None:
-        # simple-scene-init-npc: ValueError if characters[1].has_human_actor()
-        # is True.
+    def test_init_rejects_two_users(self) -> None:
+        # simple-scene-init-roles: two human-controlled characters is
+        # invalid for SimpleScene.
         campaign = self._campaign_with_chars(user_human=True, npc_human=True)
         with pytest.raises(ValueError):
             SimpleScene(
@@ -408,23 +406,26 @@ class TestSimpleSceneInit:
                     name="x",
                     type=EntityType.SCENE,
                     body="b",
-                    character_ids=[EntityId("u"), EntityId("n")],
+                    characters=[EntityId("u"), EntityId("n")],
                 ),
                 campaign,
             )
 
-    def test_init_aliases_set(self) -> None:
-        # simple-scene-init-aliases: _user = characters[0], _npc = characters[1].
+    def test_init_aliases_set_by_role(self) -> None:
+        # simple-scene-init-roles: _user is the human-actor character,
+        # _npc is the non-human one — regardless of list order.
         campaign = Campaign(name="t")
         user = make_character(campaign, id="the-user", owner="user", name="U")
         npc = make_character(campaign, id="the-npc", owner="stub", name="N")
+        # Intentionally put npc first to verify role-based (not positional)
+        # identification.
         scene = SimpleScene(
             SimpleScene.Model(
                 id=EntityId("s"),
                 name="x",
                 type=EntityType.SCENE,
                 body="b",
-                character_ids=[EntityId("the-user"), EntityId("the-npc")],
+                characters=[EntityId("the-npc"), EntityId("the-user")],
             ),
             campaign,
         )
@@ -445,30 +446,11 @@ class TestSimpleSceneInit:
         scene = make_simple_scene()
         assert len(scene._listeners) == 2
 
-
-# ---------------------------------------------------------------------------
-# Scene.user_characters
-# ---------------------------------------------------------------------------
-
-
-class TestSceneUserCharacters:
-    def test_user_characters_returns_only_human_actors(self) -> None:
-        # scene-user-characters: subset of `characters` with has_human_actor()
-        # True.
+    def test_init_messages_starts_empty(self) -> None:
+        # The auto-wrapped MessageList[Message] starts empty.
         scene = make_simple_scene()
-        assert scene.user_characters == [scene._user]
-
-    def test_user_characters_preserves_scene_order(self) -> None:
-        # scene-user-characters: order follows `characters` order — filter only.
-        scene = make_simple_scene()
-        assert scene.user_characters == [
-            c for c in scene.characters if c.has_human_actor()
-        ]
-
-    def test_user_characters_is_property(self) -> None:
-        # scene-user-characters: declared as a property on Scene.
-        attr = Scene.__dict__.get("user_characters")
-        assert isinstance(attr, property)
+        assert list(scene.messages) == []
+        assert isinstance(scene.messages, EntityList)
 
 
 # ---------------------------------------------------------------------------
@@ -479,26 +461,18 @@ class TestSceneUserCharacters:
 class TestSceneModelAccessor:
     def test_model_is_scene_model(self) -> None:
         # scene-model: scene.model returns a Scene.Model with id, name, and
-        # character_ids populated correctly.
+        # characters populated.
         scene = make_simple_scene(scene_id="scn-7", user_id="user-1", npc_id="npc-1")
         # make_simple_scene sets name="Test Scene".
         resp = scene.model
         assert isinstance(resp, Scene.Model)
         assert resp.id == EntityId("scn-7")
         assert resp.name == "Test Scene"
-        assert resp.character_ids == [EntityId("user-1"), EntityId("npc-1")]
+        assert list(resp.characters) == [EntityId("user-1"), EntityId("npc-1")]
 
-    def test_user_characters_excludes_npcs(self) -> None:
-        # scene-user-characters: only includes characters with has_human_actor().
-        # Scene.Model carries only character_ids; the user subset is exposed
-        # via the `user_characters` property.
-        scene = make_simple_scene(user_id="u", npc_id="n")
-        user_ids = [c.id for c in scene.user_characters]
-        assert EntityId("u") in user_ids
-        assert EntityId("n") not in user_ids
-
-    def test_model_character_ids_includes_all_characters(self) -> None:
-        # scene-model: character_ids has every character's id, in order.
+    def test_model_characters_includes_all_ids(self) -> None:
+        # scene-model: `characters` carries every character's id, in
+        # construction order.
         scene = make_simple_scene(user_id="u", npc_id="n")
         resp = scene.model
-        assert resp.character_ids == [EntityId("u"), EntityId("n")]
+        assert list(resp.characters) == [EntityId("u"), EntityId("n")]
