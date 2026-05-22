@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from speclint.cli import _iter_md_files
 from speclint.extract import build_index, parse_markdown, parse_python
 from speclint.model import LinkKind, SourceKind
 from speclint.rules.links import (
@@ -164,6 +165,18 @@ def test_sl009_unresolved_label_target_flagged():
     index, links, _ = build_index([DATA / "unbalanced.md"], [])
     diags = sl009_unresolved_target(index, links)
     assert any(d.code == "SL009" and "nonexistent-spec" in d.message for d in diags)
+
+
+def test_iter_md_files_skips_generated_dir(tmp_path):
+    # `specs/generated/api.md` is the pydoc-markdown rendering of every
+    # docstring; linting it duplicates every label from src/. Walker must skip.
+    (tmp_path / "real.md").write_text("# real: x\n", encoding="utf-8")
+    gen = tmp_path / "generated"
+    gen.mkdir()
+    (gen / "api.md").write_text("# api: x\n", encoding="utf-8")
+    found = {p.name for p in _iter_md_files([tmp_path])}
+    assert "real.md" in found
+    assert "api.md" not in found
 
 
 def test_clean_fixture_passes_all_rules():

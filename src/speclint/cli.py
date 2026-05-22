@@ -51,13 +51,20 @@ def _load_config(pyproject: Path) -> Config:
     return Config(ignore=ignore, per_file_ignores=per_file)
 
 
+_EXCLUDED_MD_DIRS = ("generated",)
+
+
 def _iter_md_files(roots: Iterable[Path]) -> list[Path]:
     out: list[Path] = []
     for root in roots:
         if root.is_file() and root.suffix == ".md":
             out.append(root)
         elif root.is_dir():
-            out.extend(sorted(root.rglob("*.md")))
+            out.extend(
+                p
+                for p in sorted(root.rglob("*.md"))
+                if not any(part in _EXCLUDED_MD_DIRS for part in p.parts)
+            )
     return out
 
 
