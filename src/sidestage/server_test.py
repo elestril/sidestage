@@ -5,7 +5,7 @@ import contextlib
 import json
 from collections.abc import Iterator
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -18,8 +18,6 @@ from sidestage.message import Message
 from sidestage.scene import Scene
 from sidestage.server import (
     App,
-    MessageAccepted,
-    MessageRequest,
     ServerState,
 )
 
@@ -84,7 +82,8 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
     """Mock Scene exposing the surface the server now relies on:
     - `model` is the canonical Scene.Model wire shape (server reads it directly).
     - `user_characters` is the player-character subset.
-    - `serialize_message`, `messages`, `append` are the message API.
+    - `messages` is a plain list whose elements are `Message` instances; the
+      route reads `scene.messages[i].model_dump(mode='json')` directly.
 
     Uses `spec=Scene` so `isinstance(mock, Scene)` returns True — the
     server's entity-dispatch route narrows by isinstance.
@@ -104,22 +103,6 @@ def make_scene(human, npc, scene_id: str = "s1") -> MagicMock:
         body=scene.body,
         character_ids=[c.id for c in scene.characters],
     )
-
-    def serialize_message(idx: int) -> Message.Model:
-        m = scene.messages[idx]
-        return Message.Model(
-            scene_id=scene.id,
-            index=idx,
-            sender_id=m.sender.id,
-            body=m.body,
-        )
-
-    def append(msg: Message) -> int:
-        scene.messages.append(msg)
-        return len(scene.messages) - 1
-
-    scene.serialize_message = serialize_message
-    scene.append = MagicMock(side_effect=append)
     return scene
 
 
@@ -202,25 +185,6 @@ class TestServerState:
 
     def test_states_distinct(self) -> None:
         assert ServerState.LOADING != ServerState.SERVING
-
-
-# ---------------------------------------------------------------------------
-# Wire models — only those still owned by server.py
-# ---------------------------------------------------------------------------
-
-
-class TestMessageRequest:
-    def test_fields(self) -> None:
-        req = MessageRequest(sender_id=EntityId("c1"), body="hi")
-        assert req.sender_id == "c1"
-        assert req.body == "hi"
-
-
-class TestMessageAccepted:
-    def test_fields(self) -> None:
-        acc = MessageAccepted(scene_id=EntityId("s1"), index=0)
-        assert acc.scene_id == "s1"
-        assert acc.index == 0
 
 
 # ---------------------------------------------------------------------------
@@ -744,8 +708,9 @@ class TestGetEntity:
 
 class TestGetMessages:
     def _seed_messages(self, scene, count: int = 3) -> None:
+        sender_id = scene.characters[0].id
         for i in range(count):
-            scene.messages.append(Message(sender=scene.characters[0], body=f"m{i}"))
+            scene.messages.append(Message(sender_id=sender_id, body=f"m{i}"))
 
     def test_messages_503_when_loading(self) -> None:
         # rest-api-get-messages-503.
@@ -778,12 +743,10 @@ class TestGetMessages:
         assert response.status_code == 200
         body = response.json()
         assert len(body) == 3
-        assert body[0]["scene_id"] == "s1" and body[0]["index"] == 0, (
-            "message-model-fields: serialized messages MUST carry scene_id "
-            f"and index on the wire; got body[0]={body[0]!r}"
-        )
-        assert body[2]["scene_id"] == "s1" and body[2]["index"] == 2
-        assert body[1]["body"] == "m1"
+        # Wire shape is the flat Message — `{sender_id, body}`.
+        assert body[0] == {"sender_id": "bob", "body": "m0"}
+        assert body[1] == {"sender_id": "bob", "body": "m1"}
+        assert body[2] == {"sender_id": "bob", "body": "m2"}
 
     def test_messages_with_from_and_to_half_open(self) -> None:
         # rest-api-get-messages-build: half-open range.
@@ -796,10 +759,7 @@ class TestGetMessages:
             )
         assert response.status_code == 200
         body = response.json()
-        assert [(m["scene_id"], m["index"]) for m in body] == [
-            ("s1", 1),
-            ("s1", 2),
-        ]
+        assert [m["body"] for m in body] == ["m1", "m2"]
 
     def test_messages_to_equals_len(self) -> None:
         # to == len(messages) is valid (half-open upper bound).
@@ -875,84 +835,6 @@ class TestGetMessages:
 
 
 # ---------------------------------------------------------------------------
-# rest-api-post-message: POST /api/scenes/{scene_id}/messages
-# ---------------------------------------------------------------------------
-
-
-class TestPostMessage:
-    def test_post_503_when_loading(self) -> None:
-        # rest-api-post-503.
-        app = App()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
-                json={"sender_id": "bob", "body": "hi"},
-            )
-        assert response.status_code == 503
-
-    def test_post_404_when_campaign_unknown(self) -> None:
-        # 404 when campaign id is unknown.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                "/api/campaigns/no-such/scenes/s1/messages",
-                json={"sender_id": "bob", "body": "hi"},
-            )
-        assert response.status_code == 404
-
-    def test_post_404_when_scene_unknown(self) -> None:
-        # rest-api-post-404: campaign.scene returns None.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                f"/api/campaigns/{CAMPAIGN_ID}/scenes/other/messages",
-                json={"sender_id": "bob", "body": "hi"},
-            )
-        assert response.status_code == 404
-
-    def test_post_422_when_bad_body(self) -> None:
-        # rest-api-post-422: pydantic validation failure.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
-                json={"body": "missing sender_id"},
-            )
-        assert response.status_code == 422
-
-    def test_post_422_when_sender_not_player(self) -> None:
-        # rest-api-post-422: sender_id not in user_characters.
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
-                json={"sender_id": "elara", "body": "hi"},  # elara is npc, not player
-            )
-        assert response.status_code == 422
-
-    def test_post_appends_and_returns_id(self) -> None:
-        # rest-api-post-dispatch + rest-api-post-returns: server calls
-        # `scene.append(message)` and returns the assigned (scene_id, index).
-        app, scene, human, npc = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.post(
-                f"/api/campaigns/{CAMPAIGN_ID}/scenes/s1/messages",
-                json={"sender_id": "bob", "body": "hello"},
-            )
-        assert response.status_code == 201
-        body = response.json()
-        assert body["scene_id"] == "s1" and body["index"] == 0, (
-            "rest-api-post-returns: response carries (scene_id, index) of the "
-            f"appended message; got {body!r}"
-        )
-        scene.append.assert_called_once()
-        msg = scene.append.call_args[0][0]
-        assert isinstance(msg, Message)
-        assert msg.sender is human
-        assert msg.body == "hello"
-
-
-# ---------------------------------------------------------------------------
 # ws-route-connection: WS /api/campaigns/{cid}/ws
 # ---------------------------------------------------------------------------
 
@@ -999,17 +881,48 @@ class _FakeWebSocket:
         self._incoming.put_nowait("__disconnect__")
 
 
+async def _drive_until_op(
+    fake: _FakeWebSocket,
+    campaign: MagicMock,
+    op: str,
+    timeout: float = 1.0,
+) -> None:
+    """Drive a WsConnection.run task until at least one frame with the
+    named `op` has been sent, then signal disconnect.
+
+    The connection's sender task may not drain a queued reply if we
+    signal disconnect immediately after the recv-loop processes the
+    request — the sender cancel preempts the still-pending put. So we
+    poll `fake.sent` for the expected op, then issue the disconnect.
+    """
+    from sidestage.ws import WsConnection
+
+    conn = WsConnection(campaign, cast(Any, fake))
+    run_task = asyncio.create_task(conn.run())
+
+    try:
+        for _ in range(100):
+            if any(json.loads(f).get("op") == op for f in fake.sent):
+                break
+            await asyncio.sleep(0.005)
+    finally:
+        fake.script_disconnect()
+        await asyncio.wait_for(run_task, timeout=timeout)
+
+
 class TestWsConnection:
     """Unit tests for `WsConnection` — drive it directly with a fake socket.
 
     Per `events-subscription`, `ws-dataflow-subscribe`, `ws-dataflow-event`,
-    and `ws-dataflow-unsubscribe`. These tests exercise the per-frame
-    invariants without booting uvicorn — the full round-trip lives in
-    `tests/e2e/test_cuj_hello.py`.
+    `ws-dataflow-entity-action`, and `ws-dataflow-unsubscribe`. These tests
+    exercise the per-frame invariants without booting uvicorn — the full
+    round-trip lives in `tests/e2e/test_cuj_hello.py`.
     """
 
     def _make_scene_with_subscribe_tracking(
         self,
+        *,
+        scene_id: str = "s1",
     ) -> tuple[MagicMock, list, list]:
         """Build a scene mock whose `subscribe` / `unsubscribe` record calls.
 
@@ -1017,8 +930,15 @@ class TestWsConnection:
         the listeners passed in order, so tests can assert add/remove
         pairing.
         """
-        scene = MagicMock(spec=[])
-        scene.id = EntityId("s1")
+        scene = MagicMock(spec=Scene)
+        scene.id = EntityId(scene_id)
+        scene.model = Scene.Model(
+            id=EntityId(scene_id),
+            name="Test Scene",
+            type=EntityType.SCENE,
+            body="",
+            character_ids=[],
+        )
         subscribed: list = []
         unsubscribed: list = []
         scene.subscribe = MagicMock(
@@ -1058,11 +978,40 @@ class TestWsConnection:
             f"one listener on the entity; got {len(subscribed)}"
         )
 
-    async def test_entity_changed_sent_as_frame(self) -> None:
-        # ws-dataflow-event: an EntityChanged emitted on a subscribed
-        # entity MUST be sent as an `entity_changed` JSON frame carrying
-        # `{entity_id, attributes}`.
-        from sidestage.events import EntityChanged
+    async def test_subscribe_replies_with_initial_state(self) -> None:
+        # backend-ws-subscribe: a `subscribe` frame is acked with a
+        # `subscribed` reply carrying each requested entity's current
+        # `Entity.Model` payload.
+        scene, _, _ = self._make_scene_with_subscribe_tracking()
+        campaign = self._make_campaign_for(scene)
+        fake = _FakeWebSocket()
+        fake.script_in({"op": "subscribe", "request_id": "req-1", "entity_ids": ["s1"]})
+
+        await _drive_until_op(fake, campaign, "subscribed")
+
+        # Find the `subscribed` reply among sent frames.
+        subscribed_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "subscribed"
+        ]
+        assert len(subscribed_frames) == 1, (
+            "backend-ws-subscribe: subscribe MUST receive exactly one "
+            f"`subscribed` reply; got {len(subscribed_frames)}"
+        )
+        reply = subscribed_frames[0]
+        assert reply["request_id"] == "req-1"
+        assert isinstance(reply["states"], list)
+        assert len(reply["states"]) == 1
+        state = reply["states"][0]
+        assert state["entity_id"] == "s1"
+        assert state["model"] is not None
+        assert state["model"]["id"] == "s1"
+        assert state["model"]["name"] == "Test Scene"
+
+    async def test_entity_changed_sent_as_frame_with_delta(self) -> None:
+        # ws-dataflow-event + events-attribute-deltas: an EntityChanged
+        # emitted on a subscribed entity MUST be sent as an
+        # `entity_changed` JSON frame carrying delta payloads.
+        from sidestage.events import EntityChanged, ListDelta
         from sidestage.ws import WsConnection
 
         scene, subscribed, _ = self._make_scene_with_subscribe_tracking()
@@ -1087,30 +1036,46 @@ class TestWsConnection:
         # Simulate the entity emit by calling the registered listener directly
         # (same path entity._emit -> spawn_task -> listener.notify takes).
         listener = subscribed[0]
-        listener.notify(EntityChanged(entity=scene, attributes=["messages"]))
+        msg = Message(sender_id=EntityId("alice"), body="hi")
+        listener.notify(
+            EntityChanged(
+                entity=scene,
+                attributes=["messages"],
+                deltas={"messages": ListDelta(start=-1, len=0, items=[msg])},
+            )
+        )
 
         # Give the send loop a tick to drain.
         for _ in range(50):
-            if fake.sent:
+            if any(json.loads(f).get("op") == "entity_changed" for f in fake.sent):
                 break
             await asyncio.sleep(0.005)
 
         fake.script_disconnect()
         await asyncio.wait_for(run_task, timeout=1.0)
 
-        assert fake.sent, (
+        ec_frames = [
+            json.loads(f)
+            for f in fake.sent
+            if json.loads(f).get("op") == "entity_changed"
+        ]
+        assert len(ec_frames) == 1, (
             "ws-dataflow-event: send loop MUST emit a frame for each "
             "EntityChanged dequeued from the connection queue"
         )
-        payload = json.loads(fake.sent[0])
-        assert payload == {
-            "op": "entity_changed",
-            "entity_id": "s1",
-            "attributes": ["messages"],
+        payload = ec_frames[0]
+        assert payload["op"] == "entity_changed"
+        assert payload["entity_id"] == "s1"
+        assert payload["attributes"] == ["messages"]
+        assert "messages" in payload["deltas"]
+        delta = payload["deltas"]["messages"]
+        assert delta == {
+            "start": -1,
+            "len": 0,
+            "items": [{"sender_id": "alice", "body": "hi"}],
         }, (
-            "ws-dataflow-event: frame payload MUST be "
-            "`{op:'entity_changed', entity_id, attributes}`; "
-            f"got {payload!r}"
+            "events-attribute-deltas: ListDelta is serialised to "
+            f"`{{start, len, items}}` with items as Message dumps; got {delta!r}"
         )
 
     async def test_unsubscribe_frame_drops_listener(self) -> None:
@@ -1158,25 +1123,184 @@ class TestWsConnection:
             f"got subscribed={subscribed!r} unsubscribed={unsubscribed!r}"
         )
 
-    async def test_unknown_entity_id_is_ignored(self) -> None:
-        # Subscribe to a non-existent entity: campaign.get returns None,
-        # the handler logs and ignores. No crash, no listener registered.
-        from sidestage.ws import WsConnection
-
+    async def test_unknown_entity_id_in_subscribe(self) -> None:
+        # backend-ws-subscribe: subscribe with an unknown entity_id replies
+        # with `model: None` for that slot; no listener is registered.
         scene, subscribed, _ = self._make_scene_with_subscribe_tracking()
         campaign = self._make_campaign_for(scene)
 
         fake = _FakeWebSocket()
-        fake.script_in({"op": "subscribe", "entity_id": "ghost"})
-        fake.script_disconnect()
+        fake.script_in({"op": "subscribe", "entity_ids": ["ghost"]})
 
-        await WsConnection(campaign, cast(Any, fake)).run()
+        await _drive_until_op(fake, campaign, "subscribed")
 
         assert subscribed == [], (
             "ws-dataflow-subscribe: subscribe for an unknown entity_id "
             "MUST NOT register a listener; "
             f"got {subscribed!r}"
         )
+        subscribed_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "subscribed"
+        ]
+        assert len(subscribed_frames) == 1
+        # The reply still carries an entry for the requested id, but with
+        # `model: None`.
+        states = subscribed_frames[0]["states"]
+        assert states == [{"entity_id": "ghost", "model": None}]
+
+
+class TestWsEntityAction:
+    """ws-dataflow-entity-action: dispatch `@action`-decorated methods on
+    an entity over the WS, with `ack` / `error` replies."""
+
+    def _make_entity_with_action(self) -> Any:
+        """Build a real Character whose `say` is stubbed to an AsyncMock.
+
+        `type(entity)._actions` is the validator surface — using a real
+        Character means `type(entity)` is the actual class and carries the
+        `_actions` set built by `__init_subclass__`. A `spec=Character`
+        MagicMock would not, because `type(mock)` returns `MagicMock`.
+        """
+        from sidestage.character import Character
+
+        campaign = Campaign(name="t")
+        with patch(
+            "sidestage.server.App.get_actor", return_value=MagicMock(), create=True
+        ):
+            entity = Character(
+                Character.Model(
+                    id=EntityId("alice"),
+                    name="Alice",
+                    type=EntityType.CHARACTER,
+                    body="",
+                    owner="stub",
+                ),
+                campaign,
+            )
+        campaign.add(entity)
+        # Patch the bound `say` method to an AsyncMock so we can both spy
+        # and force `side_effect` for the failure-path test. Using
+        # `object.__setattr__` bypasses Entity's __setattr__ (which would
+        # try to route through the Pydantic model).
+        say_mock = AsyncMock(return_value=None)
+        object.__setattr__(entity, "say", say_mock)
+        return entity
+
+    def _make_campaign_for(self, entity: Any) -> MagicMock:
+        campaign = MagicMock(spec=[])
+        campaign.get = MagicMock(
+            side_effect=lambda eid: entity if eid == entity.id else None
+        )
+        return campaign
+
+    async def test_entity_action_dispatches_and_acks(self) -> None:
+        entity = self._make_entity_with_action()
+        campaign = self._make_campaign_for(entity)
+
+        fake = _FakeWebSocket()
+        fake.script_in(
+            {
+                "op": "entity_action",
+                "request_id": "req-1",
+                "entity_id": "alice",
+                "action": "say",
+                "kwargs": {"scene_id": "s1", "body": "hi"},
+            }
+        )
+
+        await _drive_until_op(fake, campaign, "ack")
+
+        entity.say.assert_awaited_once_with(scene_id="s1", body="hi")
+        # Reply is an ack carrying the request_id.
+        ack_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "ack"
+        ]
+        assert len(ack_frames) == 1, (
+            "ws-dataflow-entity-action: success MUST emit exactly one ack; "
+            f"got {ack_frames!r}"
+        )
+        assert ack_frames[0]["request_id"] == "req-1"
+
+    async def test_entity_action_unknown_entity_errors(self) -> None:
+        # Empty campaign: `get` always returns None.
+        campaign = MagicMock(spec=[])
+        campaign.get = MagicMock(return_value=None)
+
+        fake = _FakeWebSocket()
+        fake.script_in(
+            {
+                "op": "entity_action",
+                "request_id": "req-2",
+                "entity_id": "ghost",
+                "action": "say",
+                "kwargs": {"scene_id": "s1", "body": "hi"},
+            }
+        )
+
+        await _drive_until_op(fake, campaign, "error")
+
+        error_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "error"
+        ]
+        assert len(error_frames) == 1
+        err = error_frames[0]
+        assert err["request_id"] == "req-2"
+        assert err["code"] == "unknown_entity"
+
+    async def test_entity_action_unknown_action_errors(self) -> None:
+        entity = self._make_entity_with_action()
+        campaign = self._make_campaign_for(entity)
+
+        fake = _FakeWebSocket()
+        fake.script_in(
+            {
+                "op": "entity_action",
+                "request_id": "req-3",
+                "entity_id": "alice",
+                "action": "no_such_action",
+                "kwargs": {},
+            }
+        )
+
+        await _drive_until_op(fake, campaign, "error")
+
+        error_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "error"
+        ]
+        assert len(error_frames) == 1
+        err = error_frames[0]
+        assert err["request_id"] == "req-3"
+        assert err["code"] == "unknown_action"
+        entity.say.assert_not_called()
+
+    async def test_entity_action_failure_errors(self) -> None:
+        # If the action method itself raises, the dispatcher MUST emit an
+        # `error` frame with code `action_failed` (per
+        # `events-errors-action-failure`).
+        entity = self._make_entity_with_action()
+        object.__setattr__(entity, "say", AsyncMock(side_effect=ValueError("nope")))
+        campaign = self._make_campaign_for(entity)
+
+        fake = _FakeWebSocket()
+        fake.script_in(
+            {
+                "op": "entity_action",
+                "request_id": "req-4",
+                "entity_id": "alice",
+                "action": "say",
+                "kwargs": {"scene_id": "s1", "body": "hi"},
+            }
+        )
+
+        await _drive_until_op(fake, campaign, "error")
+
+        error_frames = [
+            json.loads(s) for s in fake.sent if json.loads(s).get("op") == "error"
+        ]
+        assert len(error_frames) == 1
+        err = error_frames[0]
+        assert err["request_id"] == "req-4"
+        assert err["code"] == "action_failed"
 
 
 class TestWsRouteLoadingGate:
@@ -1482,7 +1606,7 @@ class TestEndpointDataflowIntegration:
         # api-dataflow-list-campaigns + api-dataflow-campaign + api-dataflow-scene
         # + api-dataflow-history.
         app, scene, human, npc = make_loaded_app()
-        scene.messages.append(Message(sender=human, body="hi"))
+        scene.messages.append(Message(sender_id=human.id, body="hi"))
 
         with TestClient(app._fastapi) as client:
             r0 = client.get("/api/campaigns")

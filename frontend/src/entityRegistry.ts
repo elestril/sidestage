@@ -5,15 +5,22 @@
 // `/api/campaigns/{cid}/ws` and a shared cache of hydrated entities.
 //
 // Per `specs/frontend.md#frontend-entity-registry` and
-// `specs/events.md#events-subscription`.
+// `specs/events.md#events-subscription`. Phase 2b: the WS `subscribed`
+// reply carries each entity's full `Entity.Model` payload (the initial
+// state), and subsequent `entity_changed` frames carry typed deltas
+// the registry applies in place — no REST fallback for hydration.
 
 import {
   asEntityId,
+  type AttributeDelta,
   type CharacterResponse,
+  type EntityActionFrame,
   type EntityId,
-  type EntityResponse,
+  type ListDelta,
   type MessageModel,
   type SceneResponse,
+  type ScalarDelta,
+  type ServerEvent,
 } from './types_ext';
 
 // frontend-state-registry-cache: cached entity for a scene carries a
@@ -23,6 +30,11 @@ export type CachedScene = SceneResponse & { messages: MessageModel[] };
 export type CachedEntity = CachedScene | CharacterResponse;
 
 export interface EntityRegistryDeps {
+  // Phase 2b: hydration is fully WS-driven, so the registry no longer
+  // issues REST fetches. The `fetcher` slot is kept on the deps
+  // interface to preserve the Workspace's injection seam (and let
+  // tests that still construct a registry with a fetcher mock keep
+  // working) — the registry simply ignores it.
   fetcher?: typeof fetch;
   wsFactory?: (url: string) => WebSocket;
 }
@@ -31,15 +43,45 @@ const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const EVICTION_GRACE_MS = 5_000;
 
-function brandSceneResponse(raw: unknown): SceneResponse {
+interface PendingRequest {
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
+// Disambiguate `ListDelta` vs `ScalarDelta` by the presence of `start`
+// (collection deltas always carry it; scalar deltas always carry
+// `value`). Per `specs/events.md#events-attribute-deltas`.
+function isListDelta(delta: AttributeDelta): delta is ListDelta {
+  return (
+    typeof (delta as { start?: unknown }).start === 'number' &&
+    Array.isArray((delta as { items?: unknown }).items)
+  );
+}
+
+function isScalarDelta(delta: AttributeDelta): delta is ScalarDelta {
+  return 'value' in delta;
+}
+
+function brandSceneModel(raw: unknown, scene_id: EntityId): CachedScene {
   const r = raw as {
     type: 'scene';
     id: string;
     name: string;
     body: string;
     character_ids: string[];
+    messages?: Array<{ sender_id: string; body: string }>;
   };
   const character_ids = r.character_ids.map(asEntityId);
+  const rawMessages = r.messages ?? [];
+  const messages: MessageModel[] = rawMessages.map((m, idx) => ({
+    // Wire shape is positional ({sender_id, body}); synthesise the
+    // composite `(scene_id, index)` the FE uses for stable React keys
+    // and own/other classification.
+    scene_id,
+    index: idx,
+    sender_id: asEntityId(m.sender_id),
+    body: m.body,
+  }));
   return {
     type: 'scene',
     id: asEntityId(r.id),
@@ -50,16 +92,17 @@ function brandSceneResponse(raw: unknown): SceneResponse {
     // first character_id is the player. Phase 2b: compute properly by
     // looking up each Character's owner via the registry.
     player_character_ids: character_ids.length > 0 ? [character_ids[0]] : [],
+    messages,
   };
 }
 
-function brandCharacterResponse(raw: unknown): CharacterResponse {
+function brandCharacterModel(raw: unknown): CharacterResponse {
   const r = raw as {
     type: 'character';
     id: string;
     name: string;
     body: string;
-    owner: 'user' | 'stub';
+    owner: 'user' | 'stub' | 'npc';
   };
   return {
     type: 'character',
@@ -70,35 +113,40 @@ function brandCharacterResponse(raw: unknown): CharacterResponse {
   };
 }
 
-function brandEntityResponse(raw: unknown): EntityResponse {
+function brandEntityModel(raw: unknown, entity_id: EntityId): CachedEntity {
   const r = raw as { type: string };
-  if (r.type === 'scene') return brandSceneResponse(raw);
-  if (r.type === 'character') return brandCharacterResponse(raw);
+  if (r.type === 'scene') return brandSceneModel(raw, entity_id);
+  if (r.type === 'character') return brandCharacterModel(raw);
   throw new Error(`Unknown entity type: ${r.type}`);
 }
 
-function brandMessage(raw: unknown): MessageModel {
-  const r = raw as { scene_id: string; index: number; sender_id: string; body: string };
-  return {
-    scene_id: asEntityId(r.scene_id),
-    index: r.index,
-    sender_id: asEntityId(r.sender_id),
-    body: r.body,
-  };
+// Generate an opaque client-side request id. uuid is preferred per
+// `events-subscription-entity-action`; `crypto.randomUUID` is a browser
+// built-in and works in jsdom. Falls back to a Math.random-based token
+// for environments without `crypto.randomUUID`.
+function newRequestId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  return `req-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 }
 
 export class EntityRegistry {
   readonly campaignId: string;
 
-  private readonly fetchFn: typeof fetch;
   private readonly wsFactory: (url: string) => WebSocket;
 
   private cache = new Map<EntityId, CachedEntity>();
   private refCount = new Map<EntityId, number>();
   private listeners = new Map<EntityId, Set<() => void>>();
-  private hydrations = new Map<EntityId, Promise<CachedEntity>>();
-  private sliceChains = new Map<EntityId, Promise<void>>();
   private evictTimers = new Map<EntityId, ReturnType<typeof setTimeout>>();
+
+  // Pending subscribe requests: resolved when the matching `subscribed`
+  // reply arrives. The promise resolves to the requested entity id so
+  // callers can await initial-state availability if needed.
+  private pendingSubscribes = new Map<string, EntityId[]>();
+  // In-flight `entity_action` calls; resolved on `ack`, rejected on
+  // `error`. Keyed by request_id (per frontend-campaign-action-dispatch).
+  private pendingActions = new Map<string, PendingRequest>();
 
   private connectedListeners = new Set<() => void>();
   private _connected = false;
@@ -110,10 +158,6 @@ export class EntityRegistry {
 
   constructor(campaignId: string, deps: EntityRegistryDeps = {}) {
     this.campaignId = campaignId;
-    // Always bind globalThis so passing in `fetch` (or `window.fetch`) does
-    // not raise "Illegal invocation" when we call it as `this.fetchFn(...)`.
-    const f = deps.fetcher ?? fetch;
-    this.fetchFn = f.bind(globalThis);
     this.wsFactory =
       deps.wsFactory ?? ((url: string): WebSocket => new WebSocket(url));
     this.openWebSocket();
@@ -138,8 +182,7 @@ export class EntityRegistry {
       this.evictTimers.delete(entityId);
     }
     if (prev === 0) {
-      this.hydrations.set(entityId, this.hydrate(entityId));
-      this.sendSubscribe(entityId);
+      this.sendSubscribe([entityId]);
     }
     let set = this.listeners.get(entityId);
     if (!set) {
@@ -153,7 +196,7 @@ export class EntityRegistry {
       const n = this.refCount.get(entityId) ?? 0;
       if (n <= 1) {
         this.refCount.delete(entityId);
-        this.sendUnsubscribe(entityId);
+        this.sendUnsubscribe([entityId]);
         this.scheduleEviction(entityId);
       } else {
         this.refCount.set(entityId, n - 1);
@@ -181,6 +224,40 @@ export class EntityRegistry {
     };
   }
 
+  // frontend-campaign-action-dispatch: send an `entity_action` frame
+  // and return a Promise that resolves on the matching `ack` (or
+  // rejects on `error`). The Promise resolution is the only completion
+  // signal — projection state only updates when the BE-emitted
+  // `EntityChanged` arrives.
+  entityAction(
+    entityId: EntityId,
+    action: string,
+    kwargs: Record<string, unknown>,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('entity_action: socket not open'));
+        return;
+      }
+      const request_id = newRequestId();
+      this.pendingActions.set(request_id, { resolve, reject });
+      const frame: EntityActionFrame = {
+        op: 'entity_action',
+        entity_id: entityId,
+        action,
+        kwargs,
+        request_id,
+      };
+      try {
+        ws.send(JSON.stringify(frame));
+      } catch (err) {
+        this.pendingActions.delete(request_id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  }
+
   // Lifecycle hook for tab teardown; tests use it to release sockets.
   close(): void {
     this.closed = true;
@@ -194,86 +271,12 @@ export class EntityRegistry {
     }
     for (const t of this.evictTimers.values()) clearTimeout(t);
     this.evictTimers.clear();
-  }
-
-  // ------------------------------------------------------------------
-  // Hydration (REST)
-  // ------------------------------------------------------------------
-
-  private async hydrate(entityId: EntityId): Promise<CachedEntity> {
-    const entityUrl = `/api/campaigns/${encodeURIComponent(this.campaignId)}/entities/${encodeURIComponent(entityId)}`;
-    const res = await this.fetchFn(entityUrl);
-    if (!res.ok) throw new Error(`GET entity ${entityId} → ${res.status}`);
-    const fetched = brandEntityResponse(await res.json());
-
-    if (fetched.type === 'scene') {
-      // ws-client-observe: scene panels need history for first paint.
-      // The slice-fetch on entity_changed is for incremental updates.
-      const histRes = await this.fetchFn(
-        `/api/campaigns/${encodeURIComponent(this.campaignId)}/scenes/${encodeURIComponent(fetched.id)}/messages`,
-      );
-      if (!histRes.ok) throw new Error(`GET history → ${histRes.status}`);
-      const histRaw = (await histRes.json()) as unknown[];
-      const messages = histRaw.map(brandMessage);
-      const cached: CachedScene = { ...fetched, messages };
-      this.setCache(entityId, cached);
-      // Best-effort pre-cache of character dependents so sender lookups
-      // don't flash during first paint. Failures here don't reject the
-      // scene hydration — widgets render senders lazily.
-      void Promise.allSettled(
-        fetched.character_ids.map((cid) => this.prefetchCharacter(cid)),
-      );
-      return cached;
+    // Reject any in-flight action promises so callers don't hang.
+    for (const [, p] of this.pendingActions) {
+      p.reject(new Error('registry closed'));
     }
-
-    this.setCache(entityId, fetched);
-    return fetched;
-  }
-
-  private async prefetchCharacter(charId: EntityId): Promise<void> {
-    if (this.cache.has(charId)) return;
-    const url = `/api/campaigns/${encodeURIComponent(this.campaignId)}/entities/${encodeURIComponent(charId)}`;
-    const res = await this.fetchFn(url);
-    if (!res.ok) return;
-    const fetched = brandEntityResponse(await res.json());
-    if (fetched.type !== 'character') return;
-    this.setCache(charId, fetched);
-  }
-
-  // ------------------------------------------------------------------
-  // Slice fetch (REST) on entity_changed[messages]
-  // ------------------------------------------------------------------
-
-  private scheduleSliceFetch(entityId: EntityId): void {
-    // frontend-entity-registry-slice: per-entity serialization so
-    // concurrent entity_changed frames don't double-append.
-    const chain = (this.sliceChains.get(entityId) ?? Promise.resolve())
-      .then(() => this.runSliceFetch(entityId))
-      .catch((err) => {
-        console.error('slice fetch failed', err);
-      });
-    this.sliceChains.set(entityId, chain);
-  }
-
-  private async runSliceFetch(entityId: EntityId): Promise<void> {
-    const cached = this.cache.get(entityId);
-    if (!cached || cached.type !== 'scene') return;
-    const lastIndex = cached.messages.length
-      ? cached.messages[cached.messages.length - 1].index
-      : -1;
-    const from = lastIndex + 1;
-    const sliceRes = await this.fetchFn(
-      `/api/campaigns/${encodeURIComponent(this.campaignId)}/scenes/${encodeURIComponent(entityId)}/messages?from=${from}`,
-    );
-    if (!sliceRes.ok) return;
-    const sliceRaw = (await sliceRes.json()) as unknown[];
-    if (sliceRaw.length === 0) return;
-    const slice = sliceRaw.map(brandMessage);
-    const next: CachedScene = {
-      ...cached,
-      messages: [...cached.messages, ...slice],
-    };
-    this.setCache(entityId, next);
+    this.pendingActions.clear();
+    this.pendingSubscribes.clear();
   }
 
   // ------------------------------------------------------------------
@@ -286,14 +289,17 @@ export class EntityRegistry {
     if (set) for (const l of set) l();
   }
 
+  private notifyListeners(entityId: EntityId): void {
+    const set = this.listeners.get(entityId);
+    if (set) for (const l of set) l();
+  }
+
   private scheduleEviction(entityId: EntityId): void {
     // Grace period absorbs panel-switch churn (mount/unmount/mount).
     const t = setTimeout(() => {
       this.evictTimers.delete(entityId);
       if ((this.refCount.get(entityId) ?? 0) > 0) return;
       this.cache.delete(entityId);
-      this.hydrations.delete(entityId);
-      this.sliceChains.delete(entityId);
       this.listeners.delete(entityId);
     }, EVICTION_GRACE_MS);
     this.evictTimers.set(entityId, t);
@@ -317,13 +323,10 @@ export class EntityRegistry {
       this.wsBackoff = INITIAL_BACKOFF_MS;
       this.setConnected(true);
       // ws-client-reconnect: replay observe set on every (re)connect so
-      // the server has the same subscription set as the client.
-      for (const eid of this.refCount.keys()) {
-        // Refresh cache by re-hydrating; the freshly-fetched state
-        // overwrites any drift accumulated during the disconnect.
-        this.hydrations.set(eid, this.hydrate(eid));
-        this.sendSubscribe(eid);
-      }
+      // the server has the same subscription set as the client. The
+      // freshly-arriving `subscribed` reply carries authoritative state.
+      const ids = Array.from(this.refCount.keys());
+      if (ids.length > 0) this.sendSubscribe(ids);
     });
     ws.addEventListener('message', (ev) => {
       this.onWsMessage(ev as MessageEvent<string>);
@@ -356,34 +359,166 @@ export class EntityRegistry {
   }
 
   private onWsMessage(ev: MessageEvent<string>): void {
-    let frame: { op?: string; entity_id?: string; attributes?: string[] };
+    let frame: ServerEvent;
     try {
-      frame = JSON.parse(ev.data);
+      frame = JSON.parse(ev.data) as ServerEvent;
     } catch (err) {
       console.error('ws: invalid JSON frame', err);
       return;
     }
-    if (frame.op === 'entity_changed') {
-      const eid = frame.entity_id ? asEntityId(frame.entity_id) : null;
-      if (!eid) return;
-      if (frame.attributes?.includes('messages')) {
-        this.scheduleSliceFetch(eid);
+    switch (frame.op) {
+      case 'subscribed':
+        this.handleSubscribed(frame);
+        return;
+      case 'entity_changed':
+        this.handleEntityChanged(frame);
+        return;
+      case 'ack':
+        this.handleAck(frame.request_id);
+        return;
+      case 'error':
+        this.handleError(frame.request_id, frame.code, frame.message);
+        return;
+      default:
+        // Unknown op — log and ignore; the wire schema is closed but
+        // forward-compatible (a future BE may emit ops we don't handle
+        // yet, and dropping is the safest stance).
+        console.warn('ws: unknown op', frame);
+    }
+  }
+
+  private handleSubscribed(frame: {
+    request_id: string;
+    states: Array<{ entity_id: string; model: unknown }>;
+  }): void {
+    this.pendingSubscribes.delete(frame.request_id);
+    for (const state of frame.states) {
+      if (state.model == null) continue;
+      const eid = asEntityId(state.entity_id);
+      try {
+        const entity = brandEntityModel(state.model, eid);
+        this.setCache(eid, entity);
+      } catch (err) {
+        console.error('ws: subscribed: bad model', err);
       }
+    }
+  }
+
+  private handleEntityChanged(frame: {
+    entity_id: string;
+    attributes: string[];
+    deltas?: Record<string, AttributeDelta>;
+  }): void {
+    const eid = asEntityId(frame.entity_id);
+    const cached = this.cache.get(eid);
+    if (!cached) return;
+    const deltas = frame.deltas ?? {};
+    // Mutate a shallow clone so React's reference comparison flips and
+    // listeners re-render. Per-attribute mutation lives inside.
+    const next: CachedEntity = { ...cached };
+    for (const attr of frame.attributes) {
+      const delta = deltas[attr];
+      if (!delta) continue;
+      this.applyDelta(next, eid, attr, delta);
+    }
+    this.cache.set(eid, next);
+    this.notifyListeners(eid);
+  }
+
+  // frontend-campaign-collection-delta: apply a typed delta to the
+  // cached entity. ListDelta uses splice semantics with `start === -1`
+  // short-circuited to push-at-end. ScalarDelta assigns the new value.
+  // Per `specs/events.md#events-attribute-deltas`.
+  private applyDelta(
+    entity: CachedEntity,
+    entityId: EntityId,
+    attr: string,
+    delta: AttributeDelta,
+  ): void {
+    const target = entity as unknown as Record<string, unknown>;
+    if (isListDelta(delta)) {
+      const current = (target[attr] as unknown[]) ?? [];
+      // Clone so the previous snapshot stays immutable for any
+      // observer that captured it.
+      const list = [...current];
+      // Items inside the delta may need branding (e.g. `messages` carries
+      // wire-shape `{sender_id, body}` items the FE materialises with
+      // synthetic `scene_id` + `index`).
+      const items =
+        attr === 'messages' && entity.type === 'scene'
+          ? this.materialiseMessageItems(entityId, list.length, delta)
+          : delta.items;
+      if (delta.start === -1) {
+        list.push(...items);
+      } else {
+        list.splice(delta.start, delta.len, ...items);
+      }
+      // If the splice happened in the middle of `messages`, re-stamp the
+      // `index` of every following item so the FE positional key stays
+      // monotonic. Append-at-end (-1) is the common case and skips this.
+      if (attr === 'messages' && entity.type === 'scene' && delta.start !== -1) {
+        for (let i = delta.start; i < list.length; i += 1) {
+          (list[i] as MessageModel).index = i;
+        }
+      }
+      target[attr] = list;
       return;
     }
-    // Phase 2 mutation ops (ack/error) land here.
+    if (isScalarDelta(delta)) {
+      target[attr] = delta.value;
+      return;
+    }
+    console.warn('ws: unrecognised delta shape', { attr, delta });
   }
 
-  private sendSubscribe(entityId: EntityId): void {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ op: 'subscribe', entity_id: entityId }));
+  private materialiseMessageItems(
+    sceneId: EntityId,
+    startIndex: number,
+    delta: ListDelta,
+  ): MessageModel[] {
+    return delta.items.map((raw, i) => {
+      const r = raw as { sender_id: string; body: string };
+      return {
+        scene_id: sceneId,
+        index: startIndex + i,
+        sender_id: asEntityId(r.sender_id),
+        body: r.body,
+      };
+    });
   }
 
-  private sendUnsubscribe(entityId: EntityId): void {
+  private handleAck(request_id: string): void {
+    const pending = this.pendingActions.get(request_id);
+    if (!pending) return;
+    this.pendingActions.delete(request_id);
+    pending.resolve();
+  }
+
+  private handleError(
+    request_id: string,
+    code: string,
+    message: string,
+  ): void {
+    const pending = this.pendingActions.get(request_id);
+    if (!pending) return;
+    this.pendingActions.delete(request_id);
+    pending.reject(new Error(`${code}: ${message}`));
+  }
+
+  private sendSubscribe(entityIds: EntityId[]): void {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ op: 'unsubscribe', entity_id: entityId }));
+    const request_id = newRequestId();
+    this.pendingSubscribes.set(request_id, entityIds);
+    ws.send(
+      JSON.stringify({ op: 'subscribe', entity_ids: entityIds, request_id }),
+    );
+  }
+
+  private sendUnsubscribe(entityIds: EntityId[]): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ op: 'unsubscribe', entity_ids: entityIds }));
   }
 
   private setConnected(value: boolean): void {

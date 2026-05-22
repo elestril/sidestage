@@ -26,11 +26,12 @@ async def run_scenario(scenario: Scenario, app: App) -> None:
       resolves them via `campaign.get(id)`. Fresh scene = no message bleed
       across tests.
     - run-scenario-seed-history: Append each `Message` in
-      `scenario.chat_history` to the new scene's `_messages` directly,
-      bypassing `append` so seeding doesn't fire any listener tasks.
-    - run-scenario-dispatch: Call `scene.append(scenario.input)`, which
-      records the message and emits `EntityChanged` — characters subscribed
-      at construction react via their `notify` handlers.
+      `scenario.chat_history` to the new scene's `messages` list directly
+      via `list.append` (bypassing the `EntityList.append` mutator) so
+      seeding doesn't fire any listener tasks.
+    - run-scenario-dispatch: Call `scene.messages.append(scenario.input)`,
+      which records the message and emits `EntityChanged` — characters
+      subscribed at construction react via their `notify` handlers.
     - run-scenario-await-cycle: Await `scene.idle()` to wait for all
       listener-spawned background tasks to settle.
     - run-scenario-check: Invoke `scenario.expect.check(scene.messages)`.
@@ -50,18 +51,19 @@ async def run_scenario(scenario: Scenario, app: App) -> None:
         campaign,
     )
 
-    # run-scenario-seed-history. Mutate `_messages` directly so seeding
-    # doesn't fire any listener tasks.
+    # run-scenario-seed-history. Mutate the underlying list via `list.append`
+    # so seeding doesn't fire any listener tasks; the EntityList wrapper's
+    # `append` would emit a ListDelta per call.
     for msg in scenario.chat_history:
-        scene._messages.append(msg)
+        list.append(scene.messages, msg)
 
-    # run-scenario-dispatch. `scene.append` records the message and emits
-    # `EntityChanged`; subscribed characters react in spawned tasks.
-    scene.append(scenario.input)
+    # run-scenario-dispatch. `scene.messages.append` records the message and
+    # emits `EntityChanged`; subscribed characters react in spawned tasks.
+    scene.messages.append(scenario.input)
 
     # run-scenario-await-cycle. Wait for every listener-spawned task to
     # settle, bounded so a wedged coroutine fails fast.
     await scene.idle(timeout=_IDLE_TIMEOUT_S)
 
     # run-scenario-check.
-    scenario.expect.check(scene.messages)
+    scenario.expect.check(list(scene.messages))

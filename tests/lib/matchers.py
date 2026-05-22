@@ -50,8 +50,8 @@ class LastMessage:
         assert messages, "LastMessage: scene.messages is empty"
         last = messages[-1]
         if self.sender_id is not None:
-            assert last.sender.id == self.sender_id, (
-                f"LastMessage: sender_id={last.sender.id!r}, "
+            assert last.sender_id == self.sender_id, (
+                f"LastMessage: sender_id={last.sender_id!r}, "
                 f"expected {self.sender_id!r}"
             )
         if self.body is not None:

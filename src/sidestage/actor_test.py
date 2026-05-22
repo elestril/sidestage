@@ -5,6 +5,7 @@ import logging
 from unittest.mock import MagicMock
 
 from sidestage.actor import Actor, QueueListener, StubActor, UserActor
+from sidestage.entity import EntityId
 from sidestage.events import EntityChanged
 from sidestage.message import Message
 
@@ -45,29 +46,23 @@ class TestStubActor:
         assert actor.is_human() is False
 
     async def test_stub_actor_respond_returns_character_body(self) -> None:
-        # stub-actor-respond-returns: Returns Message(sender=character,
-        # body=character.body) regardless of message.sender. Body comes
-        # from the character, not a hardcoded string.
+        # stub-actor-respond-returns: Returns `character.body` regardless of
+        # message.sender_id. Body comes from the character, not a hardcoded
+        # string; the caller (Character.notify) wraps the text in a Message
+        # via `self.say`.
         actor = StubActor()
         character = MagicMock()
         character.body = "canned response"
         scene = MagicMock()
 
-        sender_human = MagicMock()
-        msg1 = Message(sender=sender_human, body="anything")
+        msg1 = Message(sender_id=EntityId("human"), body="anything")
         result1 = await actor.respond(msg1, character, scene)
-        assert result1 is not None
-        assert result1.sender is character
-        assert result1.body == character.body
-        assert result1.body == "canned response"
+        assert result1 == "canned response"
 
         # Different sender — same result, no filtering.
-        sender_npc = MagicMock()
-        msg2 = Message(sender=sender_npc, body="anything")
+        msg2 = Message(sender_id=EntityId("npc"), body="anything")
         result2 = await actor.respond(msg2, character, scene)
-        assert result2 is not None
-        assert result2.sender is character
-        assert result2.body == character.body
+        assert result2 == "canned response"
 
 
 class TestUserActorBasics:
@@ -88,21 +83,22 @@ class TestUserActorBasics:
         assert actor.is_human() is True
 
     async def test_user_actor_respond_noop(self) -> None:
-        # user-actor-respond-noop: Returns None unconditionally. Human
-        # responses arrive via REST.
+        # user-actor-respond-noop: Returns None unconditionally. Humans
+        # publish via Character.say over an EntityAction, not via the
+        # listener cycle.
         actor = UserActor()
         character = MagicMock()
         scene = MagicMock()
-        sender_human = MagicMock()
-        sender_npc = MagicMock()
         assert (
             await actor.respond(
-                Message(sender=sender_human, body="hi"), character, scene
+                Message(sender_id=EntityId("human"), body="hi"), character, scene
             )
             is None
         )
         assert (
-            await actor.respond(Message(sender=sender_npc, body="hi"), character, scene)
+            await actor.respond(
+                Message(sender_id=EntityId("npc"), body="hi"), character, scene
+            )
             is None
         )
 

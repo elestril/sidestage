@@ -128,26 +128,23 @@ async def test_responds_with_non_empty_message(
     real-LLM path.
     """
     actor = NpcActor(entry)
-    msg = Message(sender=bob, body="Say hi in one short sentence.")
-    # In production, `Scene.append` puts the triggering message into
-    # `scene.messages` BEFORE the listener kicks the actor. Mirror that
-    # here so `_shape_turns` produces a chat history with a user turn —
-    # otherwise NpcActor sends just the system prompt and provider
-    # chat templates (e.g. Qwen3) raise "no user query found".
+    msg = Message(sender_id=bob.id, body="Say hi in one short sentence.")
+    # In production, the EntityList[Message].append on `scene.messages`
+    # puts the triggering message into `scene.messages` BEFORE the listener
+    # kicks the actor. Mirror that here so `_shape_turns` produces a chat
+    # history with a user turn — otherwise NpcActor sends just the system
+    # prompt and provider chat templates (e.g. Qwen3) raise "no user query
+    # found".
     scene.messages = [msg]
 
     reply = await actor.respond(msg, cast(Character, marigold), cast(Entity, scene))
 
     assert reply is not None, (
-        "npc-actor-respond: expected a Message from a live endpoint; "
+        "npc-actor-respond: expected reply text from a live endpoint; "
         "got None (check server logs for empty completion / non-2xx)"
     )
-    assert reply.sender is marigold, (
-        "npc-actor-respond: reply sender MUST be the responding character; "
-        f"got sender={reply.sender!r}"
-    )
-    assert reply.body.strip() != "", (
-        f"npc-actor-respond: reply body MUST be non-empty; got body={reply.body!r}"
+    assert reply.strip() != "", (
+        f"npc-actor-respond: reply body MUST be non-empty; got body={reply!r}"
     )
 
 
@@ -171,7 +168,7 @@ async def test_handles_reasoning_model(
     # An open-ended prompt that often triggers a reasoning preamble on
     # CoT-trained models.
     msg = Message(
-        sender=bob,
+        sender_id=bob.id,
         body=(
             "Two travelers ask which local quest is worth their trouble — "
             "which do you steer them toward?"
@@ -182,16 +179,16 @@ async def test_handles_reasoning_model(
     reply = await actor.respond(msg, cast(Character, marigold), cast(Entity, scene))
 
     assert reply is not None, (
-        "npc-actor-respond: expected a Message even when the model emits "
+        "npc-actor-respond: expected reply text even when the model emits "
         "a reasoning preamble; got None"
     )
-    assert reply.body.strip() != "", (
-        f"npc-actor-respond: reply body MUST be non-empty; got body={reply.body!r}"
+    assert reply.strip() != "", (
+        f"npc-actor-respond: reply body MUST be non-empty; got body={reply!r}"
     )
     # Reasoning leak guard: chain-of-thought emitted into `content`
     # (instead of the provider's `reasoning_content` field) reads as a
     # break in character. Heuristic markers catch the most common shapes.
-    body_lower = reply.body.lower()
+    body_lower = reply.lower()
     cot_markers = (
         "<think>",
         "thinking process",
@@ -205,5 +202,5 @@ async def test_handles_reasoning_model(
     assert not leaked, (
         "npc-actor-respond: reply MUST be the content answer, not the "
         f"chain-of-thought preamble; found markers {leaked!r} in "
-        f"body={reply.body!r}"
+        f"body={reply!r}"
     )

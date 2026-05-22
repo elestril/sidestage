@@ -98,9 +98,9 @@ class TestShapeTurns:
         bob = _character_mock(id="bob")
         alice = _character_mock(id="alice")
         history = [
-            Message(sender=alice, body="hi"),
-            Message(sender=bob, body="hello"),
-            Message(sender=alice, body="how are you"),
+            Message(sender_id=alice.id, body="hi"),
+            Message(sender_id=bob.id, body="hello"),
+            Message(sender_id=alice.id, body="how are you"),
         ]
         turns = _shape_turns(history, bob)
         assert turns == [
@@ -127,7 +127,7 @@ class TestNpcActorRespondLocal:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -179,7 +179,7 @@ class TestNpcActorRespondLocal:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -206,7 +206,7 @@ class TestNpcActorRespondLocal:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -239,7 +239,7 @@ class TestNpcActorRespondLocal:
         bob.annotate_context = MagicMock(side_effect=_annotate)
 
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -262,11 +262,11 @@ class TestNpcActorRespondLocal:
         alice = _character_mock(id="alice")
         scene = _scene_mock(
             messages=[
-                Message(sender=alice, body="first"),
-                Message(sender=bob, body="second"),
+                Message(sender_id=alice.id, body="first"),
+                Message(sender_id=bob.id, body="second"),
             ]
         )
-        message = Message(sender=alice, body="trigger")
+        message = Message(sender_id=alice.id, body="trigger")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -282,12 +282,15 @@ class TestNpcActorRespondLocal:
         assert msgs[1] == {"role": "user", "content": "first"}
         assert msgs[2] == {"role": "assistant", "content": "second"}
 
-    async def test_returns_message_with_completion_body(self) -> None:
+    async def test_returns_completion_text(self) -> None:
+        # npc-actor-respond: returns the completion text (str | None), not a
+        # Message. The caller (Character.notify) wraps the text in a Message
+        # via `self.say(scene.id, text)`.
         actor = NpcActor(_local_entry())
         bob = _character_mock(id="bob", body="bob persona")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -296,9 +299,7 @@ class TestNpcActorRespondLocal:
         ):
             result = await actor.respond(message, bob, scene)
 
-        assert result is not None
-        assert result.sender is bob
-        assert result.body == "Hello there!"
+        assert result == "Hello there!"
 
 
 class TestNpcActorRespondErrors:
@@ -311,7 +312,7 @@ class TestNpcActorRespondErrors:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with (
             patch(
@@ -336,7 +337,7 @@ class TestNpcActorRespondErrors:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -353,7 +354,7 @@ class TestNpcActorRespondErrors:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with (
             patch(
@@ -376,7 +377,7 @@ class TestNpcActorRespondErrors:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         with patch(
             "sidestage.npc_actor.litellm.acompletion",
@@ -392,7 +393,7 @@ class TestNpcActorRespondErrors:
         bob = _character_mock(id="bob")
         scene = _scene_mock(messages=[])
         sender = _character_mock(id="alice")
-        message = Message(sender=sender, body="hi")
+        message = Message(sender_id=sender.id, body="hi")
 
         none_response: Any = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=None))]

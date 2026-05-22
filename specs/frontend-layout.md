@@ -37,7 +37,7 @@ components.
 - frontend-widget-scene: `ScenePanel` renders the scene header
   (`scene.name` + `useConnected()` indicator), the `MessageList`,
   and `MessageInput`. The input calls
-  `await campaign.get(playerCharacterId).then(c => c.speak(body))`.
+  `await campaign.get(playerCharacterId).then(c => c.say(sceneId, body))`.
   Sender resolution per-message lives in a child component
   (`MessageRow`) that calls `useEntity(message.sender_id)`.
 - frontend-widget-scenebubble: `SceneBubble` is a compact snapshot

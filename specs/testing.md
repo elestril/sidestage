@@ -170,20 +170,20 @@ class Scenario:
     name: str
     scene: Scene.Model              # built via scene_from()
     chat_history: list[Message]     # pre-seeded into the per-test Scene
-    input: Message                  # dispatched via scene.append()
+    input: Message                  # appended via scene.messages.append()
     expect: Callable[[list[Message]], None]   # PyHamcrest assertion
 
 def scene_from(campaign, scene_id, **overrides) -> Scene.Model:
-    return campaign.scene(scene_id).to_model().model_copy(update=overrides)
+    return campaign.scene(scene_id).model.model_copy(update=overrides)
 ```
 
 ## testing-runner
 
 `run_scenario(scenario, app)` builds a fresh SimpleScene from the
 scenario, seeds `chat_history` (bypassing emit so listeners don't fire),
-calls `scene.append(scenario.input)` to fire `EntityChanged`, awaits
-`scene.idle()` until cascading reactions settle (small timeout — fail
-fast on wedges), then runs `scenario.expect(scene.messages)`. Tests
+calls `scene.messages.append(scenario.input)` to fire `EntityChanged`,
+awaits `scene.idle()` until cascading reactions settle (small timeout —
+fail fast on wedges), then runs `scenario.expect(scene.messages)`. Tests
 parametrize:
 
 ```python

@@ -1,18 +1,18 @@
 /**
- * Browser e2e: same scenario as test_events_dataflow (integration) and
- * test_cuj_hello (Python e2e), driven through a real Chromium against the
- * built SPA served by FastAPI on :8000. Proves the WS → registry → React
- * state → DOM render path that lower tiers don't touch.
+ * Browser e2e: alice sends via WS `entity_action(say)`; bob (stub)
+ * replies; both render. Proves the WS-only end-to-end path (no POST).
  *
- * .tests: cuj-hello-send, cuj-hello-respond, frontend-ws-client-dataflow,
- *         frontend-messagelist-items, frontend-input-submit-button
+ * .tests: cuj-hello-send, cuj-hello-respond,
+ *         backend-ws-subscribe, backend-ws-entity-action,
+ *         frontend-campaign-action-dispatch,
+ *         frontend-campaign-collection-delta
  */
 import { test, expect, type WebSocket } from '@playwright/test';
 
 test('cuj-hello-browser', async ({ page }) => {
-  // Capture the WS handshake and the first outbound subscribe frame.
   const wsOpened: WebSocket[] = [];
-  const subscribeFrames: string[] = [];
+  const sentFrames: string[] = [];
+  const restCalls: string[] = [];
   page.on('websocket', (ws) => {
     wsOpened.push(ws);
     ws.on('framesent', (event) => {
@@ -20,40 +20,49 @@ test('cuj-hello-browser', async ({ page }) => {
         typeof event.payload === 'string'
           ? event.payload
           : Buffer.from(event.payload).toString('utf-8');
-      if (payload.includes('"subscribe"')) {
-        subscribeFrames.push(payload);
-      }
+      sentFrames.push(payload);
     });
+  });
+  // Phase-2b invariant: the FE issues NO POSTs. Capture any /api/* POST
+  // so the test fails fast if a regression reintroduces one.
+  page.on('request', (req) => {
+    if (req.method() !== 'GET' && req.url().includes('/api/')) {
+      restCalls.push(`${req.method()} ${req.url()}`);
+    }
   });
 
   await page.goto('/');
 
-  // Wait for WS to come up so the connection indicator goes green and the
-  // input is enabled.
   await expect(
     page.getByLabel('connected'),
     'frontend-useconnected: header shows the live WS state via an ' +
       'aria-label="connected" indicator',
   ).toBeVisible({ timeout: 5_000 });
 
-  // ws-dataflow-connect: at least one WS connection must have opened.
   expect(
     wsOpened.length,
     'ws-dataflow-connect: the page MUST open a WebSocket to /api/.../ws',
   ).toBeGreaterThanOrEqual(1);
   expect(wsOpened[0].url()).toMatch(/\/api\/campaigns\/.*\/ws$/);
 
-  // ws-dataflow-subscribe: registry MUST have sent at least one subscribe
-  // frame for the scene entity.
+  // backend-ws-subscribe: at least one subscribe frame for the scene entity.
   await expect
-    .poll(() => subscribeFrames.length, { timeout: 5_000 })
+    .poll(() => sentFrames.filter((f) => f.includes('"subscribe"')).length, {
+      timeout: 5_000,
+    })
     .toBeGreaterThan(0);
-  const parsed = subscribeFrames.map((f) => JSON.parse(f));
-  expect(parsed.some((p) => p.op === 'subscribe' && p.entity_id === 'parlor')).toBe(
-    true,
-  );
+  const subscribes = sentFrames
+    .map((f) => JSON.parse(f) as Record<string, unknown>)
+    .filter((p) => p.op === 'subscribe');
+  expect(
+    subscribes.some(
+      (p) =>
+        Array.isArray(p.entity_ids) &&
+        (p.entity_ids as string[]).includes('parlor'),
+    ),
+    'backend-ws-subscribe: subscribe frame must carry entity_ids: ["parlor"]',
+  ).toBe(true);
 
-  // Type "Hi" and press the send button.
   const input = page.getByTestId('message-input');
   await expect(
     input,
@@ -62,28 +71,51 @@ test('cuj-hello-browser', async ({ page }) => {
   await input.fill('Hi');
   await page.getByTestId('send-button').click();
 
-  // alice's message lands at scene_id=parlor, index=0 — server canonical id.
+  // backend-ws-entity-action: send must emit an entity_action frame
+  // (NOT a POST). Action is `say`; kwargs carry scene_id + body.
+  await expect
+    .poll(
+      () => sentFrames.filter((f) => f.includes('"entity_action"')).length,
+      { timeout: 5_000 },
+    )
+    .toBeGreaterThan(0);
+  const actions = sentFrames
+    .map((f) => JSON.parse(f) as Record<string, unknown>)
+    .filter((p) => p.op === 'entity_action');
+  const say = actions.find(
+    (p) => p.action === 'say' && p.entity_id === 'alice',
+  );
+  expect(say, 'entity_action frame for alice.say not seen').toBeTruthy();
+  const kwargs = say!.kwargs as Record<string, unknown>;
+  expect(kwargs.scene_id).toBe('parlor');
+  expect(kwargs.body).toBe('Hi');
+
+  // alice's message renders.
   const alicesMessage = page.locator(
     '[data-testid="message-item"][data-scene-id="parlor"][data-index="0"]',
   );
   await expect(
     alicesMessage,
-    "frontend-messagelist-items: alice's \"Hi\" must render in the message " +
-      'list at (parlor, 0) after the POST round-trips through WS',
+    "frontend-messagelist-items: alice's \"Hi\" must render in the message list",
   ).toContainText('Hi', { timeout: 5_000 });
 
-  // bob (stub) replies via the listener cycle. The reply is at index=1 and
-  // carries StubActor's canonical body (the character's own body field).
+  // bob (stub) reply via the listener cycle, at index 1.
   const bobsReply = page.locator(
     '[data-testid="message-item"][data-scene-id="parlor"][data-index="1"]',
   );
   await expect(
     bobsReply,
-    "cuj-hello-respond: bob's reply must arrive via WS and render at " +
-      '(parlor, 1) after the listener-driven npc cycle settles',
+    "cuj-hello-respond: bob's reply must arrive via WS and render at (parlor, 1)",
   ).toBeVisible({ timeout: 5_000 });
   await expect(
     bobsReply,
     "cuj-hello-respond: bob's reply body is the stub character's body",
   ).toContainText('*nods quietly*');
+
+  // frontend-no-rest: no non-GET REST calls to /api/*.
+  expect(
+    restCalls,
+    'frontend-no-rest: the FE must not POST/PUT/DELETE to /api/* — writes ' +
+      'flow through the WS as entity_action frames',
+  ).toEqual([]);
 });

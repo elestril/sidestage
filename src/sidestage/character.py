@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from sidestage.entity import Entity, MessageContext
+from sidestage.action import action
+from sidestage.entity import Entity, EntityId, MessageContext
+from sidestage.message import Message
 
 if TYPE_CHECKING:
     from sidestage.campaign import Campaign
     from sidestage.events import EntityChanged
-    from sidestage.message import Message
 
 
 class Character(Entity):
@@ -56,19 +57,29 @@ class Character(Entity):
         super().annotate_context(ctx)
         ctx.scene.annotate_context(ctx)
 
-    async def respond(self, message: Message, scene: Entity) -> Message | None:
-        """character-respond-passthrough: Forward to the bound Actor.
+    @action
+    async def say(self, scene_id: EntityId, body: str) -> None:
+        """character-say: Append a `Message(sender_id=self.id, body=body)`
+        to scene `scene_id`. The single mutator for "this character
+        produces a message" — covers both user input (FE-issued
+        `EntityAction`) and NPC response (in-process call from
+        `Character.notify`).
 
-        .implements: message-simplescene-respond
+        .implements: character-say, message-dataflow
+        .tested-by: cuj-hello-browser
         """
-        return await self._actor.respond(message, self, scene)
+        scene = self._campaign.get(scene_id)
+        if scene is None:
+            raise ValueError(f"unknown scene_id {scene_id!r}")
+        scene.messages.append(Message(sender_id=self.id, body=body))
 
     async def notify(self, event: EntityChanged) -> None:
         """character-notify-react: On `EntityChanged` from a subscribed
-        Scene, if the latest message wasn't from `self`, run the bound
-        Actor's `respond` and append any non-None reply back to the scene.
+        Scene, if the latest message's sender is NOT `self`, run the
+        bound Actor's `respond` and publish any non-None reply via
+        `self.say`.
 
-        .implements: events-pattern-subscription, message-dataflow-react
+        .implements: events-pattern-subscription, message-dataflow
         .tested-by: test_events_dataflow
         """
         # Lazy import — scene.py imports character.py via TYPE_CHECKING.
@@ -78,12 +89,12 @@ class Character(Entity):
             return
         if "messages" not in event.attributes:
             return
-        latest = event.entity.messages[-1]
-        if latest.sender is self:
+        latest: Message = event.entity.messages[-1]
+        if latest.sender_id == self.id:
             return
-        response = await self._actor.respond(latest, self, event.entity)
-        if response is not None:
-            event.entity.append(response)
+        response_text = await self._actor.respond(latest, self, event.entity)
+        if response_text is not None:
+            await self.say(event.entity.id, response_text)
 
     def has_human_actor(self) -> bool:
         """character-has-human-actor: Returns `self.owner == "user"`.

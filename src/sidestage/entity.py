@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING, ClassVar, NewType
 
 from pydantic import BaseModel
 
@@ -50,6 +50,11 @@ class Entity:
     `EntityChanged(attributes=["name"])`** when the value changes. No
     field duplication; no missed emissions.
 
+    Collection-typed Model fields registered in `_entity_lists` are wrapped
+    in an `EntityList` at construction; every mutator on that collection
+    emits `EntityChanged` carrying a `ListDelta` (per
+    `entity-list-attribute`).
+
     .implements: entity-impl
     """
 
@@ -66,6 +71,31 @@ class Entity:
         type: EntityType
         body: str
 
+    # entity-list-attribute: subclasses register collection fields that
+    # should auto-emit on mutation. Each entry is `attr_name → EntityList
+    # subclass` (or the base EntityList for fields with no per-item hook).
+    _entity_lists: ClassVar[dict[str, type[EntityList]]] = {}
+
+    # backend-action-class-level: set of `@action`-decorated method names
+    # on this class. Built by `__init_subclass__` (which walks each
+    # subclass's __dict__ for the `__sidestage_action__` marker). The
+    # WS `entity_action` dispatcher validates against this set.
+    _actions: ClassVar[set[str]] = set()
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        # Inherit from the nearest base, then add any locally-declared.
+        inherited: set[str] = set()
+        for base in cls.__mro__[1:]:
+            if isinstance(base, type) and issubclass(base, Entity):
+                inherited |= getattr(base, "_actions", set())
+        local = {
+            name
+            for name, member in cls.__dict__.items()
+            if getattr(member, "__sidestage_action__", False)
+        }
+        cls._actions = inherited | local
+
     def __init__(self, model: Entity.Model, campaign: Campaign) -> None:
         """Construct an Entity wrapping `model`, bound to `campaign`.
 
@@ -73,11 +103,23 @@ class Entity:
         our own `__setattr__` consults `self._model.model_fields` — that has
         to be in place before any other assignment can flow through. From
         there on, normal `self.x = y` works correctly.
+
+        Any collection field declared in `_entity_lists` is replaced in
+        place by an `EntityList` whose mutators auto-emit
+        `EntityChanged(deltas=ListDelta(...))`.
         """
         object.__setattr__(self, "_model", model)
         self._campaign = campaign
         self._listeners: list[Listener] = []
         self._pending_tasks: set[asyncio.Task] = set()
+        # Wrap registered list fields. `setattr` on the model bypasses our
+        # __setattr__ — Pydantic accepts the EntityList because it's a
+        # `list` subclass.
+        for attr, list_cls in type(self)._entity_lists.items():
+            initial = getattr(self._model, attr)
+            wrapped = list_cls(self, attr)
+            list.extend(wrapped, initial)  # bypass emit on load
+            object.__setattr__(self._model, attr, wrapped)
 
     # ---------------- public Model accessor ---------------------------
 
@@ -97,20 +139,38 @@ class Entity:
 
     def __setattr__(self, name: str, value) -> None:
         """Public Model field writes go through `_model` and auto-emit
-        `EntityChanged` when the value changes. Non-Model attributes are
-        set on `self` directly.
+        `EntityChanged` with a `ScalarDelta` (or `ListDelta` for a wholesale
+        list reassignment). Non-Model attributes are set on `self` directly.
 
         .implements: entity-impl, events-dataflow-emit
         """
         # `model_fields` is a class-level attribute on the Model — accessing
         # it via the class avoids Pydantic's instance-access deprecation.
         if name in type(self._model).model_fields:
+            from sidestage.events import EntityChanged, ListDelta, ScalarDelta
+
+            # If this is a registered EntityList field and the caller is
+            # reassigning the whole list, wrap the new value in a fresh
+            # EntityList so the "always an EntityList" contract holds.
+            list_cls = type(self)._entity_lists.get(name)
             old = getattr(self._model, name)
+            if list_cls is not None and not isinstance(value, EntityList):  # noqa: F821
+                wrapped = list_cls(self, name)
+                list.extend(wrapped, value)
+                value = wrapped
             setattr(self._model, name, value)
             if old != value:
-                from sidestage.events import EntityChanged
-
-                self._emit(EntityChanged(entity=self, attributes=[name]))
+                if list_cls is not None:
+                    delta = ListDelta(start=0, len=len(old), items=list(value))
+                else:
+                    delta = ScalarDelta(value=value)
+                self._emit(
+                    EntityChanged(
+                        entity=self,
+                        attributes=[name],
+                        deltas={name: delta},
+                    )
+                )
             return
         object.__setattr__(self, name, value)
 
@@ -212,6 +272,101 @@ class Entity:
         .implements: events-protocol
         """
         return None
+
+
+class EntityList[T](list[T]):
+    """entity-list-attribute: list subclass whose mutators emit
+    `EntityChanged(deltas={attr: ListDelta(...)})` on the owning Entity.
+
+    A Model field declared as `list[T]` and registered in
+    `Entity._entity_lists` is replaced in place at construction by an
+    instance of this class (or a subclass that overrides `_on_add` for
+    per-item processing).
+
+    The base class is itself non-generic at runtime; subscript with a
+    type parameter is for the type checker only.
+
+    .implements: entity-list-attribute
+    """
+
+    def __init__(self, owner: Entity, attr: str) -> None:
+        super().__init__()
+        self._owner = owner
+        self._attr = attr
+
+    def _on_add(self, item: T) -> None:
+        """Per-item hook before the item is stored. Base is a no-op.
+        Subclasses override to assign per-item state (timestamps,
+        per-message indices, etc.) at insertion time.
+        """
+        return None
+
+    def _emit_delta(self, start: int, length: int, items: list[T]) -> None:
+        from sidestage.events import EntityChanged, ListDelta
+
+        delta = ListDelta(start=start, len=length, items=items)
+        self._owner._emit(
+            EntityChanged(
+                entity=self._owner,
+                attributes=[self._attr],
+                deltas={self._attr: delta},
+            )
+        )
+
+    # ---- mutators ----------------------------------------------------
+
+    def append(self, item: T) -> None:
+        self._on_add(item)
+        list.append(self, item)
+        self._emit_delta(-1, 0, [item])
+
+    def extend(self, items: Iterable[T]) -> None:
+        items = list(items)
+        for x in items:
+            self._on_add(x)
+        list.extend(self, items)
+        self._emit_delta(-1, 0, items)
+
+    def insert(self, i: int, item: T) -> None:
+        pos = i if i >= 0 else max(0, len(self) + i)
+        self._on_add(item)
+        list.insert(self, i, item)
+        self._emit_delta(pos, 0, [item])
+
+    def pop(self, i: int = -1) -> T:
+        pos = i if i >= 0 else len(self) + i
+        x = list.pop(self, i)
+        self._emit_delta(pos, 1, [])
+        return x
+
+    def remove(self, item: T) -> None:
+        idx = list.index(self, item)
+        list.remove(self, item)
+        self._emit_delta(idx, 1, [])
+
+    def clear(self) -> None:
+        n = len(self)
+        list.clear(self)
+        self._emit_delta(0, n, [])
+
+    def __setitem__(self, i, item) -> None:  # type: ignore[override]
+        if isinstance(i, slice):
+            raise NotImplementedError("slice assignment not supported on EntityList")
+        pos = i if i >= 0 else len(self) + i
+        self._on_add(item)
+        list.__setitem__(self, i, item)
+        self._emit_delta(pos, 1, [item])
+
+    def __delitem__(self, i) -> None:
+        if isinstance(i, slice):
+            raise NotImplementedError("slice deletion not supported on EntityList")
+        pos = i if i >= 0 else len(self) + i
+        list.__delitem__(self, i)
+        self._emit_delta(pos, 1, [])
+
+    def __iadd__(self, other) -> EntityList[T]:  # type: ignore[override]
+        self.extend(other)
+        return self
 
 
 @dataclass

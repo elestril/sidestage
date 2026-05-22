@@ -1,13 +1,15 @@
-"""E2E: alice POSTs via REST; bob's reply arrives via WS; history check.
+"""E2E: alice posts via WS `entity_action(say)`; bob's reply arrives via WS.
 
-Same domain scenario as `test_events_dataflow` but driven through the API
-boundary against a real uvicorn (per `testing-fixture-test-server`).
-Asserts the WS wire delivery step (`events-dataflow-deliver`) plus the
-two CUJ steps (`cuj-hello-send`, `cuj-hello-respond`).
+The Phase-2b WS-centric flow. Asserts:
+- subscribe carries initial state in the `subscribed` reply
+- entity_action dispatches to `Character.say` and returns matching `ack`
+- two `entity_changed` frames fire (alice's input + bob's reply) with
+  `ListDelta` payloads on `scene.messages`
+- the history GET reflects both messages
 
 .tests: cuj-hello-send, cuj-hello-respond, events-dataflow-deliver,
-        ws-dataflow-connect, ws-dataflow-subscribe, ws-dataflow-event,
-        rest-api-post-message
+        backend-ws-subscribe, backend-ws-entity-action,
+        events-attribute-deltas
 """
 
 from __future__ import annotations
@@ -32,90 +34,94 @@ def _ws_url(base_url: str, path: str) -> str:
     return f"{scheme}://{p.netloc}{path}"
 
 
-async def _read_entity_changed_frames(ws, n: int) -> list[dict]:
-    """Read n `entity_changed` frames off a WS, ignoring others."""
-    frames: list[dict] = []
-    while len(frames) < n:
+async def _read_frames(ws, *, ops: set[str], count: int) -> list[dict]:
+    """Read until `count` frames matching one of `ops` have arrived."""
+    out: list[dict] = []
+    while len(out) < count:
         raw = await ws.recv()
         payload = json.loads(raw)
-        if payload.get("op") == "entity_changed":
-            frames.append(payload)
-    return frames
+        if payload.get("op") in ops:
+            out.append(payload)
+    return out
 
 
 async def test_cuj_hello(test_app: App, test_server: str) -> None:
-    # The test fixture loads exactly one campaign — single entry in
-    # `App.campaigns` keyed by `campaign.name`. Pull the id from the
-    # iteration order rather than threading the Campaign object through.
     campaign_id = next(iter(test_app.campaigns))
     cid_enc = quote(campaign_id, safe="")
     scene_id = "parlor"
     ws_path = f"/api/campaigns/{cid_enc}/ws"
-    post_url = f"/api/campaigns/{cid_enc}/scenes/{scene_id}/messages"
     messages_url = f"/api/campaigns/{cid_enc}/scenes/{scene_id}/messages"
 
     async with httpx.AsyncClient(base_url=test_server) as client:
         async with websockets.connect(_ws_url(test_server, ws_path)) as ws:
-            # ws-dataflow-subscribe: register interest in the scene
-            # entity before the POST so we don't miss the emit.
-            await ws.send(json.dumps({"op": "subscribe", "entity_id": scene_id}))
+            # backend-ws-subscribe: subscribe carries initial state in the reply.
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "subscribe",
+                        "entity_ids": [scene_id],
+                        "request_id": "sub-1",
+                    }
+                )
+            )
+            subscribed = (await _read_frames(ws, ops={"subscribed"}, count=1))[0]
+            assert subscribed["request_id"] == "sub-1"
+            assert len(subscribed["states"]) == 1
+            initial = subscribed["states"][0]
+            assert initial["entity_id"] == scene_id
+            assert initial["model"]["messages"] == [], (
+                "backend-ws-subscribe: initial state of fresh scene must have "
+                "empty messages list"
+            )
 
-            # Brief yield so the subscribe frame is processed before the
-            # POST fires the emit. Without this, the POST can race the
-            # subscription and the listener misses event #1.
+            # backend-ws-entity-action: alice publishes via Character.say.
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "entity_action",
+                        "entity_id": "alice",
+                        "action": "say",
+                        "kwargs": {"scene_id": scene_id, "body": "Hi"},
+                        "request_id": "say-1",
+                    }
+                )
+            )
+            # Brief yield so the action lands before we read frames.
             await asyncio.sleep(0.05)
 
-            post_resp = await client.post(
-                post_url, json={"sender_id": "alice", "body": "Hi"}
+            # We expect: one ack for the action, plus two entity_changed
+            # frames (alice's append + bob's reply).
+            ack = (await _read_frames(ws, ops={"ack", "error"}, count=1))[0]
+            assert ack == {"op": "ack", "request_id": "say-1"}, (
+                f"backend-ws-entity-action: expected ack frame; got {ack!r}"
             )
 
-            frames = await _read_entity_changed_frames(ws, n=2)
+            frames = await _read_frames(ws, ops={"entity_changed"}, count=2)
 
-        assert post_resp.status_code == 201, (
-            "rest-api-post-message: POST /messages MUST return 201 on the "
-            f"happy path; got status={post_resp.status_code} "
-            f"body={post_resp.text!r}"
-        )
-        accepted = post_resp.json()
-        assert accepted == {"scene_id": "parlor", "index": 0}, (
-            "rest-api-post-returns: response carries (scene_id, index) of "
-            f"the appended message; got {accepted!r}"
-        )
         assert len(frames) == 2, (
             "events-dataflow-deliver: WS stream must deliver one "
-            "`entity_changed` frame per `Scene.append` (alice's input "
-            f"plus bob's reply); got {len(frames)} frames"
+            "entity_changed per scene mutation (alice + bob)"
         )
         for i, frame in enumerate(frames):
-            assert frame == {
-                "op": "entity_changed",
-                "entity_id": "parlor",
-                "attributes": ["messages"],
-            }, (
-                "events-dataflow-deliver: WS frame payload for a Scene "
-                "message append MUST be "
-                "`{op:'entity_changed', entity_id, attributes}` with "
-                f"`attributes=['messages']`; got frame[{i}]={frame!r}"
+            assert frame["entity_id"] == scene_id
+            assert frame["attributes"] == ["messages"]
+            # events-attribute-deltas: each frame carries a ListDelta append.
+            delta = frame["deltas"]["messages"]
+            assert delta["start"] == -1, (
+                f"frame[{i}].deltas.messages.start must be -1 for append; got {delta!r}"
             )
+            assert delta["len"] == 0
+            assert len(delta["items"]) == 1
 
-        # History check via GET /messages — confirms alice + bob landed.
+        # History via GET /messages — confirms both landed.
         hist_resp = await client.get(messages_url)
 
-    assert hist_resp.status_code == 200, (
-        "rest-api-get-messages: GET /messages MUST return 200 on the "
-        f"happy path; got status={hist_resp.status_code}"
-    )
+    assert hist_resp.status_code == 200
     messages = hist_resp.json()
-    assert len(messages) == 2, (
-        "cuj-hello-respond: scene history must contain alice's input plus "
-        f"bob's reply after the listener cycle settles; got {len(messages)} "
-        f"messages: {messages!r}"
-    )
-    assert messages[0]["sender_id"] == "alice" and messages[0]["body"] == "Hi", (
-        "cuj-hello-send: alice's message must be at index 0 with body 'Hi'; "
-        f"got {messages[0]!r}"
+    assert len(messages) == 2
+    assert messages[0] == {"sender_id": "alice", "body": "Hi"}, (
+        "cuj-hello-send: alice's message at index 0"
     )
     assert messages[1]["sender_id"] == "bob", (
-        "cuj-hello-respond: bob (stub) must reply at index 1; "
-        f"got sender_id={messages[1]['sender_id']!r}"
+        "cuj-hello-respond: bob's stub reply at index 1"
     )

@@ -16,9 +16,9 @@ role for a Character belongs to `Character.notify` (per
 [[entity-model]] `character-listener`); on a triggering
 `EntityChanged`, Character spawns a task that calls
 `self._actor.respond(...)`. A non-None reply text is published via
-`self.speak(text)` — the same `@action` method that user-issued
+`self.say(scene.id, text)` — the same `@action` method that user-issued
 EntityAction frames invoke. NPC and human paths converge on
-`Character.speak`.
+`Character.say`.
 
 ## actor-base: Actor
 
@@ -35,7 +35,7 @@ class Actor(ABC):
 
 - actor-respond-contract: Generate reply text or return `None` for "no
   reply this turn". The returned string is the body that the
-  Character will publish via `self.speak(text)`. `scene` is the Scene
+  Character will publish via `self.say(scene.id, text)`. `scene` is the Scene
   the message was appended to; LLM-backed actors use it to build
   prompt context. Stateless actors ignore it.
 
@@ -60,7 +60,7 @@ class UserActor(Actor):
 ```
 
 - actor-user-respond-noop: Returns `None` unconditionally — humans
-  publish via the FE's `Character.speak` EntityAction, not via the
+  publish via the FE's `Character.say` EntityAction, not via the
   listener cycle.
 - actor-user-stateless: UserActor holds no per-user state today. The
   WS handler (`WsConnection`) owns its own listeners; UserActor is
@@ -92,7 +92,7 @@ no coordination.
   prompt, shapes `scene.messages` into chat turns (sender=character →
   `assistant`, else `user`), calls `litellm.acompletion`, returns
   the completion text. Character.notify then publishes it via
-  `self.speak(text)`.
+  `self.say(scene.id, text)`.
 - actor-npc-respond-error-none: Returns `None` on transport error,
   timeout, non-2xx, or empty/whitespace completion. Logs at WARNING
   or EXCEPTION. No in-band error placeholder messages — keeps scene

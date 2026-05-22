@@ -2,11 +2,11 @@
 
 alice sends "Hi" to a SimpleScene shared with bob (StubActor). The scene
 fires `EntityChanged`; bob's `Character.notify` reacts, asks his actor for
-a response, and appends it back. The second `EntityChanged` is delivered
-to alice as a subscriber. We assert at the entity layer — no FastAPI,
-no SSE, no TestClient.
+a response, and republishes it via `self.say`. The second `EntityChanged`
+is delivered to alice as a subscriber. We assert at the entity layer — no
+FastAPI, no SSE, no TestClient.
 
-.tests: events-dataflow, character-notify-react,
+.tests: events-dataflow, character-notify-react, character-say,
         simple-scene-init-subscribes-characters,
         events-pattern-subscription, events-async-tasks-idle
 """
@@ -73,7 +73,10 @@ async def test_events_dataflow() -> None:
 
     object.__setattr__(alice, "notify", spy_notify)
 
-    scene.append(Message(sender=alice, body="Hi"))
+    # The single mutation surface: `scene.messages.append(msg)`. The
+    # EntityList wrapper emits EntityChanged; bob's Character.notify
+    # picks it up, asks his StubActor, and publishes via self.say.
+    scene.messages.append(Message(sender_id=alice.id, body="Hi"))
     await scene.idle()
 
     assert len(scene.messages) == 2, (
@@ -81,24 +84,23 @@ async def test_events_dataflow() -> None:
         "scene via the listener cycle; "
         f"got {len(scene.messages)} messages"
     )
-    assert scene.messages[0].sender is alice, (
+    assert scene.messages[0].sender_id == alice.id, (
         "events-dataflow: alice's input must be at index 0; "
-        f"got sender={scene.messages[0].sender}"
+        f"got sender_id={scene.messages[0].sender_id}"
     )
-    assert scene.messages[1].sender is bob, (
+    assert scene.messages[1].sender_id == bob.id, (
         "character-notify-react: bob (stub) must reply via actor.respond "
-        "and append back to the scene; "
-        f"got sender={scene.messages[1].sender}"
+        "and publish back to the scene via self.say; "
+        f"got sender_id={scene.messages[1].sender_id}"
     )
     assert scene.messages[1].body == "*nods quietly*", (
-        "character-notify-react: bob's StubActor returns "
-        "`Message(sender=bob, body=bob.body)`; "
+        "character-notify-react: bob's StubActor returns `bob.body`; "
         f"got body={scene.messages[1].body!r}"
     )
     assert any(
         e.entity is scene
         and "messages" in e.attributes
-        and e.entity.messages[-1].sender is bob
+        and e.entity.messages[-1].sender_id == bob.id
         for e in notify_events
     ), (
         "events-pattern-subscription: alice (subscribed to scene via "

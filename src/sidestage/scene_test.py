@@ -8,8 +8,8 @@ import pytest
 
 from sidestage.campaign import Campaign
 from sidestage.character import Character
-from sidestage.entity import Entity, EntityId, EntityType
-from sidestage.events import EntityChanged
+from sidestage.entity import Entity, EntityId, EntityList, EntityType
+from sidestage.events import EntityChanged, ListDelta
 from sidestage.message import Message
 from sidestage.scene import Scene, SimpleScene
 
@@ -101,135 +101,76 @@ class TestSceneBase:
         # scene-class: Scene inherits from Entity.
         assert issubclass(Scene, Entity)
 
-    def test_scene_messages_is_abstract_property_on_base(self) -> None:
-        # scene-messages-property: `messages` is an abstract property on Scene.
-        # Subclasses own the backing storage.
-        attr = Scene.__dict__.get("messages")
-        assert attr is not None, "Scene must define a `messages` property"
-        assert isinstance(attr, property)
-        assert getattr(attr.fget, "__isabstractmethod__", False) is True
+    def test_scene_messages_field_on_model(self) -> None:
+        # scene-model: Scene.Model carries `messages: list[Message] = []`.
+        assert "messages" in Scene.Model.model_fields
+
+    def test_scene_messages_registered_as_entity_list(self) -> None:
+        # entity-list-attribute: the `messages` field is registered in
+        # `_entity_lists` so the Entity machinery wraps it at construction.
+        assert "messages" in Scene._entity_lists
 
 
 # ---------------------------------------------------------------------------
-# Scene._append_message (still present as the internal helper)
+# scene.messages — the public mutation surface
 # ---------------------------------------------------------------------------
 
 
-class TestSceneAppendMessage:
-    def test_append_history(self) -> None:
-        # scene-append-history: Appends message to self.messages.
-        scene = make_simple_scene()
-        sender = scene._user
-        m = Message(sender=sender, body="first")
-        scene._append_message(m)
-        assert scene.messages == [m]
-
-    def test_append_history_preserves_order(self) -> None:
-        # scene-append-history: ordered list.
-        scene = make_simple_scene()
-        s = scene._user
-        m0 = Message(sender=s, body="a")
-        m1 = Message(sender=s, body="b")
-        m2 = Message(sender=s, body="c")
-        scene._append_message(m0)
-        scene._append_message(m1)
-        scene._append_message(m2)
-        assert scene.messages == [m0, m1, m2]
-
-    def test_append_return(self) -> None:
-        # scene-append-return: Returns the new index (len-1).
-        scene = make_simple_scene()
-        s = scene._user
-        idx0 = scene._append_message(Message(sender=s, body="a"))
-        idx1 = scene._append_message(Message(sender=s, body="b"))
-        idx2 = scene._append_message(Message(sender=s, body="c"))
-        assert idx0 == 0
-        assert idx1 == 1
-        assert idx2 == 2
-
-
-# ---------------------------------------------------------------------------
-# Scene.append (the new public mutation API)
-# ---------------------------------------------------------------------------
-
-
-class TestSceneAppend:
-    """scene-append: Public mutation API. Records, emits, returns the index."""
+class TestSceneMessagesAppend:
+    """The single mutator: `scene.messages.append(msg)`. Records, emits a
+    `ListDelta`, and is the same surface used by `Character.say`."""
 
     async def test_append_records_message(self) -> None:
-        # scene-append-records: appended via _append_message; visible in
-        # scene.messages.
         scene = make_simple_scene()
-        sender = scene._user
-        m = Message(sender=sender, body="hello")
-        scene.append(m)
-        assert scene.messages == [m]
+        m = Message(sender_id=scene._user.id, body="hello")
+        scene.messages.append(m)
+        assert list(scene.messages) == [m]
 
     async def test_append_records_in_order(self) -> None:
-        # scene-append-records: subsequent appends preserve order.
         scene = make_simple_scene()
-        s = scene._user
-        m0 = Message(sender=s, body="a")
-        m1 = Message(sender=s, body="b")
-        m2 = Message(sender=s, body="c")
-        scene.append(m0)
-        scene.append(m1)
-        scene.append(m2)
-        assert scene.messages == [m0, m1, m2]
-
-    async def test_append_returns_index_for_first(self) -> None:
-        # scene-append-returns: returns the new message's index; first append is 0.
-        scene = make_simple_scene(scene_id="sceneid")
-        sender = scene._user
-        result = scene.append(Message(sender=sender, body="hi"))
-        assert result == 0, (
-            f"scene-append-returns: first append must return index 0; got {result!r}"
-        )
-
-    async def test_append_returns_monotonic_indices(self) -> None:
-        # scene-append-returns: index advances per-append.
-        scene = make_simple_scene(scene_id="s")
-        u = scene._user
-        r0 = scene.append(Message(sender=u, body="a"))
-        r1 = scene.append(Message(sender=u, body="b"))
-        r2 = scene.append(Message(sender=u, body="c"))
-        assert (r0, r1, r2) == (0, 1, 2), (
-            "scene-append-returns: index advances by 1 per append; "
-            f"got {(r0, r1, r2)!r}"
-        )
+        s = scene._user.id
+        m0 = Message(sender_id=s, body="a")
+        m1 = Message(sender_id=s, body="b")
+        m2 = Message(sender_id=s, body="c")
+        scene.messages.append(m0)
+        scene.messages.append(m1)
+        scene.messages.append(m2)
+        assert list(scene.messages) == [m0, m1, m2]
 
     async def test_append_emits_entity_changed_to_subscribers(self) -> None:
-        # scene-append-emits: a subscribed listener receives an EntityChanged
-        # whose entity is the scene and whose attributes contains "messages".
+        # entity-list-attribute: appending emits `EntityChanged` whose
+        # `entity` is the scene, `attributes` contains "messages", and
+        # `deltas["messages"]` is a `ListDelta(start=-1, len=0, items=[msg])`.
         scene = make_simple_scene()
         recorder = _Recorder()
         scene.subscribe(recorder)
 
-        sender = scene._user
-        scene.append(Message(sender=sender, body="hi"))
+        m = Message(sender_id=scene._user.id, body="hi")
+        scene.messages.append(m)
 
         # _emit wraps each listener in a task (events-async-tasks); wait for
         # them to settle before asserting.
         await scene.idle()
 
-        # The scene's own characters are also subscribed, so the recorder
-        # entry is one among potentially several listener invocations. We
-        # only care that recorder got exactly one event for this append.
         assert len(recorder.events) == 1
         event = recorder.events[0]
         assert isinstance(event, EntityChanged)
         assert event.entity is scene
         assert "messages" in event.attributes
+        delta = event.deltas["messages"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == -1
+        assert delta.len == 0
+        assert delta.items == [m]
 
     async def test_append_emits_once_per_call(self) -> None:
-        # scene-append-emits: exactly one EntityChanged per append.
         scene = make_simple_scene()
         recorder = _Recorder()
         scene.subscribe(recorder)
-        s = scene._user
-        scene.append(Message(sender=s, body="a"))
-        scene.append(Message(sender=s, body="b"))
-        scene.append(Message(sender=s, body="c"))
+        s = scene._user.id
+        scene.messages.append(Message(sender_id=s, body="a"))
+        scene.messages.append(Message(sender_id=s, body="b"))
+        scene.messages.append(Message(sender_id=s, body="c"))
         await scene.idle()
         assert len(recorder.events) == 3
         for event in recorder.events:
@@ -237,54 +178,37 @@ class TestSceneAppend:
             assert "messages" in event.attributes
 
 
-# ---------------------------------------------------------------------------
-# Scene.serialize_message
-# ---------------------------------------------------------------------------
+class TestSceneMessagesIsEntityList:
+    """The `messages` field is replaced in place by an `EntityList` at
+    construction (per `entity-list-attribute`)."""
 
+    def test_messages_is_entity_list(self) -> None:
+        scene = make_simple_scene()
+        assert isinstance(scene.messages, EntityList)
 
-class TestSceneSerializeMessage:
-    def test_serialize_message_builds_model(self) -> None:
-        # scene-serialize-message: returns Message.Model with scene_id,
-        # index, sender_id, body.
-        campaign = Campaign(name="t")
-        sender = make_character(campaign, id="char-x", owner="user", name="X")
-        # Also need an npc for SimpleScene's 2-character requirement.
-        make_character(campaign, id="npc-y", owner="stub", name="Y")
-        scene = SimpleScene(
-            SimpleScene.Model(
-                id=EntityId("scene-77"),
-                name="Test Scene",
-                type=EntityType.SCENE,
-                body="scene body",
-                character_ids=[EntityId("char-x"), EntityId("npc-y")],
-            ),
-            campaign,
-        )
-        campaign.add(scene)
-        scene._append_message(Message(sender=sender, body="hello"))
-        model = scene.serialize_message(0)
-        assert isinstance(model, Message.Model)
-        assert model.scene_id == EntityId("scene-77"), (
-            "scene-serialize-message: model.scene_id MUST echo self.id; "
-            f"got {model.scene_id!r}"
-        )
-        assert model.index == 0, (
-            "scene-serialize-message: model.index MUST equal the requested "
-            f"position; got {model.index!r}"
-        )
-        assert model.sender_id == EntityId("char-x")
-        assert model.body == "hello"
+    def test_messages_starts_empty(self) -> None:
+        scene = make_simple_scene()
+        assert list(scene.messages) == []
 
-    def test_serialize_message_indices_advance(self) -> None:
-        # scene-serialize-message: index reflects the requested position.
-        scene = make_simple_scene(scene_id="abc")
-        s = scene._user
-        scene._append_message(Message(sender=s, body="m0"))
-        scene._append_message(Message(sender=s, body="m1"))
-        scene._append_message(Message(sender=s, body="m2"))
-        assert scene.serialize_message(0).index == 0
-        assert scene.serialize_message(1).index == 1
-        assert scene.serialize_message(2).index == 2
+    async def test_messages_pop_emits_delta(self) -> None:
+        # entity-list-attribute: pop emits a ListDelta with len=1, items=[].
+        scene = make_simple_scene()
+        recorder = _Recorder()
+        s = scene._user.id
+        scene.messages.append(Message(sender_id=s, body="a"))
+        # Drain the append emit before subscribing the recorder so we only
+        # see the pop event.
+        await scene.idle()
+        scene.subscribe(recorder)
+
+        scene.messages.pop()
+        await scene.idle()
+
+        assert len(recorder.events) == 1
+        delta = recorder.events[0].deltas["messages"]
+        assert isinstance(delta, ListDelta)
+        assert delta.len == 1
+        assert delta.items == []
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +239,16 @@ class TestSceneModel:
         assert "character_ids" in fields
         assert "characters" not in fields
         assert "active_character_ids" not in fields
+
+    def test_scene_model_messages_defaults_empty(self) -> None:
+        model = Scene.Model(
+            id=EntityId("s"),
+            name="n",
+            type=EntityType.SCENE,
+            body="b",
+            character_ids=[EntityId("c1"), EntityId("c2")],
+        )
+        assert model.messages == []
 
 
 # ---------------------------------------------------------------------------
@@ -397,10 +331,10 @@ class TestSimpleSceneInit:
         return campaign
 
     def test_init_messages_starts_empty(self) -> None:
-        # simple-scene-init-messages: self._messages = [].
+        # The auto-wrapped EntityList[Message] starts empty.
         scene = make_simple_scene()
-        assert scene._messages == []
-        assert isinstance(scene._messages, list)
+        assert list(scene.messages) == []
+        assert isinstance(scene.messages, EntityList)
 
     def test_init_count_raises_when_too_few(self) -> None:
         # simple-scene-init-count: ValueError if len(character_ids) != 2.
@@ -510,27 +444,6 @@ class TestSimpleSceneInit:
         # are added.
         scene = make_simple_scene()
         assert len(scene._listeners) == 2
-
-
-# ---------------------------------------------------------------------------
-# SimpleScene.messages property
-# ---------------------------------------------------------------------------
-
-
-class TestSimpleSceneMessages:
-    def test_messages_returns_underlying_list(self) -> None:
-        # simple-scene-messages: returns self._messages.
-        scene = make_simple_scene()
-        assert scene.messages is scene._messages
-
-    def test_messages_mutable_via_append_message(self) -> None:
-        # simple-scene-messages: mutable; _append_message mutates in place.
-        scene = make_simple_scene()
-        s = scene._user
-        m = Message(sender=s, body="a")
-        scene._append_message(m)
-        assert scene.messages == [m]
-        assert scene._messages == [m]
 
 
 # ---------------------------------------------------------------------------

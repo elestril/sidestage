@@ -36,10 +36,12 @@ class Actor(ABC):
     @abstractmethod
     async def respond(
         self, message: Message, character: Character, scene: Entity
-    ) -> Message | None:
-        """Generate a reply (or None for "no reply this turn"). `scene`
-        is the Scene `message` was appended to; LLM-backed actors use
-        it to build prompt context. Stateless test actors ignore it.
+    ) -> str | None:
+        """Generate reply text (or None for "no reply this turn"). The
+        returned string is the body that `Character.notify` publishes via
+        `self.say(scene.id, text)`. `scene` is the Scene `message` was
+        appended to; LLM-backed actors use it to build prompt context.
+        Stateless test actors ignore it.
         """
         ...
 
@@ -56,15 +58,12 @@ class StubActor(Actor):
 
     async def respond(
         self, message: Message, character: Character, scene: Entity
-    ) -> Message | None:
-        """stub-actor-respond-returns: Returns
-        `Message(sender=character, body=character.body)`. `scene` is
-        ignored — StubActor is stateless and context-free.
+    ) -> str | None:
+        """stub-actor-respond-returns: Returns `character.body`. `scene`
+        is ignored — StubActor is stateless and context-free.
         """
-        from sidestage.message import Message as Msg
-
-        _ = scene
-        return Msg(sender=character, body=character.body)
+        _ = scene, message
+        return character.body
 
 
 class UserActor(Actor):
@@ -89,11 +88,12 @@ class UserActor(Actor):
 
     async def respond(
         self, message: Message, character: Character, scene: Entity
-    ) -> Message | None:
+    ) -> str | None:
         """user-actor-respond-noop: Returns `None` unconditionally — humans
-        respond via REST. `scene` is ignored.
+        publish via `Character.say` over an EntityAction, not via the
+        listener cycle.
         """
-        _ = scene
+        _ = message, character, scene
         return None
 
     def subscribe_to(self, entity: Entity, queue: asyncio.Queue) -> None:

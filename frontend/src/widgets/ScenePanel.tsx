@@ -5,7 +5,6 @@
 // props — those come from the cached entity and from `useConnected()`.
 
 import { useConnected, useEntityRegistry } from '../hooks/useEntity';
-import { useSendMessage } from '../hooks/useSendMessage';
 import type { CachedScene } from '../entityRegistry';
 import { MessageInput } from '../components/MessageInput';
 import { MessageList } from '../components/MessageList';
@@ -18,15 +17,19 @@ export function ScenePanel({ entity }: ScenePanelProps) {
   const registry = useEntityRegistry();
   const connected = useConnected();
   const senderId = entity.player_character_ids[0] ?? null;
-  const { send } = useSendMessage({
-    campaignId: registry.campaignId,
-    sceneId: entity.id,
-    senderId,
-  });
 
   const onSend = async (body: string): Promise<void> => {
+    const trimmed = body.trim();
+    if (!trimmed || !senderId) return;
     try {
-      await send(body);
+      // frontend-campaign-action-dispatch: write path is `Character.say`
+      // dispatched as an `entity_action` frame; the registry awaits the
+      // matching `ack`. Projection state updates land later via the
+      // BE-emitted `entity_changed` (per frontend-entity-proxy-readonly).
+      await registry.entityAction(senderId, 'say', {
+        scene_id: entity.id,
+        body: trimmed,
+      });
     } catch (err) {
       console.error('Send failed', err);
     }

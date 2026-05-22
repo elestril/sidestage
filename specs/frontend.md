@@ -31,7 +31,7 @@ frontend/
     ├── campaign.ts             # Campaign singleton + WS client
     ├── entities/
     │   ├── Entity.ts           # base proxy class
-    │   ├── Character.ts        # Character proxy with @action speak
+    │   ├── Character.ts        # Character proxy with @action say
     │   └── Scene.ts            # Scene proxy
     ├── hooks/
     │   └── useEntity.ts        # registry-backed reactive hook
@@ -127,14 +127,15 @@ EntityAction acks.
   fetch. For a `Scene.Model` this includes `messages` (the initial
   history). Subsequent `entity_changed` frames carry deltas that the
   Campaign applies in place.
-- frontend-campaign-collection-delta: On `entity_changed` with a
-  collection-attribute delta (per [[events]] `events-attribute-deltas`),
-  the Campaign applies the delta items directly to the cached
-  proxy's attribute. For `AppendDelta(items=[…])` on `Scene.messages`,
-  the items are appended to the cached Scene's `messages` list.
-  Attribute updates are serialised per-entity via a promise chain so
-  concurrent events never reorder. Attributes without a delta fall
-  back to "re-subscribe" to fetch fresh state.
+- frontend-campaign-collection-delta: On `entity_changed` carrying
+  a `ListDelta`, the Campaign applies the delta directly to the
+  cached proxy's attribute via the JS splice contract:
+  `start === -1 ? list.push(...items) : list.splice(start, len,
+  ...items)`. On a `ScalarDelta`, the Campaign assigns
+  `proxy[attr] = value`. Same shape regardless of attribute or
+  entity type (per [[events]] `events-attribute-deltas`).
+  Attribute updates are serialised per-entity via a promise chain
+  so concurrent events never reorder.
 - frontend-campaign-reconnect: On WS close, sets `connected = false`,
   schedules exponential-backoff reconnect (1 s → 30 s). On open, the
   registry re-issues subscribe frames for every observed id; the
@@ -174,22 +175,23 @@ class Entity {                       // base proxy
 
 class Character extends Entity {
   readonly owner: 'user' | 'stub' | 'npc';
-  speak(body: string): Promise<void>;   // RPC: serialises EntityAction, awaits ack
+  say(scene_id: EntityId, body: string): Promise<void>;   // RPC
 }
 
 class Scene extends Entity {
   readonly character_ids: EntityId[];
-  readonly player_character_ids: EntityId[];
-  readonly messages: MessageModel[];    // hydrated from /messages + slice-fetch
+  readonly messages: Message[];         // initial state arrives in `subscribed`;
+                                        // ListDelta frames apply in place
 }
 ```
 
 - frontend-entity-proxy-mirrors-be: Every BE Entity subclass has a
   matching FE proxy class with the same `@action` method names.
-  Calling e.g. `character.speak(body)` is encoded as
-  `EntityAction(entity_id=character.id, action="speak", kwargs={body})`.
-  The Promise resolves on the matching `ack`; its resolution carries
-  no payload (the action's effect is observed via `EntityChanged`).
+  Calling e.g. `character.say(scene_id, body)` is encoded as
+  `EntityAction(entity_id=character.id, action="say",
+  kwargs={scene_id, body})`. The Promise resolves on the matching
+  `ack`; its resolution carries no payload (the action's effect is
+  observed via `EntityChanged`).
 - frontend-entity-proxy-readonly: All proxy fields are read-only.
   Action methods take no shortcut — they always round-trip. The
   Campaign updates the proxy's backing Model in place ONLY when an
@@ -201,7 +203,7 @@ class Scene extends Entity {
   invariant from "projection state mirrors authoritative state
   modulo disconnect windows" to "...modulo disconnect windows AND
   in-flight action windows," but it does NOT change the public
-  surface — `character.speak(body)` and `useEntity(id)` keep their
+  surface — `character.say(scene_id, body)` and `useEntity(id)` keep their
   current signatures. Opt-in per action if/when latency tolerance
   becomes a UX concern.
 

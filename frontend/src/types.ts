@@ -29,30 +29,3 @@ export interface ModelEntry {
   model: string;
   api_key_env?: string | null;
 }
-/**
- * server-message-accepted: Wire shape returned by
- * `POST /api/campaigns/{cid}/scenes/{scene_id}/messages` on success (201 Created).
- *
- * Carries the composite identity assigned by `Scene.append` so the
- * client can correlate its optimistic local message with the canonical
- * entry in scene history.
- *
- * .implements: rest-api-post-message
- */
-export interface MessageAccepted {
-  scene_id: string;
-  index: number;
-}
-/**
- * server-message-request: Wire shape of `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`.
- *
- * The minimal payload a client sends to inject a player message into a scene.
- * The server constructs the actual `Message` from this plus the resolved
- * sender Character.
- *
- * .implements: rest-api-post-message
- */
-export interface MessageRequest {
-  sender_id: string;
-  body: string;
-}

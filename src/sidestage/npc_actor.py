@@ -48,7 +48,7 @@ def _shape_turns(history: list[Message], responding: Character) -> list[dict[str
     """
     turns: list[dict[str, str]] = []
     for msg in history:
-        role = "assistant" if msg.sender is responding else "user"
+        role = "assistant" if msg.sender_id == responding.id else "user"
         turns.append({"role": role, "content": msg.body})
     return turns
 
@@ -123,12 +123,12 @@ class NpcActor(Actor):
 
     async def respond(
         self, message: Message, character: Character, scene: Entity
-    ) -> Message | None:
+    ) -> str | None:
         """npc-actor-respond: build MessageContext(message, scene), let
         the character annotate it, join annotations as the system
         prompt, shape scene.messages as turns, call
-        `litellm.acompletion`, wrap response in
-        `Message(sender=character, body=text)`.
+        `litellm.acompletion`, return the completion text. The caller
+        (Character.notify) publishes via `self.say(scene.id, text)`.
 
         Returns `None` on any failure (transport, timeout, non-2xx,
         empty/whitespace-only completion) per
@@ -169,4 +169,4 @@ class NpcActor(Actor):
                 "NpcActor.respond: empty completion for character=%s", character.id
             )
             return None
-        return Message(sender=character, body=text)
+        return text

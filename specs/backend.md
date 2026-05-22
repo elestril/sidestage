@@ -184,22 +184,36 @@ accepted socket gets one instance.
   draining `_queue`, then loops on `receive_text` → JSON-parse →
   dispatch by `op`. On any exit the receiver `finally` cancels the
   sender and walks `_subscriptions`, unsubscribing every listener.
-- backend-ws-subscribe: `op="subscribe"` resolves the entity via
-  `campaign.get(eid)`, constructs a `QueueListener(self._queue)`, calls
-  `entity.subscribe(listener)`, records under `_subscriptions[eid]`.
-  Idempotent. Unknown entity ids are logged and ignored.
+- backend-ws-subscribe: `op="subscribe"` carries
+  `(entity_ids, request_id)`. For each id: resolve the entity via
+  `campaign.get(eid)`, construct a `QueueListener(self._queue)`,
+  call `entity.subscribe(listener)`, record under
+  `_subscriptions[eid]`. Idempotent — repeating a subscribe for the
+  same id is a no-op. After all subscriptions land, send a single
+  `subscribed` reply carrying `states: [{entity_id, model}, ...]` —
+  the canonical Entity.Model payload for each requested entity, so
+  the FE has authoritative initial state without a follow-up
+  fetch. Unknown entity ids are returned with `model: null` (FE
+  treats as missing).
 - backend-ws-unsubscribe: `op="unsubscribe"` pops the listener and
-  calls `entity.unsubscribe(listener)`.
+  calls `entity.unsubscribe(listener)`. Fire-and-forget — no ack
+  frame.
 - backend-ws-entity-action: `op="entity_action"` carries
   `(entity_id, action, kwargs, request_id)`. Handler resolves the
   entity via `campaign.get(entity_id)`, validates
   `action in type(entity)._actions` (per `backend-action-decorator`),
-  awaits `getattr(entity, action)(**kwargs)`, sends an `ack` frame on
-  success or an `error` frame on validation/dispatch failure.
+  awaits `getattr(entity, action)(**kwargs)`, sends an `ack` frame
+  on success or an `error` frame on validation/dispatch failure.
+  Any exception raised by the action body surfaces as an `error`
+  frame; the entity's state is unaffected unless the action
+  committed before raising.
 - backend-ws-send: Each `EntityChanged` dequeued from `_queue` is
   serialised at the wire boundary to
-  `{"op":"entity_changed","entity_id": <id>, "attributes": [...]}`.
-  Acks/errors are sent the same way, keyed by `request_id`.
+  `{"op":"entity_changed","entity_id": <id>, "attributes": [...],
+  "deltas": {<attr>: <delta>}}`. The delta payload is the
+  serialised `ListDelta` / `ScalarDelta` (per [[events]]
+  `events-attribute-deltas`). Acks/errors are sent the same way,
+  keyed by `request_id`.
 - backend-ws-lameduck: The route handler closes with code 1013 while
   `App.state == LOADING`, 1008 if `cid` is unknown.
 - .implements: cuj-hello-send, cuj-hello-respond

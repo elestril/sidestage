@@ -12,11 +12,6 @@
 // that way, so they're hand-rolled here and must be kept in sync with
 // the backend manually.
 
-import type {
-  MessageAccepted as _MessageAccepted,
-  MessageRequest as _MessageRequest,
-} from './types';
-
 // frontend-types-entityid: brand the opaque id type so it cannot be
 // confused with arbitrary strings at the type level.
 export type EntityId = string & { readonly _brand: 'EntityId' };
@@ -70,17 +65,14 @@ export type SceneResponse = SceneModel & {
 export type CampaignResponse = CampaignModel;
 export type EntityResponse = SceneResponse | CharacterResponse;
 
-export interface MessageRequest extends Omit<_MessageRequest, 'sender_id'> {
-  sender_id: EntityId;
-}
-
-export interface MessageAccepted extends Omit<_MessageAccepted, 'scene_id'> {
-  scene_id: EntityId;
-}
-
-// Wire shape of items in the `GET /api/campaigns/{cid}/scenes/{sid}/messages`
-// response list. Mirrors the nested `sidestage.message.Message.Model`
-// Pydantic class.
+// Wire shape of a single message inside a Scene. The BE `Message.Model`
+// carries only `sender_id` and `body` (per `specs/message.md` — identity
+// is positional, the message at index N in scene S's `messages`). The
+// FE-side `MessageModel` additionally carries `scene_id` and `index`,
+// synthesised from the parent scene id + position when the registry
+// ingests a `subscribed` reply or applies a `ListDelta`. This keeps
+// MessageList/MessageItem's positional keys stable without rippling
+// through every consumer.
 export interface MessageModel {
   scene_id: EntityId;
   index: number;
@@ -88,17 +80,69 @@ export interface MessageModel {
   body: string;
 }
 
-// SSE/WS event payload for `entity_changed`. Mirrors
-// `sidestage.events.EntityChanged` — a `@dataclass`, not a Pydantic
-// model, so pydantic2ts cannot pick it up.
-export interface EntityChangedEvent {
-  entity_id: EntityId;
-  attributes: string[];
+// frontend-types-delta-list: payload shape for a collection-attribute
+// change on `entity_changed`. Splice semantics: replace `len` items at
+// `start` with `items`. `start === -1` short-circuits to push-at-end
+// (per `specs/events.md#events-attribute-deltas`).
+export interface ListDelta {
+  start: number;
+  len: number;
+  items: unknown[];
 }
 
-// frontend-types-discriminated: ServerEvent union for WS event payloads.
-// Today only one variant exists; the union is exhaustive on `type`.
-export type ServerEvent = EntityChangedEvent & { type: 'entity_changed' };
+// frontend-types-delta-scalar: payload shape for a scalar-attribute
+// change. The new value of the attribute.
+export interface ScalarDelta {
+  value: unknown;
+}
+
+export type AttributeDelta = ListDelta | ScalarDelta;
+
+// frontend-types-entity-action: client → server frame for invoking an
+// `@action`-decorated method on any entity. The server resolves the
+// entity, dispatches the action, and replies with a matching `ack` or
+// `error` keyed by `request_id`.
+export interface EntityActionFrame {
+  op: 'entity_action';
+  entity_id: EntityId;
+  action: string;
+  kwargs: Record<string, unknown>;
+  request_id: string;
+}
+
+// frontend-types-discriminated: ServerEvent union for WS frames the
+// server pushes to the client (per `specs/events.md#events-subscription`).
+// Discriminated on `op`.
+export interface SubscribedEvent {
+  op: 'subscribed';
+  request_id: string;
+  states: Array<{ entity_id: string; model: unknown }>;
+}
+
+export interface EntityChangedEvent {
+  op: 'entity_changed';
+  entity_id: string;
+  attributes: string[];
+  deltas?: Record<string, AttributeDelta>;
+}
+
+export interface AckEvent {
+  op: 'ack';
+  request_id: string;
+}
+
+export interface ErrorEvent {
+  op: 'error';
+  request_id: string;
+  code: string;
+  message: string;
+}
+
+export type ServerEvent =
+  | SubscribedEvent
+  | EntityChangedEvent
+  | AckEvent
+  | ErrorEvent;
 
 // frontend-state-chatmessage: rendered message with the sender resolved
 // against the registry cache. Produced by the Scene widget's per-message

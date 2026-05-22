@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from sidestage.actor import Actor, StubActor, UserActor
 from sidestage.campaign import Campaign
@@ -25,7 +24,6 @@ from sidestage.instance_config import (
     serialize_to_env as _instance_config_serialize_to_env,
 )
 from sidestage.llm_profile import LlmProfile, load_profiles
-from sidestage.message import Message
 from sidestage.npc_actor import NpcActor
 from sidestage.scene import Scene
 from sidestage.ws import WsConnection
@@ -56,50 +54,6 @@ class ServerState(Enum):
 
     LOADING = 1
     SERVING = 2
-
-
-# ---------------------------------------------------------------------------
-# Wire models for the Phase 1 POST endpoint. The Phase 2 WS EntityAction
-# path replaces this; until then, the POST endpoint stays as the FE write
-# path.
-# ---------------------------------------------------------------------------
-
-
-class MessageRequest(BaseModel):
-    """server-message-request: Wire shape of `POST /api/campaigns/{cid}/scenes/{scene_id}/messages`.
-
-    The minimal payload a client sends to inject a player message into a scene.
-    The server constructs the actual `Message` from this plus the resolved
-    sender Character.
-
-    .implements: rest-api-post-message
-    """
-
-    sender_id: EntityId
-    """server-message-request-sender-id: EntityId of the Character sending the
-    message; must be one of the scene's user-characters (i.e.
-    `has_human_actor()` is True) or the request is rejected with 422."""
-
-    body: str
-    """server-message-request-body: The message body text."""
-
-
-class MessageAccepted(BaseModel):
-    """server-message-accepted: Wire shape returned by
-    `POST /api/campaigns/{cid}/scenes/{scene_id}/messages` on success (201 Created).
-
-    Carries the composite identity assigned by `Scene.append` so the
-    client can correlate its optimistic local message with the canonical
-    entry in scene history.
-
-    .implements: rest-api-post-message
-    """
-
-    scene_id: EntityId
-    """server-message-accepted-scene-id: scene this message was appended to (echoes the URL path)."""
-
-    index: int
-    """server-message-accepted-index: 0-based position in the scene's message history."""
 
 
 # ---------------------------------------------------------------------------
@@ -370,42 +324,10 @@ class App:
             # rest-api-get-messages-build: half-open range, Python slice
             # semantics. `from == to` (incl. the empty-scene default) yields [].
             payload = [
-                scene.serialize_message(i).model_dump(mode="json")
+                scene.messages[i].model_dump(mode="json")
                 for i in range(from_idx, to_idx)
             ]
             return JSONResponse(content=payload)
-
-        # rest-api-post-message: POST /api/campaigns/{cid}/scenes/{scene_id}/messages
-        @app.post("/api/campaigns/{cid}/scenes/{scene_id}/messages", status_code=201)
-        async def post_message(
-            cid: str, scene_id: str, body: MessageRequest
-        ) -> MessageAccepted:
-            self._require_serving()
-            campaign = self.campaigns.get(cid)
-            if campaign is None:
-                raise HTTPException(status_code=404, detail="campaign not found")
-            scene = campaign.scene(EntityId(scene_id))
-            # rest-api-post-404.
-            if scene is None:
-                raise HTTPException(status_code=404, detail="scene not found")
-            # rest-api-post-422: sender must be a user-controlled character.
-            sender = next(
-                (c for c in scene.user_characters if c.id == body.sender_id),
-                None,
-            )
-            if sender is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail="sender_id is not a player character",
-                )
-            # rest-api-post-dispatch: construct Message(sender, body), call
-            # scene.append (per events-dataflow), return assigned (scene_id, index).
-            # Reactions (npc cycle, SSE delivery) are listener-driven — the
-            # POST handler does not await them.
-            msg = Message(sender=sender, body=body.body)
-            index = scene.append(msg)
-            # rest-api-post-returns: 201 + MessageAccepted{scene_id, index}.
-            return MessageAccepted(scene_id=scene.id, index=index)
 
         # ws-route-connection: WS /api/campaigns/{cid}/ws — multiplexed
         # subscription endpoint per `specs/events.md#events-subscription`.

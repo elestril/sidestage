@@ -1,7 +1,10 @@
-// frontend-entity-registry tests: ref-counting, hydration, slice fetch.
+// frontend-entity-registry tests: ref-counting, WS hydration, delta
+// application, entity_action ack/error round-trip.
 //
-// Drives `EntityRegistry` with injected fetch + WS factories so the
-// tests exercise the registry's behaviour without a real socket.
+// Drives `EntityRegistry` with an injected WS factory so the tests
+// exercise the registry's behaviour without a real socket. Phase 2b:
+// hydration is fully WS-driven (the `subscribed` reply carries each
+// entity's initial state); there are no REST fetches to mock.
 
 import { describe, expect, it, vi } from 'vitest';
 import { EntityRegistry } from './entityRegistry';
@@ -62,32 +65,20 @@ class FakeWebSocket {
 
 (globalThis as any).WebSocket ??= FakeWebSocket;
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-
 interface Harness {
   registry: EntityRegistry;
-  fetchMock: ReturnType<typeof vi.fn>;
   sockets: FakeWebSocket[];
 }
 
 function makeHarness(): Harness {
-  const fetchMock = vi.fn();
   const sockets: FakeWebSocket[] = [];
   const wsFactory = (url: string): WebSocket => {
     const ws = new FakeWebSocket(url);
     sockets.push(ws);
     return ws as unknown as WebSocket;
   };
-  const registry = new EntityRegistry('Test Campaign', {
-    fetcher: fetchMock as unknown as typeof fetch,
-    wsFactory,
-  });
-  return { registry, fetchMock, sockets };
+  const registry = new EntityRegistry('Test Campaign', { wsFactory });
+  return { registry, sockets };
 }
 
 // Drive microtasks until the predicate is true or `tries` is exhausted.
@@ -99,108 +90,119 @@ async function waitFor(pred: () => boolean, tries = 50): Promise<void> {
   if (!pred()) throw new Error('waitFor: predicate never became true');
 }
 
+// Helper: parse the last subscribe frame's request_id off a fake socket.
+function lastSubscribeRequestId(ws: FakeWebSocket): string {
+  const frames = ws.sent
+    .map((s) => JSON.parse(s) as { op: string; request_id?: string })
+    .filter((f) => f.op === 'subscribe');
+  const last = frames[frames.length - 1];
+  if (!last?.request_id) throw new Error('no subscribe frame on socket');
+  return last.request_id;
+}
+
 describe('EntityRegistry', () => {
-  it('hydrates a scene + history and sends a subscribe frame', async () => {
-    const { registry, fetchMock, sockets } = makeHarness();
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/entities/parlor')) {
-        return jsonResponse({
-          type: 'scene',
-          id: 'parlor',
-          name: 'Parlor',
-          body: '',
-          character_ids: ['alice'],
-          player_character_ids: ['alice'],
-        });
-      }
-      if (url.includes('/scenes/parlor/messages')) {
-        return jsonResponse([
-          { scene_id: 'parlor', index: 0, sender_id: 'alice', body: 'hi' },
-        ]);
-      }
-      if (url.endsWith('/entities/alice')) {
-        return jsonResponse({
-          type: 'character',
-          id: 'alice',
-          name: 'Alice',
-          body: '',
-          owner: 'user',
-        });
-      }
-      throw new Error(`unexpected fetch ${url}`);
-    });
+  it('hydrates a scene from the `subscribed` reply and sends a subscribe frame', async () => {
+    const { registry, sockets } = makeHarness();
 
     const eid = asEntityId('parlor');
-    let snapshot = registry.peek(eid);
-    expect(snapshot).toBeNull();
+    expect(registry.peek(eid)).toBeNull();
 
     const notified = vi.fn();
     const release = registry.observe(eid, notified);
     sockets[0].fireOpen();
 
-    await waitFor(() => registry.peek(eid) !== null);
-
-    // ws-dataflow-subscribe: subscribe frame went out.
-    const subscribeFrames = sockets[0].sent.filter((s) =>
-      s.includes('"subscribe"'),
-    );
-    expect(subscribeFrames.length).toBeGreaterThanOrEqual(1);
-    expect(JSON.parse(subscribeFrames[0])).toEqual({
+    // ws-dataflow-subscribe: subscribe frame went out with entity_ids + request_id.
+    const subscribeFrames = sockets[0].sent
+      .map((s) => JSON.parse(s) as { op: string })
+      .filter((f) => f.op === 'subscribe');
+    expect(subscribeFrames).toHaveLength(1);
+    const request_id = lastSubscribeRequestId(sockets[0]);
+    expect(JSON.parse(sockets[0].sent[0])).toEqual({
       op: 'subscribe',
-      entity_id: 'parlor',
+      entity_ids: ['parlor'],
+      request_id,
     });
 
-    // Listener fired on hydration.
+    // Server replies with the initial state inline (no REST roundtrip).
+    sockets[0].fireMessage({
+      op: 'subscribed',
+      request_id,
+      states: [
+        {
+          entity_id: 'parlor',
+          model: {
+            type: 'scene',
+            id: 'parlor',
+            name: 'Parlor',
+            body: '',
+            character_ids: ['alice'],
+            messages: [{ sender_id: 'alice', body: 'hi' }],
+          },
+        },
+      ],
+    });
+
+    await waitFor(() => registry.peek(eid) !== null);
     expect(notified).toHaveBeenCalled();
 
-    snapshot = registry.peek(eid);
-    expect(snapshot).not.toBeNull();
+    const snapshot = registry.peek(eid);
     if (!snapshot || snapshot.type !== 'scene') throw new Error('expected scene');
     expect(snapshot.messages).toHaveLength(1);
-    expect(snapshot.messages[0].body).toBe('hi');
+    expect(snapshot.messages[0]).toMatchObject({
+      sender_id: 'alice',
+      body: 'hi',
+      // Synthesised positionally — wire shape carries neither.
+      scene_id: 'parlor',
+      index: 0,
+    });
+    // Phase-1 player_character_ids stub: first character_id.
+    expect(snapshot.player_character_ids).toEqual(['alice']);
 
     release();
     registry.close();
   });
 
-  it('merges slice fetched on entity_changed[messages]', async () => {
-    const { registry, fetchMock, sockets } = makeHarness();
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/entities/parlor')) {
-        return jsonResponse({
-          type: 'scene',
-          id: 'parlor',
-          name: 'Parlor',
-          body: '',
-          character_ids: [],
-          player_character_ids: [],
-        });
-      }
-      if (url.includes('/scenes/parlor/messages')) {
-        if (url.includes('?from=')) {
-          return jsonResponse([
-            { scene_id: 'parlor', index: 1, sender_id: 'bob', body: 'reply' },
-          ]);
-        }
-        return jsonResponse([
-          { scene_id: 'parlor', index: 0, sender_id: 'alice', body: 'hi' },
-        ]);
-      }
-      throw new Error(`unexpected fetch ${url}`);
-    });
+  it('applies a ListDelta append (-1) on entity_changed[messages]', async () => {
+    const { registry, sockets } = makeHarness();
 
     const eid = asEntityId('parlor');
     const release = registry.observe(eid, () => {});
     sockets[0].fireOpen();
+    const request_id = lastSubscribeRequestId(sockets[0]);
+    sockets[0].fireMessage({
+      op: 'subscribed',
+      request_id,
+      states: [
+        {
+          entity_id: 'parlor',
+          model: {
+            type: 'scene',
+            id: 'parlor',
+            name: 'Parlor',
+            body: '',
+            character_ids: [],
+            messages: [{ sender_id: 'alice', body: 'hi' }],
+          },
+        },
+      ],
+    });
     await waitFor(() => {
       const s = registry.peek(eid);
       return !!s && s.type === 'scene' && s.messages.length === 1;
     });
 
+    // Append-at-end: start === -1.
     sockets[0].fireMessage({
       op: 'entity_changed',
       entity_id: 'parlor',
       attributes: ['messages'],
+      deltas: {
+        messages: {
+          start: -1,
+          len: 0,
+          items: [{ sender_id: 'bob', body: 'reply' }],
+        },
+      },
     });
     await waitFor(() => {
       const s = registry.peek(eid);
@@ -209,30 +211,103 @@ describe('EntityRegistry', () => {
     const snapshot = registry.peek(eid);
     if (!snapshot || snapshot.type !== 'scene') throw new Error('expected scene');
     expect(snapshot.messages.map((m) => m.body)).toEqual(['hi', 'reply']);
+    expect(snapshot.messages.map((m) => m.index)).toEqual([0, 1]);
+    expect(snapshot.messages[1].scene_id).toBe(eid);
+
+    release();
+    registry.close();
+  });
+
+  it('applies a ListDelta replace mid-list on entity_changed[messages]', async () => {
+    const { registry, sockets } = makeHarness();
+
+    const eid = asEntityId('parlor');
+    const release = registry.observe(eid, () => {});
+    sockets[0].fireOpen();
+    const request_id = lastSubscribeRequestId(sockets[0]);
+    sockets[0].fireMessage({
+      op: 'subscribed',
+      request_id,
+      states: [
+        {
+          entity_id: 'parlor',
+          model: {
+            type: 'scene',
+            id: 'parlor',
+            name: 'Parlor',
+            body: '',
+            character_ids: [],
+            messages: [
+              { sender_id: 'alice', body: 'one' },
+              { sender_id: 'alice', body: 'two' },
+              { sender_id: 'alice', body: 'three' },
+            ],
+          },
+        },
+      ],
+    });
+    await waitFor(() => {
+      const s = registry.peek(eid);
+      return !!s && s.type === 'scene' && s.messages.length === 3;
+    });
+
+    // Replace the middle item: splice(1, 1, [...]).
+    sockets[0].fireMessage({
+      op: 'entity_changed',
+      entity_id: 'parlor',
+      attributes: ['messages'],
+      deltas: {
+        messages: {
+          start: 1,
+          len: 1,
+          items: [{ sender_id: 'bob', body: 'TWO-PRIME' }],
+        },
+      },
+    });
+    await waitFor(() => {
+      const s = registry.peek(eid);
+      return (
+        !!s && s.type === 'scene' && s.messages[1]?.body === 'TWO-PRIME'
+      );
+    });
+    const snapshot = registry.peek(eid);
+    if (!snapshot || snapshot.type !== 'scene') throw new Error('expected scene');
+    expect(snapshot.messages.map((m) => m.body)).toEqual([
+      'one',
+      'TWO-PRIME',
+      'three',
+    ]);
+    // Indexes re-stamped after the splice so positional keys stay monotonic.
+    expect(snapshot.messages.map((m) => m.index)).toEqual([0, 1, 2]);
 
     release();
     registry.close();
   });
 
   it('ref-counts observers and sends unsubscribe on last release', async () => {
-    const { registry, fetchMock, sockets } = makeHarness();
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/entities/alice')) {
-        return jsonResponse({
-          type: 'character',
-          id: 'alice',
-          name: 'Alice',
-          body: '',
-          owner: 'user',
-        });
-      }
-      throw new Error(`unexpected fetch ${url}`);
-    });
+    const { registry, sockets } = makeHarness();
 
     const eid = asEntityId('alice');
     const release1 = registry.observe(eid, () => {});
     const release2 = registry.observe(eid, () => {});
     sockets[0].fireOpen();
+    const request_id = lastSubscribeRequestId(sockets[0]);
+    sockets[0].fireMessage({
+      op: 'subscribed',
+      request_id,
+      states: [
+        {
+          entity_id: 'alice',
+          model: {
+            type: 'character',
+            id: 'alice',
+            name: 'Alice',
+            body: '',
+            owner: 'user',
+          },
+        },
+      ],
+    });
     await waitFor(() => registry.peek(eid) !== null);
 
     // Only one subscribe frame even though two observers exist.
@@ -249,8 +324,77 @@ describe('EntityRegistry', () => {
     expect(unsubFrame).toBeTruthy();
     expect(JSON.parse(unsubFrame!)).toEqual({
       op: 'unsubscribe',
-      entity_id: 'alice',
+      entity_ids: ['alice'],
     });
+
+    registry.close();
+  });
+
+  it('entityAction resolves on matching ack', async () => {
+    const { registry, sockets } = makeHarness();
+    sockets[0].fireOpen();
+
+    const eid = asEntityId('alice');
+    const result = registry.entityAction(eid, 'say', {
+      scene_id: 'parlor',
+      body: 'Hi',
+    });
+
+    // The most recent frame is the entity_action; pick the request_id back off.
+    const sent = sockets[0].sent
+      .map((s) => JSON.parse(s) as { op: string; request_id?: string })
+      .filter((f) => f.op === 'entity_action');
+    expect(sent).toHaveLength(1);
+    const request_id = sent[0].request_id!;
+    expect(JSON.parse(sockets[0].sent[sockets[0].sent.length - 1])).toEqual({
+      op: 'entity_action',
+      entity_id: 'alice',
+      action: 'say',
+      kwargs: { scene_id: 'parlor', body: 'Hi' },
+      request_id,
+    });
+
+    sockets[0].fireMessage({ op: 'ack', request_id });
+    await expect(result).resolves.toBeUndefined();
+
+    registry.close();
+  });
+
+  it('entityAction rejects on matching error frame', async () => {
+    const { registry, sockets } = makeHarness();
+    sockets[0].fireOpen();
+
+    const eid = asEntityId('alice');
+    const result = registry.entityAction(eid, 'say', {
+      scene_id: 'parlor',
+      body: 'Hi',
+    });
+
+    const sent = sockets[0].sent
+      .map((s) => JSON.parse(s) as { op: string; request_id?: string })
+      .filter((f) => f.op === 'entity_action');
+    const request_id = sent[0].request_id!;
+    sockets[0].fireMessage({
+      op: 'error',
+      request_id,
+      code: 'action_failed',
+      message: 'boom',
+    });
+    await expect(result).rejects.toThrow(/action_failed.*boom/);
+
+    registry.close();
+  });
+
+  it('entityAction rejects when the socket is not open', async () => {
+    const { registry, sockets } = makeHarness();
+    // Do NOT open the socket — the ready state stays at 0.
+
+    const eid = asEntityId('alice');
+    await expect(
+      registry.entityAction(eid, 'say', { scene_id: 'parlor', body: 'Hi' }),
+    ).rejects.toThrow(/socket not open/);
+    // Nothing was queued onto the socket either.
+    expect(sockets[0].sent.find((s) => s.includes('entity_action'))).toBeUndefined();
 
     registry.close();
   });

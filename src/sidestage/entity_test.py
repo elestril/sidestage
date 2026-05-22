@@ -6,15 +6,17 @@ import logging
 
 import pytest
 
+from sidestage.action import action
 from sidestage.campaign import Campaign
 from sidestage.entity import (
     DictEntityFactory,
     Entity,
     EntityId,
+    EntityList,
     EntityType,
     MessageContext,
 )
-from sidestage.events import EntityChanged
+from sidestage.events import EntityChanged, ListDelta, ScalarDelta
 
 
 def make_campaign() -> Campaign:
@@ -106,6 +108,10 @@ class TestEntityConstruction:
         event = listener.received[0]
         assert event.entity is entity
         assert event.attributes == ["body"]
+        # The scalar delta carries the new value.
+        delta = event.deltas["body"]
+        assert isinstance(delta, ScalarDelta)
+        assert delta.value == "new"
         # The model was updated.
         assert entity.body == "new"
 
@@ -627,6 +633,240 @@ class TestEntityAnnotateContextDefault:
             "same entity MUST collapse to one annotation entry; "
             f"got annotations={ctx.annotations!r}"
         )
+
+
+# ----------------------------------------------------------------------
+# entity-list-attribute: EntityList mutators emit ListDelta
+# ----------------------------------------------------------------------
+
+
+class _EntityWithList(Entity):
+    """An Entity subclass with a registered `items` EntityList field.
+
+    Uses `list[str]` so Pydantic can schema-validate the field; the
+    EntityList mutator path is independent of the element type, so
+    strings are sufficient to exercise every code path.
+    """
+
+    class Model(Entity.Model):
+        items: list[str] = []  # type: ignore[assignment]
+
+    _entity_lists = {"items": EntityList}
+
+
+def _make_list_entity(items: list[str] | None = None) -> _EntityWithList:
+    model = _EntityWithList.Model(
+        id=EntityId("le1"),
+        name="L",
+        type=EntityType.ENTITY,
+        body="b",
+        items=items or [],
+    )
+    return _EntityWithList(model, Campaign(name="t"))
+
+
+class TestEntityListAppend:
+    """entity-list-attribute: `append` emits `ListDelta(start=-1, len=0, items=[x])`."""
+
+    def test_append_stores_item(self) -> None:
+        entity = _make_list_entity()
+        entity.items.append("x")
+        assert list(entity.items) == ["x"]
+
+    def test_append_emits_list_delta(self) -> None:
+        entity = _make_list_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.append("x")
+            await entity.idle()
+
+        asyncio.run(run())
+
+        assert len(listener.received) == 1
+        event = listener.received[0]
+        assert event.entity is entity
+        assert event.attributes == ["items"]
+        delta = event.deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == -1
+        assert delta.len == 0
+        assert delta.items == ["x"]
+
+
+class TestEntityListInsert:
+    def test_insert_emits_list_delta_with_position(self) -> None:
+        entity = _make_list_entity(items=["a", "b"])
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.insert(1, "x")
+            await entity.idle()
+
+        asyncio.run(run())
+
+        assert list(entity.items) == ["a", "x", "b"]
+        delta = listener.received[0].deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == 1
+        assert delta.len == 0
+        assert delta.items == ["x"]
+
+
+class TestEntityListExtend:
+    def test_extend_emits_single_list_delta(self) -> None:
+        entity = _make_list_entity()
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.extend(["a", "b"])
+            await entity.idle()
+
+        asyncio.run(run())
+
+        # extend emits ONE event carrying every appended item.
+        assert len(listener.received) == 1
+        delta = listener.received[0].deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == -1
+        assert delta.len == 0
+        assert delta.items == ["a", "b"]
+
+
+class TestEntityListPop:
+    def test_pop_emits_list_delta_with_len_one(self) -> None:
+        entity = _make_list_entity(items=["a", "b"])
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.pop()
+            await entity.idle()
+
+        asyncio.run(run())
+
+        delta = listener.received[0].deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == 1  # -1 of len=2 resolves to position 1
+        assert delta.len == 1
+        assert delta.items == []
+
+
+class TestEntityListRemove:
+    def test_remove_emits_list_delta(self) -> None:
+        entity = _make_list_entity(items=["a", "b"])
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.remove("a")
+            await entity.idle()
+
+        asyncio.run(run())
+
+        delta = listener.received[0].deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == 0
+        assert delta.len == 1
+        assert delta.items == []
+
+
+class TestEntityListClear:
+    def test_clear_emits_list_delta(self) -> None:
+        entity = _make_list_entity(items=["a", "b"])
+        listener = _SyncListener()
+        entity.subscribe(listener)
+
+        async def run() -> None:
+            entity.items.clear()
+            await entity.idle()
+
+        asyncio.run(run())
+
+        delta = listener.received[0].deltas["items"]
+        assert isinstance(delta, ListDelta)
+        assert delta.start == 0
+        assert delta.len == 2
+        assert delta.items == []
+
+
+class TestEntityListIsWrappedAtConstruction:
+    """entity-list-attribute: Model fields declared in `_entity_lists`
+    are replaced in place by an `EntityList` at construction."""
+
+    def test_initial_field_becomes_entity_list(self) -> None:
+        entity = _make_list_entity(items=["a"])
+        assert isinstance(entity.items, EntityList)
+        assert list(entity.items) == ["a"]
+
+
+# ----------------------------------------------------------------------
+# backend-action-decorator + backend-action-class-level
+# ----------------------------------------------------------------------
+
+
+class TestActionRegistry:
+    """backend-action-class-level: `@action`-decorated methods on a subclass
+    are collected into `cls._actions` by `__init_subclass__`."""
+
+    def test_action_decorator_marks_method(self) -> None:
+        # backend-action-marks-method: the decorator sets the
+        # `__sidestage_action__` marker on the method object.
+        @action
+        def some_method() -> None:
+            return None
+
+        assert getattr(some_method, "__sidestage_action__", False) is True
+
+    def test_subclass_collects_action_names(self) -> None:
+        class _Decorated(Entity):
+            class Model(Entity.Model):
+                pass
+
+            @action
+            def alpha(self) -> None:
+                return None
+
+            @action
+            def beta(self) -> None:
+                return None
+
+            def not_an_action(self) -> None:
+                return None
+
+        assert "alpha" in _Decorated._actions
+        assert "beta" in _Decorated._actions
+        assert "not_an_action" not in _Decorated._actions
+
+    def test_subclass_without_actions_has_empty_set(self) -> None:
+        class _Bare(Entity):
+            class Model(Entity.Model):
+                pass
+
+        # An Entity subclass that declares no `@action` methods inherits
+        # only whatever its bases declared. The base Entity declares
+        # none, so the set is empty.
+        assert "alpha" not in _Bare._actions
+
+    def test_subclass_inherits_parent_actions(self) -> None:
+        class _Parent(Entity):
+            class Model(Entity.Model):
+                pass
+
+            @action
+            def shared(self) -> None:
+                return None
+
+        class _Child(_Parent):
+            @action
+            def extra(self) -> None:
+                return None
+
+        assert "shared" in _Child._actions
+        assert "extra" in _Child._actions
 
 
 class TestEventsAsyncTasksIdle:

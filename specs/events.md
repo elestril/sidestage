@@ -20,15 +20,16 @@ class EntityChanged:
 
 In-process the event carries the entity reference directly — listeners
 read fresh state via `event.entity.<attr>`. The `attributes` list tells
-the listener WHICH attributes changed. The optional `deltas` map
-carries the per-attribute payload itself (new scalar value, appended
-collection items, etc.) so projections can apply the change directly
-without re-reading the entity over REST (per
-`events-attribute-deltas`). Today's only emit point is `Scene.append`:
-`EntityChanged(entity=self, attributes=["messages"],
-deltas={"messages": AppendDelta(items=[msg])})`. Plain `@dataclass`,
-NOT a Pydantic model — wire serialisation happens at the WS boundary
-(per `events-subscription`).
+the listener WHICH attributes changed. The `deltas` map carries the
+per-attribute payload (per `events-attribute-deltas`) — a `ListDelta`
+for collection attributes, a `ScalarDelta` for everything else.
+Projections apply the deltas directly without re-reading. Today's
+only emit point is `scene.messages.append(msg)` — the EntityList
+mutator on `Scene.Model.messages` fires
+`EntityChanged(entity=scene, attributes=["messages"],
+deltas={"messages": ListDelta(start=-1, len=0, items=[msg])})`.
+Plain `@dataclass`, NOT a Pydantic model — wire serialisation
+happens at the WS boundary (per `events-subscription`).
 
 ## events-attribute-deltas: Per-attribute delta payloads
 
@@ -36,25 +37,39 @@ Notifications carry the data, not a fetch hint. Each entry in
 `deltas` is a typed payload that a projection can apply directly to
 its cached entity state.
 
+Two delta shapes — one for ordered collections, one for scalars:
+
 ```python
 @dataclass
+class ListDelta:
+    start: int      # position at which the change applies; -1 = end
+    len: int        # number of items removed at `start`
+    items: list     # items inserted at `start`, replacing the `len` removed
+
+@dataclass
 class ScalarDelta:
-    value: Any                       # new value of a scalar attribute
+    value: Any      # new value of a scalar attribute
 
-@dataclass
-class AppendDelta:
-    items: list                      # items appended at the tail
-
-@dataclass
-class InsertDelta:
-    items: list[tuple[int, Any]]     # (index, item) pairs at insert positions
-
-@dataclass
-class RemoveDelta:
-    indices: list[int]               # pre-removal positions of removed items
-
-AttributeDelta = ScalarDelta | AppendDelta | InsertDelta | RemoveDelta
+AttributeDelta = ListDelta | ScalarDelta
 ```
+
+`ListDelta` is unified-diff / splice semantics. Every list mutation
+maps to one delta:
+
+| op | delta |
+|---|---|
+| `append(x)` | `{start: -1, len: 0, items: [x]}` |
+| `extend(xs)` | `{start: -1, len: 0, items: xs}` |
+| `insert(i, x)` | `{start: i, len: 0, items: [x]}` |
+| `pop(i)` | `{start: i, len: 1, items: []}` |
+| `remove(x)` | `{start: idx, len: 1, items: []}` |
+| `lst[i] = x` | `{start: i, len: 1, items: [x]}` |
+| `del lst[i]` | `{start: i, len: 1, items: []}` |
+| `lst[i:j] = xs` | `{start: i, len: j-i, items: xs}` |
+| `clear()` | `{start: 0, len: <length>, items: []}` |
+
+Receivers apply with one line: `splice(start, len, ...items)` (with
+`start == -1` short-circuited to push-at-end).
 
 - events-attribute-deltas-self-contained: A delta carries everything
   the projection needs to apply the change. There is no follow-up
@@ -62,23 +77,20 @@ AttributeDelta = ScalarDelta | AppendDelta | InsertDelta | RemoveDelta
   `subscribed` reply; on reconnect, the client re-issues subscribe
   to get a fresh snapshot (per [[frontend]]
   `frontend-campaign-reconnect`).
-- events-attribute-deltas-optional: The `deltas` map is optional —
-  emitters MAY omit it for an attribute, in which case a projection
-  treating its cache as authoritative falls back to "re-read the
-  entity over REST." Producers SHOULD emit a delta; the no-delta
-  fallback is for emit points that don't yet know how to describe
-  their change (or for which a full re-read is cheaper than
-  describing the diff).
-- events-attribute-deltas-append-today: `Scene.append` is the only
-  emit point today and produces `AppendDelta(items=[msg.Model()])`.
-  Future collection mutators (`scene.edit_message`,
-  `scene.redact_message`) emit `InsertDelta` / `RemoveDelta` /
-  `ReplaceDelta` as their semantics demand.
+- events-attribute-deltas-emitted-by-entitylist: For collection
+  attributes declared as `EntityList[T]` on the Entity (per
+  [[entity-model]] `entity-list-attribute`), every mutator method
+  emits a `ListDelta` automatically. Emitters never construct
+  deltas by hand for list attributes.
+- events-attribute-deltas-emitted-by-setattr: For scalar Model
+  fields, `Entity.__setattr__` auto-emits a `ScalarDelta(value=new)`
+  on value change. Same principle: producers don't construct
+  deltas; mutating the field IS the emission.
 - events-attribute-deltas-references: For attributes that hold
-  `EntityId` references (e.g. `Scene.character_ids`), the delta
-  carries the id itself; the projection separately fetches or
-  subscribes to the referenced entity. Cross-entity hydration is
-  not the delta's job.
+  `EntityId` references, the delta carries the id itself; the
+  projection separately resolves or subscribes to the referenced
+  entity via `Campaign.get(id)`. Cross-entity hydration is not the
+  delta's job.
 
 ## events-protocol: Listener
 
@@ -153,8 +165,8 @@ never reads from them.
 ```
 { "op": "subscribe",     "entity_ids": [...], "request_id": "..." }
 { "op": "unsubscribe",   "entity_ids": [...] }
-{ "op": "entity_action", "entity_id": "...", "action": "speak",
-                         "kwargs": { "body": "Hi" },
+{ "op": "entity_action", "entity_id": "alice", "action": "say",
+                         "kwargs": { "scene_id": "parlor", "body": "Hi" },
                          "request_id": "..." }
 ```
 
@@ -164,7 +176,9 @@ never reads from them.
 { "op": "subscribed",     "request_id": "...",
                           "states": [{ "entity_id": "...", "model": {...} }, ...] }
 { "op": "entity_changed", "entity_id": "...", "attributes": [...],
-                          "deltas": { "messages": { "kind": "append", "items": [...] } } }
+                          "deltas": { "messages": { "start": -1, "len": 0,
+                                                    "items": [{"sender_id": "alice",
+                                                               "body": "Hi"}] } } }
 { "op": "ack",            "request_id": "..." }
 { "op": "error",          "request_id": "...", "code": "...", "message": "..." }
 ```
@@ -174,16 +188,16 @@ requested entity (its `Entity.Model` payload) plus opens the
 subscription. No separate "get" op exists; subscribe is the read
 operation.
 
-The `deltas` field on `entity_changed` is optional. Each value is a
-tagged record (`kind` plus kind-specific fields) per
-`events-attribute-deltas`:
+The `deltas` field on `entity_changed` is required when the
+attribute has a defined delta shape (every Model field does). Two
+shapes, per `events-attribute-deltas`:
 
 ```
-{ "kind": "scalar", "value": <any> }
-{ "kind": "append", "items": [...] }
-{ "kind": "insert", "items": [[<int>, <any>], ...] }
-{ "kind": "remove", "indices": [<int>, ...] }
+{ "start": <int>, "len": <int>, "items": [...] }   # collection (ListDelta)
+{ "value": <any> }                                 # scalar (ScalarDelta)
 ```
+
+The receiver disambiguates by the presence of `start` / `value`.
 
 - events-subscription-fanout: Fan-out on the server stays per-entity
   (each `QueueListener` is registered on a single entity); the socket
