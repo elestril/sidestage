@@ -4,11 +4,12 @@ import argparse
 import logging
 from enum import Enum
 from pathlib import Path
+from urllib.parse import quote
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from sidestage.actor import Actor, StubActor, UserActor
@@ -235,16 +236,18 @@ class App:
     def _setup_routes(self) -> None:
         app = self._fastapi
 
-        # rest-api-get-root: GET /. Registered only when the static dir is
-        # absent — when present, the static mount below shadows `/` and
-        # provides the SPA fallback (frontend-serve-mount/spa).
-        if not _STATIC_DIR.exists():
-
-            @app.get("/")
-            async def get_root() -> Response:
-                self._require_serving()
-                # rest-api-root-fallback: inline HTML.
-                return HTMLResponse(_INLINE_HTML)
+        # rest-api-get-root: GET / redirects to /<cid> for the loaded
+        # campaign. Single-campaign today; future multi-campaign will
+        # have a real selector page here. Registered BEFORE the static
+        # mount so it always takes precedence over the SPA fallback.
+        @app.get("/")
+        async def get_root() -> Response:
+            self._require_serving()
+            if self.campaigns:
+                cid = next(iter(self.campaigns))
+                return RedirectResponse(url=f"/{quote(cid, safe='')}", status_code=302)
+            # rest-api-root-fallback: no campaigns loaded → inline HTML.
+            return HTMLResponse(_INLINE_HTML)
 
         # rest-api-list-campaigns: GET /api/campaigns
         @app.get("/api/campaigns")
@@ -352,6 +355,28 @@ class App:
                 await websocket.close(code=1008)  # policy violation: unknown cid
                 return
             await WsConnection(campaign, websocket).run()
+
+        # rest-api-get-campaign-spa: GET /<cid> serves the SPA HTML for
+        # any loaded campaign. The static mount's `html=True` only
+        # serves index.html at the literal `/`; a campaign-scoped URL
+        # needs an explicit handler so the FE can read its `cid` from
+        # `window.location.pathname` (per `frontend-workspace-cid-from-url`).
+        #
+        # This route also catches single-segment root-level files
+        # (favicon.ico, robots.txt, …) by checking the static dir first.
+        @app.get("/{cid}")
+        async def get_campaign_spa(cid: str) -> Response:
+            self._require_serving()
+            # Single-segment root-level static asset wins if present.
+            if _STATIC_DIR.exists():
+                candidate = _STATIC_DIR / cid
+                if candidate.is_file():
+                    return FileResponse(candidate)
+            if cid not in self.campaigns:
+                raise HTTPException(status_code=404, detail="not found")
+            if _STATIC_DIR.exists():
+                return FileResponse(_STATIC_DIR / "index.html")
+            return HTMLResponse(_INLINE_HTML)
 
         # frontend-serve-mount + frontend-serve-spa: mount StaticFiles at `/`
         # AFTER all `/api/*` routes are registered. `html=True` provides SPA

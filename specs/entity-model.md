@@ -294,6 +294,20 @@ class Campaign:
   per-entity via `entity.subscribe(listener)`; `WsConnection`
   uses that primitive directly. No separate `Campaign.subscribe`
   method exists or is needed.
+- campaign-runtime-mutation-deferred: `Campaign.add` and
+  `Campaign.delete` exist on the architectural surface but emit no
+  events today, and Campaign carries no listeners. Runtime
+  scene/entity addition or removal is therefore not visible to
+  subscribed clients. This is benign today — scenes load from disk
+  at startup and the only runtime mutation surface is
+  `scene.messages.append`. When runtime entity mutation lands,
+  Campaign becomes subscribable: a reserved `entity_id` (or the
+  cid itself) resolves to a Campaign-as-Entity exposing an
+  `entity_ids` or `scene_ids` Model field wrapped in an
+  `EntityList`. `add`/`delete` mutate that list, fire
+  `EntityChanged` through the existing machinery, and the FE picks
+  up the diff as a normal `ListDelta`. Not implemented; flagged so
+  the design point isn't lost.
 - .implemented-by: Campaign, Campaign.load
 
 ## entity-campaign-tree: On-disk layout

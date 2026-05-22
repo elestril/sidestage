@@ -7,12 +7,21 @@ shared cache of hydrated entities. Components ask the FE Campaign for
 an entity and receive a promise; FE entity proxies expose
 `@action`-decorated methods that serialise as `EntityAction` frames.
 
-- frontend-no-rest: The FE issues **no HTTP requests to `/api/*`** —
-  only the static SPA bundle at `/`. Every Campaign operation
-  (resolve, subscribe, mutate) flows through the single WebSocket.
-  The REST endpoints documented in [[backend]] `backend-rest-debug`
-  exist for human/ops inspection only; a `grep` guard on
-  `frontend/src/` enforces zero `/api/` fetches.
+- frontend-no-rest: The FE issues **no non-GET HTTP requests to
+  `/api/*`** — every Campaign mutation (writes) and every live update
+  (sync) flows through the single WebSocket. Bootstrap GETs are
+  allowed: the workspace fetches campaign metadata and the scene list
+  once on mount; everything after that is WS. The REST endpoints
+  documented in [[backend]] `backend-rest-debug` also exist as a
+  human/ops inspection surface. A Playwright guard asserts zero
+  non-GET `/api/*` requests in the cuj-hello browser test.
+- frontend-workspace-cid-from-url: The campaign id is the first path
+  segment of `window.location.pathname`, URL-decoded. The FE does NOT
+  call `GET /api/campaigns` to discover the campaign. `GET /` on the
+  backend redirects to `/<cid>` for the single loaded campaign.
+  Multi-campaign deployments later route via real HTML navigation
+  (`/dragons_lair`, `/another_campaign`); the FE never enumerates
+  campaigns at runtime.
 
 The **UI layer** — workspace shell and entity-typed widgets — is
 specced separately in [[frontend-layout]].

@@ -56,11 +56,16 @@ export function Workspace({ deps = {} }: WorkspaceProps = {}) {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const bootstrap = async () => {
-      const campaignsRes = await doFetch('/api/campaigns');
-      if (!campaignsRes.ok) throw new Error(`GET /api/campaigns → ${campaignsRes.status}`);
-      const campaignsRaw = (await campaignsRes.json()) as Array<{ name: string }>;
-      if (campaignsRaw.length === 0) throw new Error('No campaigns loaded');
-      const cid = campaignsRaw[0].name;
+      // frontend-workspace-cid-from-url: the campaign id is the first
+      // path segment, URL-decoded. `/` is reserved for "no campaign
+      // selected" and is not a valid bootstrap target today.
+      const segments = window.location.pathname.split('/').filter(Boolean);
+      if (segments.length === 0) {
+        throw new Error(
+          'No campaign in URL — open /<campaign_name> instead of /',
+        );
+      }
+      const cid = decodeURIComponent(segments[0]);
 
       const campaignRes = await doFetch(`/api/campaigns/${encodeURIComponent(cid)}`);
       if (!campaignRes.ok) throw new Error(`GET /api/campaigns/${cid} → ${campaignRes.status}`);

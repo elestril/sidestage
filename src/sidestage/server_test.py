@@ -433,28 +433,43 @@ class TestGetRoot:
             f"got status={response.status_code}"
         )
 
-    def test_root_falls_back_to_inline_when_static_missing(self, tmp_path) -> None:
-        # rest-api-root-fallback: inline HTML when static dir is absent.
-        # The static-dir decision is made at App construction time, so the
-        # patch wraps the App() call inside `make_loaded_app`.
+    def test_root_redirects_to_campaign_when_loaded(self, tmp_path) -> None:
+        # rest-api-get-root: GET / redirects to /<cid> for the loaded
+        # campaign. URL-encoded cid in the Location header.
         with patch("sidestage.server._STATIC_DIR", tmp_path / "does-not-exist"):
             app, *_ = make_loaded_app()
+            with TestClient(app._fastapi, follow_redirects=False) as client:
+                response = client.get("/")
+        assert response.status_code == 302
+        from urllib.parse import quote as _q
+
+        assert response.headers["location"] == f"/{_q(CAMPAIGN_ID, safe='')}"
+
+    def test_root_falls_back_to_inline_when_no_campaigns(self, tmp_path) -> None:
+        # rest-api-root-fallback: when no campaigns are loaded, GET /
+        # serves the inline HTML (no campaign to redirect to).
+        with patch("sidestage.server._STATIC_DIR", tmp_path / "does-not-exist"):
+            app = App()
+            app.state = ServerState.SERVING
             with TestClient(app._fastapi) as client:
                 response = client.get("/")
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "<html" in response.text.lower()
 
-    def test_root_serves_static_index_when_static_dir_exists(self, tmp_path) -> None:
-        # frontend-serve-mount: StaticFiles mount serves index.html at `/`
-        # when the static dir exists.
+    def test_static_serves_spa_for_campaign_path(self, tmp_path) -> None:
+        # frontend-serve-mount + frontend-workspace-cid-from-url: SPA
+        # static fallback serves index.html for /<cid>. FE reads cid
+        # from window.location.pathname.
         static_dir = tmp_path / "static"
         static_dir.mkdir()
         (static_dir / "index.html").write_text("<!doctype html><h1>STATIC</h1>")
         with patch("sidestage.server._STATIC_DIR", static_dir):
             app, *_ = make_loaded_app()
+            from urllib.parse import quote as _q
+
             with TestClient(app._fastapi) as client:
-                response = client.get("/")
+                response = client.get(f"/{_q(CAMPAIGN_ID, safe='')}")
         assert response.status_code == 200
         assert "STATIC" in response.text
 
@@ -471,15 +486,6 @@ class TestGetRoot:
                 response = client.get("/app.js")
         assert response.status_code == 200
         assert "console.log" in response.text
-
-    def test_root_returns_200_when_serving(self) -> None:
-        # server-route-root: serves root when SERVING (default: no static dir
-        # in the repo, so the inline HTML fallback handles `/`).
-        app, *_ = make_loaded_app()
-        with TestClient(app._fastapi) as client:
-            response = client.get("/")
-        assert response.status_code == 200
-        assert "text/html" in response.headers["content-type"]
 
 
 # ---------------------------------------------------------------------------

@@ -114,7 +114,8 @@ Plus the static SPA bundle at `/`.
 ### backend-rest-debug: Read-only REST debug mirror
 
 ```
-GET /                                           SPA bundle (or inline fallback)
+GET /                                           302 → /<cid>  (single-campaign deploy)
+GET /<cid>                                      SPA bundle (or inline fallback) — campaign-scoped
 GET /api/campaigns                              list[Campaign.Model]
 GET /api/campaigns/{cid}                        Campaign.Model
 GET /api/campaigns/{cid}/scenes                 list[Scene.Model]
@@ -138,9 +139,15 @@ GET /api/campaigns/{cid}/scenes/{sid}/messages  list[Message.Model]
   `_require_serving()`, which raises 503 while `App.state == LOADING`.
 - backend-rest-debug-ws-lameduck: The WS handshake closes with code
   1013 in `LOADING`.
-- backend-route-root: GET `/` serves the static SPA (mount
-  `html=True` for SPA fallback) when `static/` exists; otherwise
-  returns inline HTML or 503 depending on state.
+- backend-route-root: GET `/` 302-redirects to `/<cid>` for the
+  single loaded campaign. Returns inline HTML when no campaigns are
+  loaded; returns 503 while `App.state == LOADING`.
+- backend-route-campaign-spa: GET `/<cid>` serves the SPA HTML
+  (`static/index.html` when present, else inline). The FE reads the
+  campaign id from `window.location.pathname` (per [[frontend]]
+  `frontend-workspace-cid-from-url`). Unknown `cid` returns 404.
+  Single-segment root-level static files (favicon.ico, robots.txt,
+  …) win over this route via a static-dir-first check.
 - .implements: cuj-startup-ready
 - .implemented-by: App._setup_routes
 
